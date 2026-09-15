@@ -31,7 +31,7 @@ try {
   const downloadEvent = page.waitForEvent('download'); await page.locator('#download').click();
   await (await downloadEvent).saveAs(`${output}/hello.wasm`);
   const component = readFileSync(`${output}/hello.wasm`);
-  assert(hash(component) === 'ab257fdd6ca543bd8180048692384bcec39ae0caa187c132f66e2095831d233f', 'Desktop component equality');
+  assert(hash(component) === 'dc433ef969973d37b0ff8a3a9acf66bba4fa071b78f09359d4dc0836021baa17', 'Configured component equality');
   await source('using System; Console.WriteLine(11);'); await page.locator('#compile').click();
   await source('using System; Console.WriteLine(12);'); await page.locator('#run').click();
   await source('using System; Console.WriteLine(13);'); await page.locator('#run').click();

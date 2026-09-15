@@ -48,7 +48,7 @@ def verify_staged(folder):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--baseline', type=Path, default=ROOT / '.cache/desktop-baseline-verified-20260915-d')
-    parser.add_argument('--compiler', type=Path, default=ROOT / '.cache/trusted-compiler-host-20260916')
+    parser.add_argument('--compiler', type=Path, default=ROOT / '.cache/phase6-compiler-host-20260916')
     parser.add_argument('--tools', type=Path, default=ROOT / '.cache/browser-tools-probe-20260915')
     parser.add_argument('--lld', type=Path, default=ROOT / '.cache/browser-lld-20260915')
     parser.add_argument('--component', type=Path, default=ROOT / '.cache/browser-component-20260916/final')
@@ -57,12 +57,14 @@ def main():
     parser.add_argument('--examples', type=Path, default=ROOT / '.cache/desktop-examples-20260916', help='Receipt-verified public desktop example inputs')
     parser.add_argument('--generated-json', type=Path, default=ROOT / '.cache/desktop-json-generated-20260916', help='Receipt-verified source-generated JSON example inputs')
     parser.add_argument('--tunit', type=Path, default=ROOT / '.cache/tunit-example-20260916/final', help='Receipt-verified public TUnit template inputs')
+    parser.add_argument('--notices', type=Path, default=ROOT / '.cache/browser-notice-stage-20260916/catalog-notices', help='Verified public notices and portable origins.json')
     parser.add_argument('--output', type=Path, default=ROOT / 'public/toolchain')
     parser.add_argument('--verify', type=Path, help='Verify an already staged version without rebuilding')
     args = parser.parse_args()
     if args.verify:
         verify_staged(args.verify.resolve())
         return
+    subprocess.run(['python3', str(ROOT / 'eng/browser-notices.py'), '--verify', str(args.notices)], check=True)
     subprocess.run(['python3', str(ROOT / 'eng/desktop-baseline.py'), str(args.baseline), '--verify'], check=True)
     for folder in [args.compiler, args.tools, args.component]:
         verify_receipt(folder)
@@ -129,7 +131,9 @@ def main():
         commit = pins['netwasm']['browserToolHostCommit']
         if args.tunit:
             tunit_pins = json.loads((args.tunit / 'receipt.json').read_text())['pins']['sources']
-            if tunit_pins != pins:
+            if (tunit_pins['tunit'] != pins['tunit'] or
+                    any(tunit_pins['netwasm'][key] != pins['netwasm'][key]
+                        for key in ['repository', 'commit', 'packageVersion'])):
                 raise ValueError('TUnit package/source pins do not match the toolchain')
             recipe = json.loads((args.tunit / 'recipe-inputs.json').read_text())
             references, implementations = {}, {}
@@ -157,10 +161,13 @@ def main():
                 content = subprocess.check_output(['git', '-C', str(args.source), 'show', f'{commit}:src/NetWasm.Hosting/JavaScript/{name}'])
                 (stage / 'hosting').mkdir(exist_ok=True)
                 (stage / 'hosting' / name).write_bytes(content)
-        for name in ['binaryen-host.mjs', 'tool-inputs.mjs', 'wasm-tools-host.mjs']:
+        for name in ['binaryen-host.mjs', 'tool-inputs.mjs', 'wasm-tools-host.mjs', 'wasm32-memory-ceiling.mjs']:
             content = subprocess.check_output(['git', '-C', str(args.source), 'show', f'{commit}:src/NetWasm.Toolchain/Browser/Tools/{name}'])
             (stage / 'hosts').mkdir(exist_ok=True)
             (stage / 'hosts' / name).write_bytes(content)
+        for path in sorted(args.notices.rglob('*')):
+            if path.is_file():
+                copy(path, Path('notices') / path.relative_to(args.notices))
         for path in worker_paths:
             copy(path, Path('workers') / path.name)
         assets = {}

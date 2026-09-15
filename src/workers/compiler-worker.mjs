@@ -48,6 +48,8 @@ async function initialize() {
     const exports = await runtime.getAssemblyExports(runtime.getConfig().mainAssemblyName);
     const program = exports.NetWasm.Playground.CompilerProbe.Program;
     program.EnableProgress();
+    if (typeof program.ConfigureGuestMemoryMaximum !== 'function') throw Error('Rebuild the compiler host for guest memory limits');
+    program.ConfigureGuestMemoryMaximum(256 * 1048576);
     const loaded = await Promise.allSettled([
       loader.load('compiler/target-reference.dll').then(toBase64),
       loader.load('compiler/support.json').then(bytes => new TextDecoder().decode(bytes)),
@@ -64,14 +66,15 @@ async function initialize() {
 serveWorker(async (data, emit) => {
   report = emit;
   if (data.operation !== 'compile' && data.operation !== 'prune' && data.operation !== 'initialize') throw Error('Unsupported compiler operation');
-  if (data.operation === 'compile' && (!['hello', 'allocation', 'linq', 'json-dom', 'json-generated', 'tunit'].includes(data.recipe) || typeof data.source !== 'string' || new TextEncoder().encode(data.source).length > 65536)) throw Error('Invalid compiler source or recipe');
+  if (data.operation === 'compile' && (!['hello', 'allocation', 'linq', 'json-dom', 'json-generated', 'tunit'].includes(data.recipe) || typeof data.source !== 'string' || data.source.length > 65536 || new TextEncoder().encode(data.source).length > 65536)) throw Error('Invalid compiler source or recipe');
   const module = data.operation === 'prune' ? (() => {
     if (!(data.module instanceof Uint8Array) || data.module.length > 4 * 1048576 || typeof data.prefix !== 'string' || data.prefix.length > 255) throw Error('Invalid export pruning request');
     return data.module.slice();
   })() : undefined;
   const { runtime, program, inputs } = await initialize();
   if (data.operation === 'initialize') return { success: true };
-  if (module) return { module: fromBase64(program.RetainComponentExports(toBase64(module), data.prefix)) };
+  if (module) return { module: fromBase64(program.RetainComponentExports(toBase64(module), data.prefix)),
+    hostLinearMemoryBytes: runtime.Module?.HEAPU8?.buffer?.byteLength ?? null };
   const { images: additional, supportJson } = await recipeInputs(data.recipe);
   const recipeCompilerInputs = inputs.slice();
   if (supportJson !== undefined) recipeCompilerInputs[1] = supportJson;

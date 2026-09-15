@@ -1,0 +1,1 @@
+(component (core module $m (func $start (loop $forever br $forever)) (start $start) (func (export "run"))) (core instance $guest (instantiate $m)) (func $run (canon lift (core func $guest "run"))) (export "attack" (func $run)))

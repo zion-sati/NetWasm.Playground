@@ -1,3 +1,4 @@
+import { checkGuestMemory } from './guest-memory.mjs';
 import { createAssetLoader, serveWorker, digest, errorText } from './asset-loader.mjs';
 
 const allowedImports = ['wasi:cli/environment', 'wasi:cli/exit', 'wasi:cli/stderr',
@@ -19,6 +20,9 @@ serveWorker(async (data, report) => {
   let loaded = [];
   let generatedImports = [];
   let componentSha256;
+  const moduleMemories = new WeakMap();
+  let allocatedMemoryPages = 0;
+  let coreInstances = 0;
   function begin(next) { stage = next; started = performance.now(); report({ stage: next }); }
   function complete() {
     if (started !== undefined) { timings.push({ stage, milliseconds: performance.now() - started }); started = undefined; }
@@ -83,10 +87,23 @@ serveWorker(async (data, report) => {
     const loadCoreModule = async name => {
       if (!Object.hasOwn(files, name) || !name.endsWith('.wasm')) throw Error(`Missing generated core: ${name}`);
       const module = await WebAssembly.compile(files[name]);
+      const memories = checkGuestMemory(files[name]);
       const coreImports = WebAssembly.Module.imports(module);
       if (coreImports.some(item => item.module === 'wasi_snapshot_preview1')) throw Error('Guest Preview 1 imports are unsupported');
-      loaded.push({ name, imports: coreImports });
+      moduleMemories.set(module, memories);
+      loaded.push({ name, imports: coreImports, memories });
       return module;
+    };
+    const instantiateCore = async (module, imports) => {
+      const memories = moduleMemories.get(module);
+      if (!memories) throw Error('Unverified guest core module');
+      const pages = memories.reduce((total, memory) => total + memory.maximumPages, 0);
+      if (allocatedMemoryPages + pages > 4096) throw Error('Guest memory limit exceeded (256 MiB total)');
+      allocatedMemoryPages += pages; coreInstances++;
+      // Core start functions can execute during instantiation. Start the outer
+      // execution deadline before allowing any guest core code to run.
+      if (!running) { running = true; report({ guestEntered: true }); }
+      return WebAssembly.instantiate(module, imports);
     };
     const checkCoreGraph = () => {
       if (loaded.length !== generated.files.filter(([name]) => name.endsWith('.wasm')).length)
@@ -107,7 +124,7 @@ serveWorker(async (data, report) => {
         complete(); begin('execute'); running = true; report({ guestEntered: true });
         return Object.freeze({ process: root.process, reactorGuest: root.reactorGuest });
       } });
-      const outcome = await executeComponent({ contractKey, adapter, loadCoreModule,
+      const outcome = await executeComponent({ contractKey, adapter, loadCoreModule, instantiateCore,
         imports: { ...imports, 'wasi:io/poll': io.poll,
           'wasi:clocks/monotonic-clock': clocks.monotonicClock } });
       complete(); finishOutput();
@@ -115,9 +132,9 @@ serveWorker(async (data, report) => {
         error: outcome.primaryFailure?.message, stage: outcome.primaryFailure?.phase,
         executionResult: outcome, ...output, consoleBytes,
         providedArguments: cli.environment.getArguments(), componentSha256,
-        graph, loaded, imports: generatedImports, timings };
+        graph, loaded, memoryMaximumBytes: allocatedMemoryPages * 65536, coreInstances, imports: generatedImports, timings };
     }
-    const guest = await main.instantiate(loadCoreModule, imports);
+    const guest = await main.instantiate(loadCoreModule, imports, instantiateCore);
     checkCoreGraph();
     const command = guest['wasi:cli/run@0.2.11'];
     if (!command || typeof command.run !== 'function') throw Error('Missing guest command export');
@@ -135,12 +152,12 @@ serveWorker(async (data, report) => {
     complete();
     finishOutput();
     return { success: true, exitCode, ...output, consoleBytes, providedArguments: cli.environment.getArguments(),
-      componentSha256, graph, loaded, imports: generatedImports, timings };
+      componentSha256, graph, loaded, memoryMaximumBytes: allocatedMemoryPages * 65536, coreInstances, imports: generatedImports, timings };
   } catch (error) {
     complete();
     finishOutput();
     return { success: false, ...output, error: errorText(error), stage,
       code: running ? 'guest-trap' : 'guest-failure', consoleBytes, componentSha256,
-      graph, loaded, imports: generatedImports, timings, recoverable: true };
+      graph, loaded, memoryMaximumBytes: allocatedMemoryPages * 65536, coreInstances, imports: generatedImports, timings, recoverable: true };
   } finally { if (url) URL.revokeObjectURL(url); }
 });

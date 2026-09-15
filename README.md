@@ -16,7 +16,8 @@ Use the pinned Node version in the public NetWasm toolchain manifest.
 
 ```sh
 npm ci
-python3 eng/prepare-web.py --baseline <verified-baseline> --compiler <verified-compiler-host> --tools <verified-tools> --lld <verified-browser-lld> --component <verified-component-probe> --examples <verified-desktop-examples> --generated-json <verified-generated-json> --tunit <verified-tunit-template> --source <public-netwasm-checkout>
+python3 eng/browser-notices.py --packages <verified-baseline>/packages --packages <verified-generator-host>/packages --packages <verified-tunit-template>/packages --cache <notice-cache> --output <verified-notices>
+python3 eng/prepare-web.py --baseline <verified-baseline> --compiler <verified-compiler-host> --tools <verified-tools> --lld <verified-browser-lld> --component <verified-component-probe> --examples <verified-desktop-examples> --generated-json <verified-generated-json> --tunit <verified-tunit-template> --source <public-netwasm-checkout> --notices <verified-notices>
 npm run dev
 ```
 
@@ -40,18 +41,69 @@ Playwright's Chromium installed. It exercises the actual compiler and guest.
 workspace; `--recipe` selects a particular example. `eng/tunit-example.py` checks
 the public TUnit template using ordinary `dotnet test`.
 `eng/browser-smoke/examples.mjs` checks the ordinary examples and compares
-their downloads with those desktop builds; set `PLAYGROUND_DESKTOP_EXAMPLES` to
+their outputs with those desktop builds; set `PLAYGROUND_DESKTOP_EXAMPLES` to
 the verified workspace alongside the smoke environment variables above.
 
 The JSON generator smoke is `eng/browser-smoke/json-generated.mjs`. The TUnit
 smoke is `eng/browser-smoke/tunit.mjs`, with `PLAYGROUND_TUNIT_EXAMPLE` pointing
-to its verified native template workspace. TUnit downloads use NetWasm's
+to its verified native template workspace. Set `PLAYGROUND_COMPARE_DESKTOP_BYTES=1`
+for exact ordinary/JSON download comparison when the desktop build uses the same
+memory policy; Playground caps guest memory at 256 MiB. TUnit downloads use NetWasm's
 asynchronous component contract and require its host.
 
 Build the compiler host with `eng/roslyn-worker.py`, supplying the verified
 baseline, an output directory, `--compiler-source`, `--json-example` and
 `--tunit-example`. Only the pinned JSON and TUnit generators run; user code
-cannot supply packages or analyzers.
+cannot supply packages or analyzers. Repeat host builds can use
+`--reuse-verified-host <previous-host>`; `--skip-trusted-probes` keeps a focused
+compiler-only check while retaining verification of generator inputs.
+
+## Limits and browser checks
+
+| Boundary | Limit |
+| --- | --- |
+| Source | 64 KiB UTF-8 |
+| Diagnostics | 128, with a visible limit label |
+| Guest console | 64 KiB across stdout and stderr |
+| Component / generated execution graph | 4 MiB / 8 MiB |
+| Guest defined memories | 256 MiB combined, counted per instance |
+| Guest execution, including core start functions | 5 seconds |
+| Guest transpilation / compiler and tool stages | 60 / 120 seconds |
+| Completed compiler job recycling | At least 512 MiB retained linear memory |
+
+Guest imports are explicit; environment and arguments are empty by default.
+Filesystem, sockets and arbitrary JavaScript imports are excluded. TUnit alone
+receives the clock/poll/reactor capabilities needed by its asynchronous host.
+Workers inherit the page CSP and are terminated on Stop or timeout.
+
+Trusted compiler/tool binaries have finite linear-memory maxima: .NET 2 GiB,
+LLD 1 GiB, Binaryen 4 GiB and wasm-tools 512 MiB. These are separate from accepted
+input/output bounds and do not establish a browser process RAM quota.
+
+Hello compile/run/download has been tested in Chromium 151, Firefox 153 and
+WebKit 26.5; generated JSON, TUnit timers and failure recovery were tested in
+Chromium. Safari support remains experimental. Unsupported required features
+produce a message before compilation.
+
+Focused development-server checks:
+
+```sh
+PLAYGROUND_URL=http://127.0.0.1:5173/playground/ node eng/browser-smoke/worker-channel.mjs
+PLAYGROUND_URL=http://127.0.0.1:5173/playground/ PLAYGROUND_EVIDENCE=<evidence-dir> PLAYGROUND_WASM_TOOLS=<verified-baseline>/packages/netwasm.toolchain/0.1.0/tools/wasm-tools node eng/browser-smoke/reliability.mjs
+PLAYGROUND_URL=http://127.0.0.1:5173/playground/ PLAYGROUND_EVIDENCE=<evidence-dir> node eng/browser-smoke/resource.mjs
+```
+
+The resource check samples owned Chromium processes with `ps`. For a production
+preview, use `eng/browser-smoke/browsers.mjs` with `PLAYGROUND_URL` and
+`PLAYGROUND_EVIDENCE`; `PLAYGROUND_BROWSERS` can select `chromium`, `firefox`,
+`webkit`, or a comma-separated list. Downloaded ordinary components run with
+Wasmtime without preopens.
+
+The bundle contains verified public notices and `notices/origins.json`, produced
+from a pinned catalog of source and package inputs. That file also records three
+generic license paths referenced but absent in the upstream source; resolve
+these distribution items before hosting. Keep historical bundles outside
+`public/toolchain/` so the static build includes the current version only.
 
 Built on [NetWasm](https://github.com/zion-sati/NetWasm), with examples using
 [NetWasm libraries](https://github.com/zion-sati/NetWasm.Libraries) and

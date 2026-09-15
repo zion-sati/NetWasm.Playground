@@ -9,7 +9,7 @@
       "toolchainManifest": "eng/toolchain.json",
       "browserCompilerCommit": "45d7a7118c3cd60df74ba8067b4500527a9b2391",
       "browserLinkerCommit": "b89839a8c748c9edd58bce00c30a5a60a2972fbc",
-      "browserToolHostCommit": "743ceacf2e40edeba9fccf531979c45b12552ea2"
+      "browserToolHostCommit": "1395d1b8a7aac8895feb66a6ee9c7e876cad9ca5"
     },
     "libraries": {
       "repository": "https://github.com/zion-sati/NetWasm.Libraries",

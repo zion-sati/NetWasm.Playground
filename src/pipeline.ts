@@ -11,6 +11,7 @@ export class PlaygroundPipeline {
   private assets = { rawBytes: 0, transferBytes: 0 };
   private measuredAssets = new Set<string>();
   private currentStage = 'download';
+  private runOutput?: { stdout: string; stderr: string };
   constructor(private onEvent: (event: PipelineEvent) => void) {}
   private emit(event: object) { if (this.context) this.onEvent({ requestId: this.context.requestId, revision: this.context.revision, ...event } as PipelineEvent); }
   private async initialize() {
@@ -39,7 +40,10 @@ export class PlaygroundPipeline {
     if (!channel) {
       channel = new WorkerChannel(new URL(`workers/${name}-worker.mjs`, this.root!), data => {
         if (data.stage && !['wasm-tools', 'wasm-merge', 'wasm-opt'].includes(data.stage)) { this.currentStage = data.stage; this.emit({ type: 'stage', stage: data.stage, state: 'running' }); }
-        if (data.console) this.emit({ type: 'console', stream: data.console, text: data.text ?? '' });
+        if (data.console) {
+          if (this.runOutput && (data.console === 'stdout' || data.console === 'stderr')) this.runOutput[data.console as 'stdout' | 'stderr'] += data.text ?? '';
+          this.emit({ type: 'console', stream: data.console, text: data.text ?? '' });
+        }
         if (data.assets && !this.measuredAssets.has(data.assets.name)) { this.measuredAssets.add(data.assets.name); this.assets.rawBytes += data.assets.rawBytes; this.assets.transferBytes += data.assets.transferBytes; this.emit({ type: 'assets', ...this.assets }); }
       });
       this.channels.set(name, channel);
@@ -64,11 +68,14 @@ export class PlaygroundPipeline {
   async compile(snapshot: SourceSnapshot): Promise<CompilationResult> {
     const epoch = this.epoch; this.context = snapshot; const timings: StageTiming[] = [];
     const result = { requestId: snapshot.requestId, revision: snapshot.revision, diagnostics: [], timings };
+    let recycleCompiler = false;
     try {
       if (!['hello', 'allocation', 'linq', 'json-dom', 'json-generated', 'tunit'].includes(snapshot.recipeId)) throw new Error('Unknown compilation recipe');
+      if (snapshot.source.length > 65536 || new TextEncoder().encode(snapshot.source).byteLength > 65536) throw new Error('Source limit exceeded (64 KiB)');
       await this.stage('download', timings, () => this.initialize());
       await this.stage('compiler-initialize', timings, () => this.channel('compiler').request({ operation: 'initialize' }));
       const compilation = await this.stage('compile', timings, () => this.channel('compiler').request({ operation: 'compile', recipe: snapshot.recipeId, source: snapshot.source }));
+      recycleCompiler = compilation.hostLinearMemoryBytes >= 512 * 1048576;
       for (const timing of compilation.timings ?? []) this.emit({ type: 'stage', stage: timing.stage, state: 'complete', milliseconds: timing.milliseconds });
       if (!compilation.success) return { ...result, success: false, diagnostics: compilation.diagnostics ?? [], stage: compilation.stage, assets: { ...this.assets } };
       if (compilation.timings) timings.push(...compilation.timings);
@@ -87,6 +94,7 @@ export class PlaygroundPipeline {
       const merged = await this.stage('merge', timings, () => this.tool('wasm-merge', args(plan.Merge), files, [mergedName]));
       const module = merged[mergedName];
       const pruned = await this.stage('prune', timings, () => this.channel('compiler').request({ operation: 'prune', module, prefix: plan.ExportPruning.Prefix }, [module.buffer]));
+      recycleCompiler ||= pruned.hostLinearMemoryBytes >= 512 * 1048576;
       const optimized = await this.stage('optimize', timings, () => this.tool('wasm-opt', args(plan.Optimization), { [basename(plan.ExportPruning.OutputPath)]: pruned.module }, ['linked.wasm']));
       const linked = optimized['linked.wasm'];
       await this.stage('validate', timings, () => this.tool('wasm-tools', ['validate', 'linked.wasm'], { 'linked.wasm': linked }, []));
@@ -105,20 +113,24 @@ export class PlaygroundPipeline {
       if (epoch !== this.epoch) throw new Error('Stopped');
       return { ...result, success: true, component, assets: { ...this.assets } };
     } catch (error) { return { ...result, success: false, cancelled: epoch !== this.epoch, stage: this.currentStage, error: String(error) }; }
-    finally { this.context = undefined; }
+    finally {
+      if (recycleCompiler) { this.channels.get('compiler')?.reset(); this.channels.delete('compiler'); }
+      this.context = undefined;
+    }
   }
   async run(compilation: CompilationResult, snapshot: SourceSnapshot): Promise<RunResult> {
     this.context = snapshot; const epoch = this.epoch; const timings: StageTiming[] = [];
+    this.runOutput = { stdout: '', stderr: '' };
     const base = { requestId: snapshot.requestId, revision: snapshot.revision, timings, stdout: '', stderr: '' };
     try {
       if (!compilation.component) throw new Error('No compiled component');
       await this.initialize(); this.channels.get('guest')?.reset(); this.channels.delete('guest');
       const component = compilation.component.slice();
-      const result = await this.stage('run', timings, () => this.channel('guest').request({ operation: 'run', component, recipe: snapshot.recipeId }, [component.buffer], 60_000));
+      const result = await this.stage('run', timings, () => this.channel('guest').request({ operation: 'run', component, recipe: snapshot.recipeId }, [component.buffer], 60_000, 5_000));
       for (const timing of result.timings ?? []) this.emit({ type: 'stage', stage: timing.stage, state: 'complete', milliseconds: timing.milliseconds });
       return { ...base, ...result, timings: [...timings, ...(result.timings ?? [])] };
-    } catch (error) { return { ...base, success: false, cancelled: epoch !== this.epoch, stage: this.currentStage, error: String(error) }; }
-    finally { this.channels.get('guest')?.reset(); this.channels.delete('guest'); this.context = undefined; }
+    } catch (error) { return { ...base, ...this.runOutput, success: false, cancelled: epoch !== this.epoch, stage: this.currentStage, error: String(error) }; }
+    finally { this.channels.get('guest')?.reset(); this.channels.delete('guest'); this.runOutput = undefined; this.context = undefined; }
   }
   stop() { this.epoch++; this.abort?.abort(); for (const channel of this.channels.values()) channel.reset(); }
   dispose() { this.stop(); this.channels.clear(); }

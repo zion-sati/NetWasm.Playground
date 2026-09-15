@@ -10,14 +10,15 @@ import type { CompilationResult, Diagnostic, PipelineEvent, SourceSnapshot, Stag
 import { examples } from './examples';
 import { formatTestReport } from './tunit-report';
 import './style.css';
+import { browserSupportMessage } from './browser-support';
 
 (globalThis as typeof globalThis & { MonacoEnvironment: unknown }).MonacoEnvironment = { getWorker: () => new EditorWorker() };
 document.querySelector<HTMLDivElement>('#app')!.innerHTML = `
 <header><a class="brand" href="./">NetWasm <span>Playground</span></a><span class="badge">C# → WebAssembly</span></header>
 <main><section class="intro"><h1>Small code. Real WebAssembly.</h1><p>Compiled locally in your browser. Your source code never leaves this page.</p></section>
 <section class="workbench" aria-label="C# playground"><div class="toolbar"><label class="recipe">Example <select id="example" aria-label="Example"></select></label><div class="actions"><button id="compile">Compile</button><button id="run" class="primary">Run <span aria-hidden="true">▶</span></button><button id="stop" disabled>Stop</button><button id="download" disabled>Download</button></div></div>
-<div class="panes"><section class="source-pane"><div class="pane-heading"><h2>Program.cs</h2><span>C# · Release</span></div><div id="editor" aria-label="C# source editor"></div></section><section class="results-pane"><div class="pane-heading"><h2>Console</h2><span id="exit"></span></div><pre id="output" tabindex="0" aria-label="Program output"></pre><div class="diagnostic-heading"><h2>Diagnostics</h2><span id="diagnostic-count">0</span></div><div id="diagnostics" aria-label="Compiler diagnostics"><p class="empty">Compile to check your source.</p></div></section></div>
-<footer class="results"><div id="status" role="status" aria-live="polite">Ready</div><div id="size">No component yet</div></footer><div class="details"><ol id="stages" aria-label="Pipeline progress"></ol><div id="timings"></div><div id="assets"></div></div></section><p id="footnote" class="footnote">One file, no setup. Download the compiled WASI Preview 2 component to run with Wasmtime.</p></main>`;
+<div class="panes"><section class="source-pane"><div class="pane-heading"><h2 id="source-name">Program.cs</h2><span>C# · Release</span></div><div id="editor" aria-label="C# source editor"></div></section><section class="results-pane"><div class="pane-heading"><h2>Console</h2><span id="exit"></span></div><pre id="output" tabindex="0" aria-label="Program output"></pre><div class="diagnostic-heading"><h2>Diagnostics</h2><span id="diagnostic-count">0</span></div><div id="diagnostics" aria-label="Compiler diagnostics"><p class="empty">Compile to check your source.</p></div></section></div>
+<footer class="results"><div id="status" role="status" aria-live="polite">Ready</div><div id="size">No component yet</div></footer><div class="details"><ol id="stages" aria-label="Pipeline progress"></ol><div id="timings"></div><div id="assets"></div></div></section><p id="footnote" class="footnote">One file, no setup. Download the compiled WASI Preview 2 component to run with Wasmtime.</p><p class="footnote">Current Chromium and Firefox recommended. Safari support is experimental.</p></main>`;
 const el = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id)! as T;
 const compileButton = el<HTMLButtonElement>('compile');
 const runButton = el<HTMLButtonElement>('run');
@@ -33,6 +34,7 @@ let queued: { snapshot: SourceSnapshot; run: boolean } | undefined;
 let compilation: CompilationResult | undefined;
 let downloadUrl: string | undefined;
 let stopped = false;
+let unsupported: string | undefined;
 let pipeline: PlaygroundPipeline | undefined;
 const stages = new Map<string, HTMLLIElement>();
 const formatBytes = (bytes: number) => `${bytes.toLocaleString()} bytes`;
@@ -41,7 +43,7 @@ function invalidateDownload() { compilation = undefined; downloadButton.disabled
 function setDiagnostics(diagnostics: Diagnostic[]) {
   const model = editor.getModel()!;
   monaco.editor.setModelMarkers(model, 'roslyn', diagnostics.map(d => ({ message: `${d.code}: ${d.message}`, severity: d.severity.toLowerCase() === 'error' ? monaco.MarkerSeverity.Error : d.severity.toLowerCase() === 'warning' ? monaco.MarkerSeverity.Warning : monaco.MarkerSeverity.Info, startLineNumber: (d.line ?? 0) + 1, endLineNumber: (d.line ?? 0) + 1, startColumn: (d.column ?? 0) + 1, endColumn: (d.column ?? 0) + 2 })));
-  el('diagnostic-count').textContent = String(diagnostics.length);
+  el('diagnostic-count').textContent = diagnostics.length >= 128 ? `${diagnostics.length} · limit reached` : String(diagnostics.length);
   el('diagnostics').replaceChildren();
   if (!diagnostics.length) { const p = document.createElement('p'); p.className = 'empty'; p.textContent = 'No diagnostics.'; el('diagnostics').append(p); }
   for (const d of diagnostics) { const button = document.createElement('button'); button.className = 'diagnostic'; button.textContent = `${d.line === undefined ? '' : `${d.line + 1}:${(d.column ?? 0) + 1} · `}${d.code} ${d.message}`; button.onclick = () => { const position = { lineNumber: (d.line ?? 0) + 1, column: (d.column ?? 0) + 1 }; editor.setPosition(position); editor.revealPositionInCenter(position); editor.focus(); }; el('diagnostics').append(button); }
@@ -53,7 +55,7 @@ function onEvent(event: PipelineEvent) {
   if (event.type === 'assets') el('assets').textContent = `Tool assets: ${formatBytes(event.transferBytes)} transfer cost · ${formatBytes(event.rawBytes)} uncompressed`;
   if (event.type === 'stage') { let item = stages.get(event.stage); if (!item) { item = document.createElement('li'); item.textContent = event.stage; stages.set(event.stage, item); el('stages').append(item); } item.dataset.state = event.state; el('status').textContent = event.state === 'running' ? event.stage : `${event.stage} complete`; }
 }
-editor.onDidChangeModelContent(() => { revision++; invalidateDownload(); setDiagnostics([]); el('status').textContent = active ? 'Source changed · result pending for earlier revision' : 'Source changed'; });
+editor.onDidChangeModelContent(() => { revision++; invalidateDownload(); setDiagnostics([]); el('status').textContent = unsupported ?? (active ? 'Source changed · result pending for earlier revision' : 'Source changed'); });
 exampleSelect.onchange = () => {
   const example = examples.find(example => example.id === exampleSelect.value);
   if (!example) return;
@@ -61,6 +63,7 @@ exampleSelect.onchange = () => {
   editor.setValue(example.source);
   // A recipe change must invalidate its artifact even when the source is equal.
   if (revision === previousRevision) { revision++; invalidateDownload(); setDiagnostics([]); el('status').textContent = 'Example changed'; }
+  el('source-name').textContent = example.id === 'tunit' ? 'Tests.cs' : 'Program.cs';
   el('footnote').textContent = example.id === 'tunit' ? 'TUnit uses the NetWasm asynchronous component host and the generated guest test runner.' : 'One file, no setup. Download the compiled WASI Preview 2 component to run with Wasmtime.';
   editor.setScrollTop(0);
   editor.setPosition({ lineNumber: 1, column: 1 });
@@ -87,6 +90,8 @@ async function execute(job: { snapshot: SourceSnapshot; run: boolean }) {
   } catch (error) { if (!stopped && revision === job.snapshot.revision) el('status').textContent = errorSummary(error); }
   finally { active = undefined; stopButton.disabled = true; const next = queued; queued = undefined; if (next) void execute(next); }
 }
+unsupported = browserSupportMessage();
+if (unsupported) { compileButton.disabled = true; runButton.disabled = true; el('status').textContent = unsupported; }
 compileButton.onclick = () => request(false);
 runButton.onclick = () => request(true);
 stopButton.onclick = () => { stopped = true; queued = undefined; pipeline?.stop(); stopButton.disabled = true; el('status').textContent = 'Stopped'; };

@@ -56,6 +56,15 @@ def verify(run):
         trusted = json.loads((run / "trusted-worker-test.json").read_text())
         if [[item["success"] for item in group["results"]] for group in trusted["groups"]] != [[True, True], [True, True, False, True]]:
             raise RuntimeError("Trusted generator success/failure/recovery evidence changed")
+    if (run / "memory-test.json").exists():
+        memory = json.loads((run / "memory-test.json").read_text())
+        compilations = [item for item in memory["results"] if item["kind"] == "compile"]
+        invalid = [item for item in memory["results"] if item["kind"] == "invalid-setting"]
+        if not memory["passed"] or memory["configuredMaximumBytes"] != 268435456 or \
+                [item["success"] for item in compilations] != [True, False, True] or \
+                len(invalid) != 4 or not all(item["rejected"] for item in invalid) or \
+                any(item["runtimeMemory"]["maximumPages"] != 4096 for item in compilations if item["success"]):
+            raise RuntimeError("Configured guest memory and recovery evidence changed")
     print("PASS: browser fixture hashes and managed output match", flush=True)
 
 
@@ -292,12 +301,21 @@ def main():
                         help="Published public NetWasm checkout for the real compiler probe")
     parser.add_argument("--json-example", type=Path, help="Verified desktop JSON source-generation recipe")
     parser.add_argument("--tunit-example", type=Path, help="Verified ordinary dotnet test template comparison")
+    parser.add_argument("--reuse-verified-host", type=Path,
+                        help="Reuse a retained, receipt-verified public host package cache and Playwright installation")
+    parser.add_argument("--skip-trusted-probes", action="store_true",
+                        help="Run compiler compatibility checks without repeating the trusted generator matrix")
     args = parser.parse_args()
     baseline = args.desktop_baseline.resolve()
     run = args.run_directory.resolve()
     if args.verify:
         verify(run)
         return
+    reused_host = args.reuse_verified_host.resolve() if args.reuse_verified_host else None
+    if reused_host:
+        verify(reused_host)
+        if not (reused_host / "packages").is_dir():
+            raise RuntimeError("Verified host package cache is unavailable")
     subprocess.run(["python3", str(ROOT / "eng/desktop-baseline.py"), str(baseline), "--verify"], check=True)
     receipt = json.loads((baseline / "receipt.json").read_text())
     host = json.loads((ROOT / "eng/browser-host.json").read_text())
@@ -337,7 +355,8 @@ def main():
         (app / "TrustedGeneratorAssets.cs").write_text("namespace NetWasm.Playground.CompilerProbe;\ninternal static class TrustedGeneratorAssets { internal const string TUnitProgram = " + json.dumps(trusted["program"]) + "; }\n")
     (app / "global.json").write_text(json.dumps({"sdk": {
         "version": receipt["toolchain"]["dotnetSdk"], "rollForward": "disable"}}, indent=2))
-    env = dict(os.environ, NUGET_PACKAGES=str(run / "packages"),
+    package_cache = reused_host / "packages" if reused_host else run / "packages"
+    env = dict(os.environ, NUGET_PACKAGES=str(package_cache),
                NUGET_HTTP_CACHE_PATH=str(run / "http-cache"))
     commands = []
 
@@ -371,7 +390,7 @@ def main():
             snapshots = run / "restore-assets"
             snapshots.mkdir(exist_ok=True)
             shutil.copyfile(project, snapshots / (project.parent.parent.name + ".json"))
-            if {Path(folder).resolve() for folder in resolved["packageFolders"]} != {run / "packages"}:
+            if {Path(folder).resolve() for folder in resolved["packageFolders"]} != {package_cache}:
                 raise RuntimeError("Compiler restore did not use the isolated package cache")
             restore = resolved["project"]["restore"]
             if set(restore["sources"]) != {"https://api.nuget.org/v3/index.json"} or restore.get("fallbackFolders"):
@@ -381,7 +400,8 @@ def main():
                     pending.append(Path(reference).parent / "obj/project.assets.json")
         (run / "restore-provenance.json").write_text(json.dumps({
             "projectsChecked": len(checked), "sources": ["https://api.nuget.org/v3/index.json"],
-            "fallbackFolders": [], "packageCache": "packages"}, indent=2))
+            "fallbackFolders": [], "packageCache": str(package_cache.relative_to(reused_host if reused_host else run)),
+            "reusedVerifiedHostReceipt": fingerprint(reused_host / "receipt.json") if reused_host else None}, indent=2))
     execute(["dotnet", "publish", runtime_option, *source_options, "-c", "Debug", "--no-restore", "-o", str(run / "publish")], "publish")
     shutil.copyfile(app / "bin/Debug/net10.0/NetWasm.Playground.CompilerProbe.runtimeconfig.json",
                     run / "host-runtimeconfig.json")
@@ -432,8 +452,11 @@ def main():
         "toolchain": receipt["toolchain"], "compilerHost": host,
         "browserCompilerCommit": compiler_pin,
         "expectedRuntimePlan": expected_runtime_plan}, indent=2))
-    execute(["npm", "install", "--no-save", "--package-lock=false",
-             "playwright@" + receipt["toolchain"]["playwright"]], "playwright-install", run)
+    if reused_host:
+        (run / "node_modules").symlink_to(reused_host / "node_modules", target_is_directory=True)
+    else:
+        execute(["npm", "install", "--no-save", "--package-lock=false",
+                 "playwright@" + receipt["toolchain"]["playwright"]], "playwright-install", run)
     shutil.copyfile(fixture / "test-worker.mjs", run / "test-worker.mjs")
     handler = functools.partial(http.server.SimpleHTTPRequestHandler, directory=str(web))
     server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), handler)
@@ -443,7 +466,7 @@ def main():
         env["COMPILER_PROBE_URL"] = f"http://127.0.0.1:{server.server_port}"
         print("Testing actual source compilation and recovery in Chromium", flush=True)
         execute(["node", "test-worker.mjs"], "worker-test", run)
-        if trusted:
+        if trusted and not args.skip_trusted_probes:
             (run / "test-trusted.mjs").write_text(TRUSTED_TEST)
             execute(["node", "test-trusted.mjs"], "trusted-worker-test", run)
             (run / "test-trusted-limit.mjs").write_text(TRUSTED_LIMIT_TEST)
@@ -453,7 +476,8 @@ def main():
         server.server_close()
         thread.join()
     finalize_evidence(run, baseline, compiler_pin)
-    print("PASS: browser Roslyn compilation, trusted generators, diagnostics and recovery", flush=True)
+    print("PASS: browser Roslyn compilation, diagnostics and recovery" +
+          ("; trusted generators" if trusted and not args.skip_trusted_probes else ""), flush=True)
 
 
 if __name__ == "__main__":

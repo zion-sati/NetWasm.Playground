@@ -34,6 +34,15 @@ public static partial class Program
     private const int MaximumGeneratedSources = 128;
     private const int MaximumGeneratedBytes = 512 * 1024;
     private static bool progressEnabled;
+    private static long guestMemoryMaximum = 2147483648;
+
+    [JSExport]
+    public static void ConfigureGuestMemoryMaximum(int bytes)
+    {
+        if (bytes <= 0 || bytes % 65536 != 0)
+            throw new ArgumentOutOfRangeException(nameof(bytes), "Guest memory maximum must be a positive multiple of 64 KiB.");
+        guestMemoryMaximum = bytes;
+    }
 
     [JSImport("reportStage", "compiler-progress")]
     private static partial void ReportStage(string stage);
@@ -141,7 +150,8 @@ public static partial class Program
                 new Dictionary<string,string> { ["compiler.wit.wasm"] = witJson }, selectManagedExecutableEntryPoint: true));
             timings.Add(new("netwasm", Stopwatch.GetElapsedTime(started).TotalMilliseconds));
             var runtimeLinkPlan = RuntimeLinkPlanner.Plan(new(runtimeManifest, "wasm32", compiled.StaticDataEnd,
-                AssetRoot: "/netwasm-link/runtime", OutputPath: "/netwasm-link/runtime.wasm"));
+                AssetRoot: "/netwasm-link/runtime", OutputPath: "/netwasm-link/runtime.wasm",
+                MaximumMemorySizeBytes: guestMemoryMaximum));
             var coreLinkPlan = BrowserComponentCoreModules.CreateLinkPlan(
                 new("/netwasm-link/application.wasm", "/netwasm-link/runtime.wasm", "/netwasm-link/linked.wasm",
                     ComponentTarget.Wasm32Wasi02, compiled.EntryPoint.Abi),
