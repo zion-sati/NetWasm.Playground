@@ -28,6 +28,15 @@ It does not rebuild LLVM. A reusable toolchain release bundle is still planned.
 
 For a static build, run `npm run build`. Set `PLAYGROUND_BASE=/playground/`
 when building for a nested path. The default base is `/`.
+Build and preview must use the same base. For the local nested-path preview:
+
+```sh
+PLAYGROUND_BASE=/playground/ npm run build
+PLAYGROUND_BASE=/playground/ npm run preview -- --port 5174
+```
+
+Open `http://127.0.0.1:5174/playground/`. Rebuilding with the default base
+while this preview is running will break its asset URLs.
 
 ```sh
 npm run typecheck
