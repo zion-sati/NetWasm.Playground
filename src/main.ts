@@ -8,6 +8,7 @@ import EditorWorker from 'monaco-editor/editor/editor.worker?worker';
 import { PlaygroundPipeline } from './pipeline';
 import type { CompilationResult, Diagnostic, PipelineEvent, SourceSnapshot, StageTiming } from './contracts';
 import { examples } from './examples';
+import { formatTestReport } from './tunit-report';
 import './style.css';
 
 (globalThis as typeof globalThis & { MonacoEnvironment: unknown }).MonacoEnvironment = { getWorker: () => new EditorWorker() };
@@ -16,7 +17,7 @@ document.querySelector<HTMLDivElement>('#app')!.innerHTML = `
 <main><section class="intro"><h1>Small code. Real WebAssembly.</h1><p>Compiled locally in your browser. Your source code never leaves this page.</p></section>
 <section class="workbench" aria-label="C# playground"><div class="toolbar"><label class="recipe">Example <select id="example" aria-label="Example"></select></label><div class="actions"><button id="compile">Compile</button><button id="run" class="primary">Run <span aria-hidden="true">▶</span></button><button id="stop" disabled>Stop</button><button id="download" disabled>Download</button></div></div>
 <div class="panes"><section class="source-pane"><div class="pane-heading"><h2>Program.cs</h2><span>C# · Release</span></div><div id="editor" aria-label="C# source editor"></div></section><section class="results-pane"><div class="pane-heading"><h2>Console</h2><span id="exit"></span></div><pre id="output" tabindex="0" aria-label="Program output"></pre><div class="diagnostic-heading"><h2>Diagnostics</h2><span id="diagnostic-count">0</span></div><div id="diagnostics" aria-label="Compiler diagnostics"><p class="empty">Compile to check your source.</p></div></section></div>
-<footer class="results"><div id="status" role="status" aria-live="polite">Ready</div><div id="size">No component yet</div></footer><div class="details"><ol id="stages" aria-label="Pipeline progress"></ol><div id="timings"></div><div id="assets"></div></div></section><p class="footnote">One file, no setup. Download the compiled WASI Preview 2 component to run with Wasmtime.</p></main>`;
+<footer class="results"><div id="status" role="status" aria-live="polite">Ready</div><div id="size">No component yet</div></footer><div class="details"><ol id="stages" aria-label="Pipeline progress"></ol><div id="timings"></div><div id="assets"></div></div></section><p id="footnote" class="footnote">One file, no setup. Download the compiled WASI Preview 2 component to run with Wasmtime.</p></main>`;
 const el = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id)! as T;
 const compileButton = el<HTMLButtonElement>('compile');
 const runButton = el<HTMLButtonElement>('run');
@@ -60,6 +61,7 @@ exampleSelect.onchange = () => {
   editor.setValue(example.source);
   // A recipe change must invalidate its artifact even when the source is equal.
   if (revision === previousRevision) { revision++; invalidateDownload(); setDiagnostics([]); el('status').textContent = 'Example changed'; }
+  el('footnote').textContent = example.id === 'tunit' ? 'TUnit uses the NetWasm asynchronous component host and the generated guest test runner.' : 'One file, no setup. Download the compiled WASI Preview 2 component to run with Wasmtime.';
   editor.setScrollTop(0);
   editor.setPosition({ lineNumber: 1, column: 1 });
 };
@@ -80,7 +82,7 @@ async function execute(job: { snapshot: SourceSnapshot; run: boolean }) {
     }
     if (job.run && result?.success && !stopped && revision === job.snapshot.revision) {
       const run = await pipeline.run(result, job.snapshot);
-      if (!stopped && revision === job.snapshot.revision) { el('output').textContent = run.stdout + run.stderr; el('exit').textContent = run.exitCode === undefined ? '' : `Exit ${run.exitCode}`; showTimings([...result.timings, ...run.timings]); el('status').textContent = run.cancelled ? 'Stopped' : run.success ? 'Run complete' : run.error ? errorSummary(run.error) : 'Run failed'; }
+      if (!stopped && revision === job.snapshot.revision) { el('output').textContent = run.stdout + run.stderr; el('exit').textContent = run.exitCode === undefined ? '' : `Exit ${run.exitCode}`; showTimings([...result.timings, ...run.timings]); el('status').textContent = run.cancelled ? 'Stopped' : run.success ? 'Run complete' : run.error ? errorSummary(run.error) : 'Run failed'; if (job.snapshot.recipeId === 'tunit' && !run.cancelled && !run.error && run.exitCode !== undefined) { const report = formatTestReport(run.stdout); el('output').textContent = report.text + run.stderr; el('status').textContent = `Tests complete · ${report.passed} passed · ${report.failed} failed`; } }
     } else if (!stopped && result?.success && revision === job.snapshot.revision) el('status').textContent = 'Compilation complete';
   } catch (error) { if (!stopped && revision === job.snapshot.revision) el('status').textContent = errorSummary(error); }
   finally { active = undefined; stopButton.disabled = true; const next = queued; queued = undefined; if (next) void execute(next); }

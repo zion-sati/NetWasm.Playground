@@ -63,4 +63,49 @@ Console.WriteLine($"Age: {person.GetProperty("age").GetInt32()}");
 Console.WriteLine($"Tags: {person.GetProperty("tags").GetArrayLength()}");
 `,
   },
+  {
+    id: 'json-generated',
+    name: 'Source-generated JSON (serialize)',
+    source: `using System;
+using System.Text.Json;
+using System.Text.Json.Serialization;
+
+var message = new Message { Name = "Ada", Score = 42 };
+string json = JsonSerializer.Serialize(message, MessageJsonContext.Default.Message);
+Console.WriteLine(json);
+
+public sealed class Message
+{
+    public string Name { get; set; } = "";
+    public int Score { get; set; }
+}
+
+[JsonSourceGenerationOptions(GenerationMode = JsonSourceGenerationMode.Serialization)]
+[JsonSerializable(typeof(Message))]
+public partial class MessageJsonContext : JsonSerializerContext { }
+`,
+  },
+  {
+    id: 'tunit',
+    name: 'TUnit tests',
+    source: `using System.Threading.Tasks;
+
+using TUnit.Assertions;
+using TUnit.Core;
+
+namespace NetWasmTUnitTests;
+
+public sealed class Tests
+{
+    [Test]
+    [Category("smoke")]
+    public async Task AnswerIsFortyTwo()
+    {
+        var answer = 6 * 7;
+
+        await Assert.That(answer).IsEqualTo(42);
+    }
+}
+`,
+  },
 ];

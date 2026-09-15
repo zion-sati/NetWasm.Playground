@@ -7,8 +7,8 @@ The project is in development. The local editor compiles, links and packages
 real C# programs in browser workers, then runs the downloaded component in a
 separate guest worker.
 
-Editable examples cover Hello World, allocation and guest GC, LINQ, and
-read-only JSON parsing.
+Editable examples cover Hello World, allocation and guest GC, LINQ, read-only
+JSON parsing, source-generated JSON serialization, and TUnit tests.
 
 ## Local development
 
@@ -16,7 +16,7 @@ Use the pinned Node version in the public NetWasm toolchain manifest.
 
 ```sh
 npm ci
-python3 eng/prepare-web.py --baseline <verified-baseline> --compiler <verified-compiler-host> --tools <verified-tools> --lld <verified-browser-lld> --component <verified-component-probe> --examples <verified-desktop-examples> --source <public-netwasm-checkout>
+python3 eng/prepare-web.py --baseline <verified-baseline> --compiler <verified-compiler-host> --tools <verified-tools> --lld <verified-browser-lld> --component <verified-component-probe> --examples <verified-desktop-examples> --generated-json <verified-generated-json> --tunit <verified-tunit-template> --source <public-netwasm-checkout>
 npm run dev
 ```
 
@@ -37,9 +37,21 @@ The smoke expects a running development server with the same base path and
 Playwright's Chromium installed. It exercises the actual compiler and guest.
 
 `eng/desktop-examples.py` creates the example inputs using a fresh NuGet.org-only
-workspace. `eng/browser-smoke/examples.mjs` checks all four examples and compares
+workspace; `--recipe` selects a particular example. `eng/tunit-example.py` checks
+the public TUnit template using ordinary `dotnet test`.
+`eng/browser-smoke/examples.mjs` checks the ordinary examples and compares
 their downloads with those desktop builds; set `PLAYGROUND_DESKTOP_EXAMPLES` to
 the verified workspace alongside the smoke environment variables above.
+
+The JSON generator smoke is `eng/browser-smoke/json-generated.mjs`. The TUnit
+smoke is `eng/browser-smoke/tunit.mjs`, with `PLAYGROUND_TUNIT_EXAMPLE` pointing
+to its verified native template workspace. TUnit downloads use NetWasm's
+asynchronous component contract and require its host.
+
+Build the compiler host with `eng/roslyn-worker.py`, supplying the verified
+baseline, an output directory, `--compiler-source`, `--json-example` and
+`--tunit-example`. Only the pinned JSON and TUnit generators run; user code
+cannot supply packages or analyzers.
 
 Built on [NetWasm](https://github.com/zion-sati/NetWasm), with examples using
 [NetWasm libraries](https://github.com/zion-sati/NetWasm.Libraries) and

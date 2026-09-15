@@ -10,7 +10,7 @@ import subprocess
 from xml.sax.saxutils import escape
 
 ROOT = Path(__file__).resolve().parents[1]
-PACKAGES = {'hello': [], 'allocation': [], 'linq': ['NetWasm.System.Linq'], 'json-dom': ['NetWasm.System.Text.Json']}
+PACKAGES = {'hello': [], 'allocation': [], 'linq': ['NetWasm.System.Linq'], 'json-dom': ['NetWasm.System.Text.Json'], 'json-generated': ['NetWasm.System.Text.Json']}
 def fingerprint(path):
     return {'bytes': path.stat().st_size, 'sha256': hashlib.sha256(path.read_bytes()).hexdigest()}
 def main():
@@ -19,6 +19,7 @@ def main():
     parser.add_argument('--baseline', type=Path, required=True)
     parser.add_argument('--wasm-ld', type=Path)
     parser.add_argument('--verify', action='store_true')
+    parser.add_argument('--recipe', action='append', help='Verify only the named recipe; repeat to select several')
     args = parser.parse_args(); run = args.directory.resolve()
     if args.verify:
         receipt = json.loads((run/'receipt.json').read_text())
@@ -31,7 +32,11 @@ def main():
     baseline = args.baseline.resolve()
     subprocess.run(['python3',str(ROOT/'eng/desktop-baseline.py'),str(baseline),'--verify'],check=True)
     sources = subprocess.check_output(['node','--input-type=module','-e',"import('./src/examples.ts').then(m=>process.stdout.write(JSON.stringify(m.examples)))"],cwd=ROOT,text=True)
-    examples = json.loads(sources); (run/'examples.json').write_text(sources+'\n')
+    examples = [example for example in json.loads(sources) if example['id'] in PACKAGES]
+    if args.recipe:
+        examples = [example for example in examples if example['id'] in args.recipe]
+        if {example['id'] for example in examples} != set(args.recipe): parser.error('Unknown recipe')
+    (run/'examples.json').write_text(json.dumps(examples)+'\n')
     pins = json.loads((ROOT/'eng/upstream-sources.json').read_text()); version=pins['sources']['libraries']['packageVersion']
     (run/'NuGet.Config').write_text('<configuration><packageSources><clear/><add key="nuget.org" value="https://api.nuget.org/v3/index.json"/></packageSources><fallbackPackageFolders><clear/></fallbackPackageFolders></configuration>\n')
     env=dict(os.environ,NUGET_PACKAGES=str(run/'packages'),NUGET_HTTP_CACHE_PATH=str(run/'http-cache'))
@@ -55,7 +60,7 @@ def main():
         if set(assets['project']['restore']['sources'])!={'https://api.nuget.org/v3/index.json'} or {str(Path(p).resolve()) for p in assets['packageFolders']}!={str(run/'packages')}: raise RuntimeError('Non-public restore source/cache')
         execute(['dotnet','publish','-c','Release','--no-restore','-o',str(app/'publish'),'-p:CustomAfterMicrosoftCommonTargets='+str(app/'linker.targets')],'publish')
         stdout=execute(['wasmtime',str(app/'publish/NetWasmApp.wasm')],'run')
-        expected={'hello':'42\n','linq':'Even sum: 120\n','json-dom':'Name: Ada\nAge: 29\nTags: 2\n'}
+        expected={'hello':'42\n','linq':'Even sum: 120\n','json-dom':'Name: Ada\nAge: 29\nTags: 2\n','json-generated':'{"Name":"Ada","Score":42}\n'}
         if recipe=='allocation':
             if not stdout.startswith('Survivor: 42\nGuest collections: ') or int(stdout.strip().split(': ')[-1])<1: raise RuntimeError('Guest GC output mismatch')
         elif stdout!=expected[recipe]: raise RuntimeError('Example output mismatch')
@@ -68,7 +73,7 @@ def main():
         outcomes.append({'id':recipe,'stdout':stdout,'component':fingerprint(app/'publish/NetWasmApp.wasm')})
         print(f'PASS: desktop {recipe}',flush=True)
     (run/'outcomes.json').write_text(json.dumps(outcomes,indent=2)+'\n')
-    retained=[run/'examples.json',run/'outcomes.json',run/'NuGet.Config',*run.glob('*/Program.cs'),*run.glob('*/Support*.cs'),*run.glob('*/NetWasmApp.csproj'),*run.glob('*/global.json'),*run.glob('*/recipe-inputs.json'),*run.glob('*/publish/NetWasmApp.wasm'),*run.glob('*/obj/project.assets.json'),*run.glob('*/obj/Release/netwasm0.1/NetWasmApp.dll'),*run.glob('*/obj/Release/netwasm0.1/NetWasmApp.core.wasm'),*run.glob('*/run.log'),*run.glob('packages/*/*/*.nupkg')]
+    retained=[run/'examples.json',run/'outcomes.json',run/'NuGet.Config',*run.glob('*/Program.cs'),*run.glob('*/Support*.cs'),*run.glob('*/NetWasmApp.csproj'),*run.glob('*/global.json'),*run.glob('*/recipe-inputs.json'),*run.glob('*/publish/NetWasmApp.wasm'),*run.glob('*/obj/project.assets.json'),*run.glob('*/obj/Release/netwasm0.1/NetWasmApp.dll'),*run.glob('*/bin/Release/netwasm0.1/NetWasmApp.core.wasm'),*run.glob('*/run.log'),*run.glob('packages/*/*/*.nupkg')]
     for app in [run/e['id'] for e in examples]:
         recipe=json.loads((app/'recipe-inputs.json').read_text())
         retained.extend(run/path for path in recipe['libraries'].values())

@@ -4,7 +4,7 @@ const loader = createAssetLoader(assets => report({ assets }));
 const recipes = new Map();
 async function recipeInputs(id) {
   if (!recipes.has(id)) recipes.set(id, (async () => {
-    if (id === 'hello' && !(await loader.manifest())['recipes/hello.json']) return ['{}', '{}'];
+    if (id === 'hello' && !(await loader.manifest())['recipes/hello.json']) return { images: ['{}', '{}'] };
     if (!(await loader.manifest())[`recipes/${id}.json`]) throw Error('Recipe assets unavailable. Prepare the verified example bundle.');
     const recipe = JSON.parse(new TextDecoder().decode(await loader.load(`recipes/${id}.json`)));
     if (recipe.schemaVersion !== 1 || recipe.id !== id) throw Error('Invalid compilation recipe');
@@ -19,7 +19,14 @@ async function recipeInputs(id) {
     }));
     const failure = results.find(result => result.status === 'rejected');
     if (failure) throw failure.reason;
-    return results.map(result => result.value);
+    let supportJson;
+    if (recipe.support !== undefined) {
+      if (id !== 'tunit' || recipe.support !== 'recipes/tunit-support.json') throw Error('Invalid trusted recipe support');
+      const bytes = await loader.load(recipe.support);
+      if (bytes.byteLength > 65536) throw Error('Recipe support limit exceeded');
+      supportJson = new TextDecoder().decode(bytes);
+    }
+    return { images: results.map(result => result.value), supportJson };
   })().catch(error => { recipes.delete(id); throw error; }));
   return recipes.get(id);
 }
@@ -57,7 +64,7 @@ async function initialize() {
 serveWorker(async (data, emit) => {
   report = emit;
   if (data.operation !== 'compile' && data.operation !== 'prune' && data.operation !== 'initialize') throw Error('Unsupported compiler operation');
-  if (data.operation === 'compile' && (!['hello', 'allocation', 'linq', 'json-dom'].includes(data.recipe) || typeof data.source !== 'string' || new TextEncoder().encode(data.source).length > 65536)) throw Error('Invalid compiler source or recipe');
+  if (data.operation === 'compile' && (!['hello', 'allocation', 'linq', 'json-dom', 'json-generated', 'tunit'].includes(data.recipe) || typeof data.source !== 'string' || new TextEncoder().encode(data.source).length > 65536)) throw Error('Invalid compiler source or recipe');
   const module = data.operation === 'prune' ? (() => {
     if (!(data.module instanceof Uint8Array) || data.module.length > 4 * 1048576 || typeof data.prefix !== 'string' || data.prefix.length > 255) throw Error('Invalid export pruning request');
     return data.module.slice();
@@ -65,10 +72,14 @@ serveWorker(async (data, emit) => {
   const { runtime, program, inputs } = await initialize();
   if (data.operation === 'initialize') return { success: true };
   if (module) return { module: fromBase64(program.RetainComponentExports(toBase64(module), data.prefix)) };
-  const additional = await recipeInputs(data.recipe);
+  const { images: additional, supportJson } = await recipeInputs(data.recipe);
+  const recipeCompilerInputs = inputs.slice();
+  if (supportJson !== undefined) recipeCompilerInputs[1] = supportJson;
   if (typeof program.CompileRecipe !== 'function' && data.recipe !== 'hello') throw Error('Rebuild the compiler host for library recipes');
-  const result = JSON.parse(typeof program.CompileRecipe === 'function'
-    ? program.CompileRecipe(data.source, ...inputs, ...additional) : program.Compile(data.source, ...inputs));
+  if (['json-generated', 'tunit'].includes(data.recipe) && typeof program.CompileGeneratedRecipe !== 'function') throw Error('Rebuild the compiler host for source generation');
+  const result = JSON.parse(['json-generated', 'tunit'].includes(data.recipe)
+    ? program.CompileGeneratedRecipe(data.source, ...recipeCompilerInputs, ...additional, data.recipe === 'tunit' ? 'tunit' : 'json', false)
+    : typeof program.CompileRecipe === 'function' ? program.CompileRecipe(data.source, ...recipeCompilerInputs, ...additional) : program.Compile(data.source, ...recipeCompilerInputs));
   if (typeof result.application === 'string') result.application = fromBase64(result.application);
   if (typeof result.pe === 'string') result.pe = fromBase64(result.pe);
   result.hostLinearMemoryBytes = runtime.Module?.HEAPU8?.buffer?.byteLength ?? null;

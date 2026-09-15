@@ -2,6 +2,8 @@ import { createAssetLoader, serveWorker, digest, errorText } from './asset-loade
 
 const allowedImports = ['wasi:cli/environment', 'wasi:cli/exit', 'wasi:cli/stderr',
   'wasi:cli/stdout', 'wasi:io/error', 'wasi:io/streams'];
+const processImports = [...allowedImports, 'wasi:clocks/monotonic-clock',
+  'wasi:io/poll', 'netwasm:runtime/reactor-host'];
 
 serveWorker(async (data, report) => {
   // These captures survive both instantiation failures and execution traps.
@@ -31,8 +33,14 @@ serveWorker(async (data, report) => {
   }, flush() {} });
   try {
     if (data.operation !== 'run' || !(data.component instanceof Uint8Array)) throw Error('Invalid guest run request');
+    const managedProcess = data.recipe === 'tunit';
+    const args = data.args === undefined ? [] : data.args;
+    if (!Array.isArray(args) || (args.length !== 0 &&
+        (!managedProcess || args.length !== 1 || args[0] !== '--list'))) throw Error('Unsupported guest arguments');
+    const argumentsSnapshot = args.slice();
     const component = data.component.slice();
-    if (component.byteLength > 1048576) throw Error('Component input limit exceeded');
+    // The curated serialization example produces a measured 1.3 MiB component.
+    if (component.byteLength > 4 * 1048576) throw Error('Component input limit exceeded');
     componentSha256 = await digest(component);
     if (data.sha256 !== undefined && componentSha256 !== data.sha256) throw Error('Component digest mismatch');
     begin('transpile');
@@ -51,8 +59,9 @@ serveWorker(async (data, report) => {
     const generated = await jco.generate(component, { name: 'guest', instantiation: { tag: 'async' },
       noTypescript: true, noNodejsCompat: true, base64Cutoff: 0, bindgenEnableWasmExnref: true });
     generatedImports = generated.imports;
-    if (generatedImports.some(name => !allowedImports.includes(name)))
-      throw Error(`Unsupported guest import: ${generatedImports.filter(name => !allowedImports.includes(name)).join(', ')}`);
+    const permittedImports = managedProcess ? processImports : allowedImports;
+    if (generatedImports.some(name => !permittedImports.includes(name)))
+      throw Error(`Unsupported guest import: ${generatedImports.filter(name => !permittedImports.includes(name)).join(', ')}`);
     if (generated.files.reduce((total, [, bytes]) => total + bytes.byteLength, 0) > 8388608)
       throw Error('Generated graph limit exceeded');
     const javascript = generated.files.filter(([name]) => name.endsWith('.js'));
@@ -61,7 +70,7 @@ serveWorker(async (data, report) => {
     graph = await Promise.all(generated.files.map(async ([name, bytes]) => ({ name, bytes: bytes.byteLength, sha256: await digest(bytes) })));
     complete();
     begin('instantiate');
-    const cli = cliModule.createCli({ arguments: [], environment: {}, initialCwd: '/',
+    const cli = cliModule.createCli({ arguments: argumentsSnapshot, environment: {}, initialCwd: '/',
       stdout: capture('stdout'), stderr: capture('stderr') });
     // Each WASI getter returns an owned stream. Dropping one write's handle
     // must not close the stream returned by a later Console.WriteLine.
@@ -71,16 +80,45 @@ serveWorker(async (data, report) => {
       'wasi:io/error': io.error, 'wasi:io/streams': io.streams };
     url = URL.createObjectURL(new Blob([files['guest.js']], { type: 'text/javascript' }));
     const main = await import(url);
-    const guest = await main.instantiate(async name => {
+    const loadCoreModule = async name => {
       if (!Object.hasOwn(files, name) || !name.endsWith('.wasm')) throw Error(`Missing generated core: ${name}`);
       const module = await WebAssembly.compile(files[name]);
       const coreImports = WebAssembly.Module.imports(module);
       if (coreImports.some(item => item.module === 'wasi_snapshot_preview1')) throw Error('Guest Preview 1 imports are unsupported');
       loaded.push({ name, imports: coreImports });
       return module;
-    }, imports);
-    if (loaded.length !== generated.files.filter(([name]) => name.endsWith('.wasm')).length)
-      throw Error('Generated core graph was not fully resolved');
+    };
+    const checkCoreGraph = () => {
+      if (loaded.length !== generated.files.filter(([name]) => name.endsWith('.wasm')).length)
+        throw Error('Generated core graph was not fully resolved');
+    };
+    if (managedProcess) {
+      await loader.verifyGraph('hosting/');
+      const [{ executeComponent }, clocks] = await Promise.all([
+        import(loader.url('hosting/component-executor.mjs')),
+        import(loader.url('jco/preview2/clocks.js')),
+      ]);
+      // The public executor owns reactor watch/cancel, wake delivery, process
+      // observation and cleanup. Guest imports cannot inject its reactor host.
+      const contractKey = 'netwasm:runtime/process@1.0.0';
+      const adapter = Object.freeze({ contractKey, async instantiate(request) {
+        const root = await main.instantiate(request.loadCoreModule, request.imports, request.instantiateCore);
+        checkCoreGraph();
+        complete(); begin('execute'); running = true; report({ guestEntered: true });
+        return Object.freeze({ process: root.process, reactorGuest: root.reactorGuest });
+      } });
+      const outcome = await executeComponent({ contractKey, adapter, loadCoreModule,
+        imports: { ...imports, 'wasi:io/poll': io.poll,
+          'wasi:clocks/monotonic-clock': clocks.monotonicClock } });
+      complete(); finishOutput();
+      return { success: outcome.completionKind === 'normal', exitCode: outcome.exitCode,
+        error: outcome.primaryFailure?.message, stage: outcome.primaryFailure?.phase,
+        executionResult: outcome, ...output, consoleBytes,
+        providedArguments: cli.environment.getArguments(), componentSha256,
+        graph, loaded, imports: generatedImports, timings };
+    }
+    const guest = await main.instantiate(loadCoreModule, imports);
+    checkCoreGraph();
     const command = guest['wasi:cli/run@0.2.11'];
     if (!command || typeof command.run !== 'function') throw Error('Missing guest command export');
     complete();

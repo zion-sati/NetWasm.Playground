@@ -65,7 +65,7 @@ export class PlaygroundPipeline {
     const epoch = this.epoch; this.context = snapshot; const timings: StageTiming[] = [];
     const result = { requestId: snapshot.requestId, revision: snapshot.revision, diagnostics: [], timings };
     try {
-      if (!['hello', 'allocation', 'linq', 'json-dom'].includes(snapshot.recipeId)) throw new Error('Unknown compilation recipe');
+      if (!['hello', 'allocation', 'linq', 'json-dom', 'json-generated', 'tunit'].includes(snapshot.recipeId)) throw new Error('Unknown compilation recipe');
       await this.stage('download', timings, () => this.initialize());
       await this.stage('compiler-initialize', timings, () => this.channel('compiler').request({ operation: 'initialize' }));
       const compilation = await this.stage('compile', timings, () => this.channel('compiler').request({ operation: 'compile', recipe: snapshot.recipeId, source: snapshot.source }));
@@ -90,12 +90,14 @@ export class PlaygroundPipeline {
       const optimized = await this.stage('optimize', timings, () => this.tool('wasm-opt', args(plan.Optimization), { [basename(plan.ExportPruning.OutputPath)]: pruned.module }, ['linked.wasm']));
       const linked = optimized['linked.wasm'];
       await this.stage('validate', timings, () => this.tool('wasm-tools', ['validate', 'linked.wasm'], { 'linked.wasm': linked }, []));
-      const witResponse = await fetch(new URL('command.wit.wasm', this.root!), { signal: this.abort?.signal, cache: 'force-cache' });
+      const witName = snapshot.recipeId === 'tunit' ? 'async-command.wit.wasm' : 'command.wit.wasm';
+      const witWorld = snapshot.recipeId === 'tunit' ? 'netwasm:component/async-command@1.0.0' : 'wasi:cli/command@0.2.11';
+      const witResponse = await fetch(new URL(witName, this.root!), { signal: this.abort?.signal, cache: 'force-cache' });
       if (!witResponse.ok) throw new Error('Command WIT unavailable');
       const wit = new Uint8Array(await witResponse.arrayBuffer());
-      await this.verify(wit, this.manifest!.assets['command.wit.wasm'].sha256);
+      await this.verify(wit, this.manifest!.assets[witName].sha256);
       const component = await this.stage('componentization', timings, async () => {
-        const embedded = await this.tool('wasm-tools', ['component', 'embed', 'command.wit.wasm', 'linked.wasm', '--encoding', 'utf8', '--output', 'embedded.wasm', '--world', 'wasi:cli/command@0.2.11'], { 'command.wit.wasm': wit, 'linked.wasm': linked }, ['embedded.wasm']);
+        const embedded = await this.tool('wasm-tools', ['component', 'embed', witName, 'linked.wasm', '--encoding', 'utf8', '--output', 'embedded.wasm', '--world', witWorld], { [witName]: wit, 'linked.wasm': linked }, ['embedded.wasm']);
         const packaged = await this.tool('wasm-tools', ['component', 'new', 'embedded.wasm', '--output', 'component.wasm'], embedded, ['component.wasm']);
         await this.tool('wasm-tools', ['validate', 'component.wasm', '--features', 'all'], packaged, []);
         return packaged['component.wasm'];
@@ -112,7 +114,7 @@ export class PlaygroundPipeline {
       if (!compilation.component) throw new Error('No compiled component');
       await this.initialize(); this.channels.get('guest')?.reset(); this.channels.delete('guest');
       const component = compilation.component.slice();
-      const result = await this.stage('run', timings, () => this.channel('guest').request({ operation: 'run', component }, [component.buffer], 60_000));
+      const result = await this.stage('run', timings, () => this.channel('guest').request({ operation: 'run', component, recipe: snapshot.recipeId }, [component.buffer], 60_000));
       for (const timing of result.timings ?? []) this.emit({ type: 'stage', stage: timing.stage, state: 'complete', milliseconds: timing.milliseconds });
       return { ...base, ...result, timings: [...timings, ...(result.timings ?? [])] };
     } catch (error) { return { ...base, success: false, cancelled: epoch !== this.epoch, stage: this.currentStage, error: String(error) }; }

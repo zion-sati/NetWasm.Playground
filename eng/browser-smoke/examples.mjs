@@ -33,5 +33,5 @@ try {
  if(errors.length)throw Error(errors.join('\n'));
  await page.screenshot({path:`${output}/examples.png`,fullPage:true});
  writeFileSync(`${output}/browser-test.json`,JSON.stringify({passed:true,browser:browser.version(),results,editedLinq:'5\n',errors},null,2));
- console.log('PASS: four visible source/recipe examples, desktop-equal artifacts, edit and recipe switching');
+ console.log('PASS: visible source/recipe examples, desktop-equal artifacts, edit and recipe switching');
 }finally{await browser.close()}
