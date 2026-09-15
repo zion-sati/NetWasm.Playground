@@ -37,9 +37,11 @@ linking, componentization, execution, or toolchain assets.
 Use `eng/upstream-sources.json`, the public NetWasm repositories and public
 NuGet.org/npm/upstream release artifacts. Do not depend on private NetWasm
 authoring repos, qualification repos, sibling output folders, local feeds or
-locally packed NuGet archives. The repository's `NuGet.Config` clears inherited
-feeds. Use a repo-isolated package cache, and a fresh cache for the first smoke
-test of an updated package closure so old local packages cannot satisfy restore.
+locally packed NuGet archives. Keep normal contributor NuGet configuration.
+For the initial baseline and package-update verification, use a temporary
+verification workspace with NuGet.org as its only feed, no fallback folders and
+a fresh package cache. Put that isolation in the verification setup, not a
+checked-in `NuGet.Config`; normal repeat builds can reuse verified packages.
 
 Building a browser toolchain from a pinned public source checkout is expected.
 That is distinct from consuming unpublished local NuGet packages. Put reusable
@@ -61,5 +63,6 @@ context reset, reconcile that checkpoint with Git and continue the active task.
 Do not repeat completed work or reopen settled decisions without new evidence.
 
 Keep large assets in ignored caches and release/deployment artifacts. Clean
-owned intermediates at slice boundaries. Inspect free disk space before large
-LLVM/.NET builds. Never delete another task's worktree or cache to make room.
+owned intermediates at slice boundaries, following the disk budget, ownership
+and retention rules in the delivery skill's “Disk and cleanup” section. Those
+rules are self-contained even without a globally installed hygiene skill.

@@ -1,6 +1,6 @@
 ---
 name: playground-delivery
-description: Deliver small NetWasm.Playground implementation slices, verify the changed browser behavior, and update the external live plan after committing and pushing.
+description: Deliver small NetWasm.Playground implementation slices, verify browser behavior, control build/cache disk growth, and update the external live plan after committing and pushing.
 ---
 
 # Playground delivery
@@ -44,10 +44,43 @@ hide a failed check or represent a mocked compiler as feasibility evidence.
 2. Commit with the configured Zion Sati identity and signature, and push the slice.
 3. Record the SHA, commands/results, artifact location and next action in the
    external plan. Mark unsupported assumptions explicitly.
-4. Remove owned disposable output and continue the authorized milestone.
+4. Apply the cleanup rules below, then continue the authorized milestone.
 
 A checkpoint is a short record of completed work. Do not create separate cadence
 audits, plan rewrite loops or handoff-only commits for every internal step.
 For a feasibility failure, capture one reproducible cause, try the cheapest
 plausible alternative and update the plan. Escalate a product tradeoff with
 concrete options if the browser-only MVP cannot proceed.
+
+## Disk and cleanup
+
+These rules apply to substantial builds, downloads, package staging and browser
+test artifacts. Small text edits need no storage audit. They are self-contained;
+the global `workspace-hygiene` skill may supply more detail when available.
+
+- Before LLVM/.NET AOT builds or large downloads, inspect filesystem free space
+  (`df -h`) and the actual output/cache sizes (`du -sh` on known paths). Estimate
+  peak build space, not just the final bundle. Use the free-space floor recorded
+  in the external plan; this workstation's floor is 100 GiB.
+- During long builds, sample free space every few minutes with a lightweight
+  monitor or checks between stages. Verify that the monitor produces real samples.
+  If the next operation would cross the floor, stop launching more work, clean
+  owned disposable output and report the remaining constraint.
+- Isolate each large run in a named ignored directory or `mktemp -d` directory.
+  Record its exact path, purpose and retention status in the external plan. Also
+  record owned containers, worktrees and background processes when used.
+- Once a slice passes, retain the input/toolchain manifest, concise test result
+  and useful final fixture. Remove its redundant extracted packages, temporary
+  restore caches, duplicate archives, failed build trees, verbose traces and
+  test output. Keep one reusable verified cache/toolchain where it saves costly
+  rebuilds; do not accumulate a new full copy for each slice or version bump.
+- Resolve exact cleanup targets and confirm ownership before deletion. Do not
+  clear all NuGet caches, run broad Docker prune commands, or delete another
+  task's worktree/cache. Unknown ownership means preserve it. Check that retained
+  evidence does not require files you are about to remove; cleanup alone does
+  not justify rebuilding or rerunning the full suite.
+- At a substantial slice boundary, clean those owned disposable outputs,
+  recheck free space and record the remaining large caches in the external plan.
+  Briefly report material deletions and whether they are recoverable. Stop only
+  your temporary monitors/processes when done; preserve processes the owner
+  requested to keep running.
