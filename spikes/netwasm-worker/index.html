@@ -1,0 +1,29 @@
+<!doctype html><title>NetWasm worker feasibility</title><textarea id="source" rows="8" cols="60" spellcheck="false">using System;
+
+Console.WriteLine(42);
+</textarea><button id="compile" disabled>Compile Wasm</button><pre id="status">Loading compiler worker</pre><script type="module">
+const worker = new Worker('./compiler-worker.mjs', {type:'module'});
+let nextId = 0; const pending = new Map();
+window.ready = new Promise((resolve,reject) => {
+ worker.onmessage = ({data}) => {
+  if(data.ready) { document.querySelector('#status').textContent='Compiler ready';document.querySelector('#compile').disabled=false;resolve(true); }
+  else if(data.fatal) {document.querySelector('#status').textContent=data.fatal;reject(new Error(data.fatal));}
+  else { const p = pending.get(data.id);pending.delete(data.id);data.error?p.reject(new Error(data.error)):p.resolve(data.result); }
+ };
+ worker.onerror = e => reject(new Error(e.message));
+});
+window.compile = source => new Promise((resolve,reject) => {const id=++nextId;pending.set(id,{resolve,reject});worker.postMessage({schemaVersion:1,id,recipe:"hello",source});});
+document.querySelector('#compile').onclick = async () => {
+ const button = document.querySelector('#compile');
+ button.disabled = true;
+ window.lastResult = null;
+ try {
+  const result = await window.compile(document.querySelector('#source').value);
+  window.lastResult = result;
+  document.querySelector('#status').textContent = result.success ? 'Wasm compilation succeeded' :
+   (result.diagnostics ?? []).map(d => `${d.code} ${d.path}:${d.line+1}:${d.column+1} ${d.message}`).join('\n') || result.error;
+ } catch(error) {
+  document.querySelector('#status').textContent = String(error);
+ } finally { button.disabled = false; }
+};
+</script>
