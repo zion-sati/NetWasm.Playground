@@ -100,9 +100,9 @@ preview, use `eng/browser-smoke/browsers.mjs` with `PLAYGROUND_URL` and
 Wasmtime without preopens.
 
 The bundle contains verified public notices and `notices/origins.json`, produced
-from a pinned catalog of source and package inputs. That file also records three
-generic license paths referenced but absent in the upstream source; resolve
-these distribution items before hosting. Keep historical bundles outside
+from a pinned catalog of source and package inputs, including the upstream
+MIT, BSD 2-Clause and BSD 3-Clause texts referenced by its license map.
+Keep historical bundles outside
 `public/toolchain/` so the static build includes the current version only.
 
 Built on [NetWasm](https://github.com/zion-sati/NetWasm), with examples using

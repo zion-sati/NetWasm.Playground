@@ -57,7 +57,7 @@ def main():
     parser.add_argument('--examples', type=Path, default=ROOT / '.cache/desktop-examples-20260916', help='Receipt-verified public desktop example inputs')
     parser.add_argument('--generated-json', type=Path, default=ROOT / '.cache/desktop-json-generated-20260916', help='Receipt-verified source-generated JSON example inputs')
     parser.add_argument('--tunit', type=Path, default=ROOT / '.cache/tunit-example-20260916/final', help='Receipt-verified public TUnit template inputs')
-    parser.add_argument('--notices', type=Path, default=ROOT / '.cache/browser-notice-stage-20260916/catalog-notices', help='Verified public notices and portable origins.json')
+    parser.add_argument('--notices', type=Path, default=ROOT / '.cache/browser-notice-correction-20260916/notices', help='Verified public notices and portable origins.json')
     parser.add_argument('--output', type=Path, default=ROOT / 'public/toolchain')
     parser.add_argument('--verify', type=Path, help='Verify an already staged version without rebuilding')
     args = parser.parse_args()
