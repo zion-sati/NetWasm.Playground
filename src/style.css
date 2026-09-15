@@ -20,3 +20,8 @@
   #stages li:before{color:#a7b3c3}
   #stages li[data-state=complete]:before{color:#80c9ac}
 }
+
+.compile-spinner{display:none;width:12px;height:12px;margin-right:7px;border:2px solid currentColor;border-right-color:transparent;border-radius:50%;vertical-align:-2px}
+.workbench[aria-busy=true] .compile-spinner{display:inline-block;animation:compile-spin .8s linear infinite}
+@keyframes compile-spin{to{transform:rotate(360deg)}}
+@media(prefers-reduced-motion:reduce){.workbench[aria-busy=true] .compile-spinner{animation:none}}

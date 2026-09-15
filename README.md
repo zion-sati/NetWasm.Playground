@@ -43,6 +43,11 @@ npm run typecheck
 PLAYGROUND_URL=http://127.0.0.1:5173/playground/ PLAYGROUND_EVIDENCE=.cache/ui-smoke node eng/browser-smoke/ui.mjs
 ```
 
+Compile and Run disable while a job is active; Stop remains available. A
+spinner and numbered status show the current operation across eight steps for
+Compile + Run, seven for Compile, or one for an unchanged component rerun.
+`eng/browser-smoke/progress.mjs` checks these states and Stop recovery.
+
 The smoke expects a running development server with the same base path and
 Playwright's Chromium installed. It exercises the actual compiler and guest.
 

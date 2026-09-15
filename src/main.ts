@@ -16,7 +16,7 @@ import { browserSupportMessage } from './browser-support';
 document.querySelector<HTMLDivElement>('#app')!.innerHTML = `
 <header><a class="brand" href="./">NetWasm <span>Playground</span></a><span class="badge">C# → WebAssembly</span></header>
 <main><section class="intro"><h1>Small code. Real WebAssembly.</h1><p>Compiled locally in your browser. Your source code never leaves this page.</p></section>
-<section class="workbench" aria-label="C# playground"><div class="toolbar"><label class="recipe">Example <select id="example" aria-label="Example"></select></label><div class="actions"><button id="compile">Compile</button><button id="run" class="primary">Run <span aria-hidden="true">▶</span></button><button id="stop" disabled>Stop</button><button id="download" disabled>Download</button></div></div>
+<section class="workbench" aria-label="C# playground"><div class="toolbar"><label class="recipe">Example <select id="example" aria-label="Example"></select></label><div class="actions"><button id="compile"><span class="compile-spinner" aria-hidden="true"></span>Compile</button><button id="run" class="primary">Run <span aria-hidden="true">▶</span></button><button id="stop" disabled>Stop</button><button id="download" disabled>Download</button></div></div>
 <div class="panes"><section class="source-pane"><div class="pane-heading"><h2 id="source-name">Program.cs</h2><span>C# · Release</span></div><div id="editor" aria-label="C# source editor"></div></section><section class="results-pane"><div class="pane-heading"><h2>Console</h2><span id="exit"></span></div><pre id="output" tabindex="0" aria-label="Program output"></pre><div class="diagnostic-heading"><h2>Diagnostics</h2><span id="diagnostic-count">0</span></div><div id="diagnostics" aria-label="Compiler diagnostics"><p class="empty">Compile to check your source.</p></div></section></div>
 <footer class="results"><div id="status" role="status" aria-live="polite">Ready</div><div id="size">No component yet</div></footer><div class="details"><ol id="stages" aria-label="Pipeline progress"></ol><div id="timings"></div><div id="assets"></div></div></section><p id="footnote" class="footnote">One file, no setup. Download the compiled WASI Preview 2 component to run with Wasmtime.</p><p class="footnote">Current Chromium and Firefox recommended. Safari support is experimental.</p></main>`;
 const el = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id)! as T;
@@ -39,6 +39,23 @@ let stopped = false;
 let unsupported: string | undefined;
 let pipeline: PlaygroundPipeline | undefined;
 const stages = new Map<string, HTMLLIElement>();
+const progressSteps: Record<string, number> = {
+  download: 1, 'compiler-initialize': 2,
+  compile: 3, roslyn: 3, generator: 3, netwasm: 3,
+  'linker-initialize': 4, 'tools-initialize': 4, link: 4, parse: 4,
+  merge: 5, prune: 5, optimize: 6, validate: 7, componentization: 7, run: 8,
+};
+const stageLabels: Record<string, string> = {
+  download: 'Loading toolchain manifest', 'compiler-initialize': 'Loading C# compiler',
+  compile: 'Compiling C#', roslyn: 'Checking C#', generator: 'Generating source', netwasm: 'Compiling WebAssembly',
+  'linker-initialize': 'Loading linker', 'tools-initialize': 'Loading WebAssembly tools',
+  link: 'Linking runtime', parse: 'Preparing runtime modules', merge: 'Combining modules',
+  prune: 'Removing unused exports', optimize: 'Optimizing WebAssembly',
+  validate: 'Validating WebAssembly', componentization: 'Packaging component', run: 'Running program',
+};
+let progressTotal = 8;
+let runOnly = false;
+
 const formatBytes = (bytes: number) => `${bytes.toLocaleString()} bytes`;
 const errorSummary = (error: unknown) => String(error).split('\n')[0].slice(0, 300);
 function invalidateDownload() { compilation = undefined; downloadButton.disabled = true; if (downloadUrl) URL.revokeObjectURL(downloadUrl); downloadUrl = undefined; el('size').textContent = 'No current component'; }
@@ -55,7 +72,7 @@ function onEvent(event: PipelineEvent) {
   if (!active || stopped || event.requestId !== active.requestId || event.revision !== revision) return;
   if (event.type === 'console') el('output').textContent += event.text;
   if (event.type === 'assets') el('assets').textContent = `Tool assets: ${formatBytes(event.transferBytes)} transfer cost · ${formatBytes(event.rawBytes)} uncompressed`;
-  if (event.type === 'stage') { let item = stages.get(event.stage); if (!item) { item = document.createElement('li'); item.textContent = event.stage; stages.set(event.stage, item); el('stages').append(item); } item.dataset.state = event.state; el('status').textContent = event.state === 'running' ? event.stage : `${event.stage} complete`; }
+  if (event.type === 'stage') { let item = stages.get(event.stage); if (!item) { item = document.createElement('li'); item.textContent = stageLabels[event.stage] ?? event.stage; stages.set(event.stage, item); el('stages').append(item); } item.dataset.state = event.state; const step = runOnly ? 1 : progressSteps[event.stage]; if (step && event.state === 'running') el('status').textContent = `Step ${step} of ${progressTotal} · ${stageLabels[event.stage] ?? event.stage}`; }
 }
 editor.onDidChangeModelContent(() => { revision++; invalidateDownload(); setDiagnostics([]); el('status').textContent = unsupported ?? (active ? 'Source changed · result pending for earlier revision' : 'Source changed'); });
 exampleSelect.onchange = () => {
@@ -73,6 +90,10 @@ exampleSelect.onchange = () => {
 function snapshot(): SourceSnapshot { return { requestId: ++nextRequest, revision, source: editor.getValue(), recipeId: exampleSelect.value }; }
 function request(run: boolean) { const job = { snapshot: snapshot(), run }; if (active) { queued = job; el('status').textContent = 'Latest request queued'; } else void execute(job); }
 async function execute(job: { snapshot: SourceSnapshot; run: boolean }) {
+  runOnly = job.run && !!compilation?.success && compilation.revision === job.snapshot.revision;
+  progressTotal = runOnly ? 1 : job.run ? 8 : 7;
+  compileButton.disabled = true; runButton.disabled = true;
+  document.querySelector('.workbench')!.setAttribute('aria-busy', 'true');
   active = job.snapshot; stopped = false; stopButton.disabled = false; stages.clear(); el('stages').replaceChildren(); el('output').textContent = ''; el('exit').textContent = ''; el('timings').textContent = ''; el('status').textContent = 'Starting';
   pipeline ??= new PlaygroundPipeline(onEvent);
   try {
@@ -90,7 +111,7 @@ async function execute(job: { snapshot: SourceSnapshot; run: boolean }) {
       if (!stopped && revision === job.snapshot.revision) { el('output').textContent = run.stdout + run.stderr; el('exit').textContent = run.exitCode === undefined ? '' : `Exit ${run.exitCode}`; showTimings([...result.timings, ...run.timings]); el('status').textContent = run.cancelled ? 'Stopped' : run.success ? 'Run complete' : run.error ? errorSummary(run.error) : 'Run failed'; if (job.snapshot.recipeId === 'tunit' && !run.cancelled && !run.error && run.exitCode !== undefined) { const report = formatTestReport(run.stdout); el('output').textContent = report.text + run.stderr; el('status').textContent = `Tests complete · ${report.passed} passed · ${report.failed} failed`; } }
     } else if (!stopped && result?.success && revision === job.snapshot.revision) el('status').textContent = 'Compilation complete';
   } catch (error) { if (!stopped && revision === job.snapshot.revision) el('status').textContent = errorSummary(error); }
-  finally { active = undefined; stopButton.disabled = true; const next = queued; queued = undefined; if (next) void execute(next); }
+  finally { active = undefined; stopButton.disabled = true; compileButton.disabled = !!unsupported; runButton.disabled = !!unsupported; document.querySelector('.workbench')!.setAttribute('aria-busy', 'false'); const next = queued; queued = undefined; if (next) void execute(next); }
 }
 unsupported = browserSupportMessage();
 if (unsupported) { compileButton.disabled = true; runButton.disabled = true; el('status').textContent = unsupported; }
