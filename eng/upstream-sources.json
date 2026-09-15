@@ -1,0 +1,24 @@
+{
+  "schemaVersion": 1,
+  "sources": {
+    "netwasm": {
+      "repository": "https://github.com/zion-sati/NetWasm",
+      "commit": "5fdc1dd7d9efa06f8e4bfc023a9340feb93a054c",
+      "tag": "v0.1.0",
+      "packageVersion": "0.1.0",
+      "toolchainManifest": "eng/toolchain.json"
+    },
+    "libraries": {
+      "repository": "https://github.com/zion-sati/NetWasm.Libraries",
+      "commit": "628cc17d25327d111950363494bd90ff3dcee2b7",
+      "tag": "v0.1.0",
+      "packageVersion": "0.1.0"
+    },
+    "tunit": {
+      "repository": "https://github.com/zion-sati/TUnit-NetWasm",
+      "commit": "b3aece2b3bf8885379ddcf6030d0f5dbfff0430a",
+      "tag": "netwasm-v0.1.0",
+      "packageVersion": "0.1.0"
+    }
+  }
+}
