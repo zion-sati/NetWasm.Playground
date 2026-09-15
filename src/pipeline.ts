@@ -70,7 +70,7 @@ export class PlaygroundPipeline {
     const result = { requestId: snapshot.requestId, revision: snapshot.revision, diagnostics: [], timings };
     let recycleCompiler = false;
     try {
-      if (!['hello', 'allocation', 'linq', 'json-dom', 'json-generated', 'tunit'].includes(snapshot.recipeId)) throw new Error('Unknown compilation recipe');
+      if (!['hello', 'allocation', 'linq', 'json-dom', 'json-generated', 'tunit', 'regex', 'di', 'hashing'].includes(snapshot.recipeId)) throw new Error('Unknown compilation recipe');
       if (snapshot.source.length > 65536 || new TextEncoder().encode(snapshot.source).byteLength > 65536) throw new Error('Source limit exceeded (64 KiB)');
       await this.stage('download', timings, () => this.initialize());
       await this.stage('compiler-initialize', timings, () => this.channel('compiler').request({ operation: 'initialize' }));

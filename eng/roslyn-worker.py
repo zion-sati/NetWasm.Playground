@@ -65,6 +65,17 @@ def verify(run):
                 len(invalid) != 4 or not all(item["rejected"] for item in invalid) or \
                 any(item["runtimeMemory"]["maximumPages"] != 4096 for item in compilations if item["success"]):
             raise RuntimeError("Configured guest memory and recovery evidence changed")
+    if (run / "di-test.json").exists():
+        di = json.loads((run / "di-test.json").read_text())
+        results = di["results"]
+        if not di["passed"] or [item["success"] for item in results] != [True, False, True] or \
+                not any(item["code"] == "NWDI002" for item in results[1]["diagnostics"]):
+            raise RuntimeError("Trusted DI generator failure and recovery evidence changed")
+        for index in (0, 2):
+            for field, suffix in (("pe", "dll"), ("application", "wasm")):
+                if fingerprint(run / f"di-{index}.{suffix}") != {
+                        "bytes": results[index][field + "Bytes"], "sha256": results[index][field + "Sha256"]}:
+                    raise RuntimeError("DI output does not match browser result")
     print("PASS: browser fixture hashes and managed output match", flush=True)
 
 
@@ -76,9 +87,9 @@ def camel_case(value):
     return value
 
 
-def prepare_trusted_inputs(json_run, tunit_run, run):
+def prepare_trusted_inputs(json_run, tunit_run, run, di_run=None):
     """Snapshot only approved package executables and separately identify guest metadata."""
-    for directory in (json_run, tunit_run):
+    for directory in (json_run, tunit_run, *([di_run] if di_run else [])):
         receipt = json.loads((directory / "receipt.json").read_text())
         for relative, expected in receipt["files"].items():
             if fingerprint(directory / relative) != expected:
@@ -100,6 +111,9 @@ def prepare_trusted_inputs(json_run, tunit_run, run):
         "System.Text.Json.SourceGeneration": package_member(json_run, "packages/netwasm.system.text.json/0.1.0/analyzers/dotnet/cs/System.Text.Json.SourceGeneration.dll"),
         "TUnit.Core.SourceGenerator": package_member(tunit_run, tunit_recipe["trustedGenerator"]),
     }
+    if di_run:
+        generators["NetWasm.Microsoft.Extensions.DependencyInjection.Generator"] = package_member(di_run,
+            "packages/netwasm.microsoft.extensions.dependencyinjection/0.1.0/analyzers/dotnet/cs/NetWasm.Microsoft.Extensions.DependencyInjection.Generator.dll")
     approved = run / "approved-generators"
     approved.mkdir()
     for name, path in list(generators.items()):
@@ -118,8 +132,15 @@ def prepare_trusted_inputs(json_run, tunit_run, run):
         "json": {"source": (json_run / "json-generated/Program.cs").read_text(), "support": json_recipe["support"], "references": json_libraries, "implementations": json_libraries},
         "tunit": {"source": (tunit_run / "cases/template/Tests.cs").read_text(), "secondSource": (tunit_run / "cases/second-test/Tests.cs").read_text(), "support": [{"path": "obj/Release/netwasm0.1/" + path.name, "text": path.read_text()} for path in sorted((tunit_run / "cases/template/obj").glob("*.cs"))], "references": tunit_references, "implementations": tunit_implementations},
     }}
+    receipts = {"json": fingerprint(json_run / "receipt.json"), "tunit": fingerprint(tunit_run / "receipt.json")}
+    if di_run:
+        di_recipe = json.loads((di_run / "di/recipe-inputs.json").read_text())
+        di_libraries = {name: package_member(di_run, relative) for name, relative in di_recipe["libraries"].items()}
+        result["recipes"]["di"] = {"source": (di_run / "di/Program.cs").read_text(), "support": di_recipe["support"],
+            "references": di_libraries, "implementations": di_libraries}
+        receipts["di"] = fingerprint(di_run / "receipt.json")
     (run / "trusted-inputs.json").write_text(json.dumps({
-        "receipts": {"json": fingerprint(json_run / "receipt.json"), "tunit": fingerprint(tunit_run / "receipt.json")},
+        "receipts": receipts,
         "generatorArchivesMatch": True, "targetMetadataArchivesMatch": True,
         "generators": {name: fingerprint(path) for name, path in generators.items()}, "program": fingerprint(program),
         "recipes": {name: {"references": {key: fingerprint(path) for key, path in recipe["references"].items()}, "implementations": {key: fingerprint(path) for key, path in recipe["implementations"].items()}} for name, recipe in result["recipes"].items()},
@@ -301,6 +322,7 @@ def main():
                         help="Published public NetWasm checkout for the real compiler probe")
     parser.add_argument("--json-example", type=Path, help="Verified desktop JSON source-generation recipe")
     parser.add_argument("--tunit-example", type=Path, help="Verified ordinary dotnet test template comparison")
+    parser.add_argument("--di-example", type=Path, help="Verified desktop DI recipe and its packaged trusted generator")
     parser.add_argument("--reuse-verified-host", type=Path,
                         help="Reuse a retained, receipt-verified public host package cache and Playwright installation")
     parser.add_argument("--skip-trusted-probes", action="store_true",
@@ -343,7 +365,8 @@ def main():
     if args.compiler_source:
         if not args.json_example or not args.tunit_example:
             parser.error("--compiler-source requires --json-example and --tunit-example verified inputs")
-        trusted = prepare_trusted_inputs(args.json_example.resolve(), args.tunit_example.resolve(), run)
+        trusted = prepare_trusted_inputs(args.json_example.resolve(), args.tunit_example.resolve(), run,
+                                        args.di_example.resolve() if args.di_example else None)
     shutil.copytree(fixture, app)
     if trusted:
         project = ET.parse(app / "CompilerProbe.csproj")
@@ -352,7 +375,12 @@ def main():
             reference_item = ET.SubElement(group, "Reference", Include=name)
             ET.SubElement(reference_item, "HintPath").text = str(path)
         project.write(app / "CompilerProbe.csproj", encoding="unicode")
-        (app / "TrustedGeneratorAssets.cs").write_text("namespace NetWasm.Playground.CompilerProbe;\ninternal static class TrustedGeneratorAssets { internal const string TUnitProgram = " + json.dumps(trusted["program"]) + "; }\n")
+        di_available = "di" in trusted["recipes"]
+        di_factory = "new global::NetWasm.Microsoft.Extensions.DependencyInjection.Generator.NetWasmDependencyInjectionGenerator()" if di_available else \
+            'throw new global::System.InvalidOperationException("Trusted DI generator is not configured.")'
+        (app / "TrustedGeneratorAssets.cs").write_text("namespace NetWasm.Playground.CompilerProbe;\ninternal static class TrustedGeneratorAssets { internal const string TUnitProgram = " + json.dumps(trusted["program"]) + ";\n" +
+            "internal const bool DependencyInjectionAvailable = " + str(di_available).lower() + ";\n" +
+            "internal static global::Microsoft.CodeAnalysis.IIncrementalGenerator CreateDependencyInjectionGenerator() => " + di_factory + "; }\n")
     (app / "global.json").write_text(json.dumps({"sdk": {
         "version": receipt["toolchain"]["dotnetSdk"], "rollForward": "disable"}}, indent=2))
     package_cache = reused_host / "packages" if reused_host else run / "packages"

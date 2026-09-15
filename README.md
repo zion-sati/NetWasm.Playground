@@ -8,7 +8,8 @@ real C# programs in browser workers, then runs the downloaded component in a
 separate guest worker.
 
 Editable examples cover Hello World, allocation and guest GC, LINQ, read-only
-JSON parsing, source-generated JSON serialization, and TUnit tests.
+JSON parsing, source-generated JSON serialization, regular expressions,
+constructor-based dependency injection, CRC32 hashing, and TUnit tests.
 
 ## Local development
 
@@ -17,7 +18,7 @@ Use the pinned Node version in the public NetWasm toolchain manifest.
 ```sh
 npm ci
 python3 eng/browser-notices.py --packages <verified-baseline>/packages --packages <verified-generator-host>/packages --packages <verified-tunit-template>/packages --cache <notice-cache> --output <verified-notices>
-python3 eng/prepare-web.py --baseline <verified-baseline> --compiler <verified-compiler-host> --tools <verified-tools> --lld <verified-browser-lld> --component <verified-component-probe> --examples <verified-desktop-examples> --generated-json <verified-generated-json> --tunit <verified-tunit-template> --source <public-netwasm-checkout> --notices <verified-notices>
+python3 eng/prepare-web.py --baseline <verified-baseline> --compiler <verified-compiler-host> --tools <verified-tools> --lld <verified-browser-lld> --component <verified-component-probe> --examples <verified-desktop-examples> --generated-json <verified-generated-json> --additional-examples <verified-extra-examples> --tunit <verified-tunit-template> --source <public-netwasm-checkout> --notices <verified-notices>
 npm run dev
 ```
 
@@ -52,7 +53,10 @@ The smoke expects a running development server with the same base path and
 Playwright's Chromium installed. It exercises the actual compiler and guest.
 
 `eng/desktop-examples.py` creates the example inputs using a fresh NuGet.org-only
-workspace; `--recipe` selects a particular example. `eng/tunit-example.py` checks
+workspace; `--recipe` selects a particular example. The Regex, DI and hashing
+recipes use their public NetWasm library packages. The compiler host includes
+the package-owned DI generator through `eng/roslyn-worker.py --di-example`
+with that verified workspace; it closes constructor activation at compile time. `eng/tunit-example.py` checks
 the public TUnit template using ordinary `dotnet test`.
 `eng/browser-smoke/examples.mjs` checks the ordinary examples and compares
 their outputs with those desktop builds; set `PLAYGROUND_DESKTOP_EXAMPLES` to
@@ -86,8 +90,10 @@ compiler-only check while retaining verification of generator inputs.
 | Completed compiler job recycling | At least 512 MiB retained linear memory |
 
 Guest imports are explicit; environment and arguments are empty by default.
-Filesystem, sockets and arbitrary JavaScript imports are excluded. TUnit alone
-receives the clock/poll/reactor capabilities needed by its asynchronous host.
+Filesystem, sockets and arbitrary JavaScript imports are excluded. Ordinary
+programs can read the monotonic clock for elapsed-time and Regex timeout checks.
+TUnit alone receives clock subscriptions, polling and reactor capabilities
+needed by its asynchronous host.
 Workers inherit the page CSP and are terminated on Stop or timeout.
 
 Trusted compiler/tool binaries have finite linear-memory maxima: .NET 2 GiB,

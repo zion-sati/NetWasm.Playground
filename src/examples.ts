@@ -86,6 +86,67 @@ public partial class MessageJsonContext : JsonSerializerContext { }
 `,
   },
   {
+    id: 'regex',
+    name: 'Regular expressions',
+    source: `using System;
+using System.Text.RegularExpressions;
+
+var pattern = new Regex(@"(?<name>[A-Za-z]+):(?<score>[0-9]+)");
+string input = "Ada:42, Grace:99";
+
+foreach (Match match in pattern.Matches(input))
+{
+    Console.WriteLine($"{match.Groups["name"].Value}: {match.Groups["score"].Value}");
+}
+
+Console.WriteLine(pattern.Replace(input, "\${name} scored \${score}"));
+`,
+  },
+  {
+    id: 'di',
+    name: 'Dependency injection',
+    source: `using System;
+using Microsoft.Extensions.DependencyInjection;
+
+var services = new ServiceCollection();
+services.AddSingleton<IGreeting, Greeting>();
+services.AddTransient<Greeter>();
+
+using var provider = services.BuildServiceProvider();
+var greeter = provider.GetRequiredService<Greeter>();
+greeter.SayHello("Ada");
+
+public interface IGreeting
+{
+    string Format(string name);
+}
+
+public sealed class Greeting : IGreeting
+{
+    public string Format(string name) => $"Hello, {name}!";
+}
+
+public sealed class Greeter
+{
+    private readonly IGreeting greeting;
+    public Greeter(IGreeting greeting) => this.greeting = greeting;
+    public void SayHello(string name) => Console.WriteLine(greeting.Format(name));
+}
+`,
+  },
+  {
+    id: 'hashing',
+    name: 'CRC32 hashing',
+    source: `using System;
+using System.IO.Hashing;
+using System.Text;
+
+byte[] data = Encoding.UTF8.GetBytes("123456789");
+uint checksum = Crc32.HashToUInt32(data);
+Console.WriteLine($"CRC32: {checksum:X8}");
+`,
+  },
+  {
     id: 'tunit',
     name: 'TUnit tests',
     source: `using System.Threading.Tasks;

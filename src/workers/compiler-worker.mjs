@@ -66,7 +66,7 @@ async function initialize() {
 serveWorker(async (data, emit) => {
   report = emit;
   if (data.operation !== 'compile' && data.operation !== 'prune' && data.operation !== 'initialize') throw Error('Unsupported compiler operation');
-  if (data.operation === 'compile' && (!['hello', 'allocation', 'linq', 'json-dom', 'json-generated', 'tunit'].includes(data.recipe) || typeof data.source !== 'string' || data.source.length > 65536 || new TextEncoder().encode(data.source).length > 65536)) throw Error('Invalid compiler source or recipe');
+  if (data.operation === 'compile' && (!['hello', 'allocation', 'linq', 'json-dom', 'json-generated', 'tunit', 'regex', 'di', 'hashing'].includes(data.recipe) || typeof data.source !== 'string' || data.source.length > 65536 || new TextEncoder().encode(data.source).length > 65536)) throw Error('Invalid compiler source or recipe');
   const module = data.operation === 'prune' ? (() => {
     if (!(data.module instanceof Uint8Array) || data.module.length > 4 * 1048576 || typeof data.prefix !== 'string' || data.prefix.length > 255) throw Error('Invalid export pruning request');
     return data.module.slice();
@@ -79,9 +79,9 @@ serveWorker(async (data, emit) => {
   const recipeCompilerInputs = inputs.slice();
   if (supportJson !== undefined) recipeCompilerInputs[1] = supportJson;
   if (typeof program.CompileRecipe !== 'function' && data.recipe !== 'hello') throw Error('Rebuild the compiler host for library recipes');
-  if (['json-generated', 'tunit'].includes(data.recipe) && typeof program.CompileGeneratedRecipe !== 'function') throw Error('Rebuild the compiler host for source generation');
-  const result = JSON.parse(['json-generated', 'tunit'].includes(data.recipe)
-    ? program.CompileGeneratedRecipe(data.source, ...recipeCompilerInputs, ...additional, data.recipe === 'tunit' ? 'tunit' : 'json', false)
+  if (['json-generated', 'tunit', 'di'].includes(data.recipe) && typeof program.CompileGeneratedRecipe !== 'function') throw Error('Rebuild the compiler host for source generation');
+  const result = JSON.parse(['json-generated', 'tunit', 'di'].includes(data.recipe)
+    ? program.CompileGeneratedRecipe(data.source, ...recipeCompilerInputs, ...additional, data.recipe === 'tunit' ? 'tunit' : data.recipe === 'di' ? 'di' : 'json', false)
     : typeof program.CompileRecipe === 'function' ? program.CompileRecipe(data.source, ...recipeCompilerInputs, ...additional) : program.Compile(data.source, ...recipeCompilerInputs));
   if (typeof result.application === 'string') result.application = fromBase64(result.application);
   if (typeof result.pe === 'string') result.pe = fromBase64(result.pe);

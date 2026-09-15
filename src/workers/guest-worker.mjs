@@ -2,8 +2,8 @@ import { checkGuestMemory } from './guest-memory.mjs';
 import { createAssetLoader, serveWorker, digest, errorText } from './asset-loader.mjs';
 
 const allowedImports = ['wasi:cli/environment', 'wasi:cli/exit', 'wasi:cli/stderr',
-  'wasi:cli/stdout', 'wasi:io/error', 'wasi:io/streams'];
-const processImports = [...allowedImports, 'wasi:clocks/monotonic-clock',
+  'wasi:cli/stdout', 'wasi:io/error', 'wasi:io/streams', 'wasi:clocks/monotonic-clock'];
+const processImports = [...allowedImports,
   'wasi:io/poll', 'netwasm:runtime/reactor-host'];
 
 serveWorker(async (data, report) => {
@@ -56,9 +56,9 @@ serveWorker(async (data, report) => {
     const verified = await Promise.allSettled(jcoAssets.map(name => loader.load(name, { javascript: true })));
     const failed = verified.find(result => result.status === 'rejected');
     if (failed) throw failed.reason;
-    const [jco, cliModule, io] = await Promise.all([
+    const [jco, cliModule, io, clockModule] = await Promise.all([
       import(loader.url('jco/browser.js')), import(loader.url('jco/preview2/cli.js')),
-      import(loader.url('jco/preview2/io.js')),
+      import(loader.url('jco/preview2/io.js')), import(loader.url('jco/preview2/clocks.js')),
     ]);
     const generated = await jco.generate(component, { name: 'guest', instantiation: { tag: 'async' },
       noTypescript: true, noNodejsCompat: true, base64Cutoff: 0, bindgenEnableWasmExnref: true });
@@ -81,7 +81,10 @@ serveWorker(async (data, report) => {
     const imports = { 'wasi:cli/environment': cli.environment, 'wasi:cli/exit': cli.exit,
       'wasi:cli/stderr': { getStderr: () => io.outputStreamCreate(capture('stderr')) },
       'wasi:cli/stdout': { getStdout: () => io.outputStreamCreate(capture('stdout')) },
-      'wasi:io/error': io.error, 'wasi:io/streams': io.streams };
+      'wasi:io/error': io.error, 'wasi:io/streams': io.streams,
+      // Ordinary programs can read elapsed time; subscriptions belong to the managed host.
+      'wasi:clocks/monotonic-clock': Object.freeze({
+        now: clockModule.monotonicClock.now, resolution: clockModule.monotonicClock.resolution }) };
     url = URL.createObjectURL(new Blob([files['guest.js']], { type: 'text/javascript' }));
     const main = await import(url);
     const loadCoreModule = async name => {

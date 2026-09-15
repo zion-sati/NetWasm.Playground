@@ -48,7 +48,7 @@ def verify_staged(folder):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--baseline', type=Path, default=ROOT / '.cache/desktop-baseline-verified-20260915-d')
-    parser.add_argument('--compiler', type=Path, default=ROOT / '.cache/phase6-compiler-host-20260916')
+    parser.add_argument('--compiler', type=Path, default=ROOT / '.cache/phase6-di-compiler-host-20260916')
     parser.add_argument('--tools', type=Path, default=ROOT / '.cache/browser-tools-probe-20260915')
     parser.add_argument('--lld', type=Path, default=ROOT / '.cache/browser-lld-20260915')
     parser.add_argument('--component', type=Path, default=ROOT / '.cache/browser-component-20260916/final')
@@ -57,8 +57,9 @@ def main():
     parser.add_argument('--examples', type=Path, default=ROOT / '.cache/desktop-examples-20260916', help='Receipt-verified public desktop example inputs')
     parser.add_argument('--generated-json', type=Path, default=ROOT / '.cache/desktop-json-generated-20260916', help='Receipt-verified source-generated JSON example inputs')
     parser.add_argument('--tunit', type=Path, default=ROOT / '.cache/tunit-example-20260916/final', help='Receipt-verified public TUnit template inputs')
-    parser.add_argument('--notices', type=Path, default=ROOT / '.cache/browser-notice-correction-20260916/notices', help='Verified public notices and portable origins.json')
+    parser.add_argument('--notices', type=Path, default=ROOT / '.cache/extra-examples-notices-20260916/notices', help='Verified public notices and portable origins.json')
     parser.add_argument('--output', type=Path, default=ROOT / 'public/toolchain')
+    parser.add_argument('--additional-examples', type=Path, action='append', help='Additional receipt-verified public example inputs')
     parser.add_argument('--verify', type=Path, help='Verify an already staged version without rebuilding')
     args = parser.parse_args()
     if args.verify:
@@ -68,7 +69,8 @@ def main():
     subprocess.run(['python3', str(ROOT / 'eng/desktop-baseline.py'), str(args.baseline), '--verify'], check=True)
     for folder in [args.compiler, args.tools, args.component]:
         verify_receipt(folder)
-    example_folders = [folder for folder in [args.examples, args.generated_json] if folder]
+    additional_examples = args.additional_examples if args.additional_examples is not None else [ROOT / '.cache/desktop-extra-examples-20260916']
+    example_folders = [folder for folder in [args.examples, args.generated_json, *additional_examples] if folder]
     for folder in example_folders:
         verify_receipt(folder)
     if args.tunit:

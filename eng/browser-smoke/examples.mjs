@@ -17,10 +17,11 @@ try {
   const result=await page.evaluate(()=>({stdout:document.querySelector('#output').textContent,status:document.querySelector('#status').textContent,diagnostics:document.querySelector('#diagnostics').textContent,timings:document.querySelector('#timings').textContent,assets:document.querySelector('#assets').textContent,size:document.querySelector('#size').textContent}));
   result.id=example.id;results.push(result);writeFileSync(`${output}/partial.json`,JSON.stringify({results,errors},null,2));
   const stdoutValid=example.id==='allocation'?result.stdout.startsWith('Survivor: 42\nGuest collections: ')&&Number(result.stdout.trim().split(': ').at(-1))>=1:result.stdout===example.stdout;
-  if(result.status!=='Run complete'||!stdoutValid)throw Error(JSON.stringify(result));
   const download=page.waitForEvent('download');await page.locator('#download').click();await(await download).saveAs(`${output}/${example.id}.wasm`);
   const bytes=readFileSync(`${output}/${example.id}.wasm`),sha256=createHash('sha256').update(bytes).digest('hex');
   result.component={bytes:bytes.length,sha256};
+  writeFileSync(`${output}/partial.json`,JSON.stringify({results,errors},null,2));
+  if(result.status!=='Run complete'||!stdoutValid)throw Error(JSON.stringify(result));
   if(process.env.PLAYGROUND_COMPARE_DESKTOP_BYTES === '1' && sha256!==example.component.sha256)throw Error(`${example.id} component differs from public desktop build`);
   console.log(`PASS: browser ${example.id} ${bytes.length} bytes`);
  }

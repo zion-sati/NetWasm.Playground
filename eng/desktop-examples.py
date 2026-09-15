@@ -10,7 +10,7 @@ import subprocess
 from xml.sax.saxutils import escape
 
 ROOT = Path(__file__).resolve().parents[1]
-PACKAGES = {'hello': [], 'allocation': [], 'linq': ['NetWasm.System.Linq'], 'json-dom': ['NetWasm.System.Text.Json'], 'json-generated': ['NetWasm.System.Text.Json']}
+PACKAGES = {'hello': [], 'allocation': [], 'linq': ['NetWasm.System.Linq'], 'json-dom': ['NetWasm.System.Text.Json'], 'json-generated': ['NetWasm.System.Text.Json'], 'regex': ['NetWasm.System.Text.RegularExpressions'], 'di': ['NetWasm.Microsoft.Extensions.DependencyInjection'], 'hashing': ['NetWasm.System.IO.Hashing']}
 def fingerprint(path):
     return {'bytes': path.stat().st_size, 'sha256': hashlib.sha256(path.read_bytes()).hexdigest()}
 def main():
@@ -60,7 +60,7 @@ def main():
         if set(assets['project']['restore']['sources'])!={'https://api.nuget.org/v3/index.json'} or {str(Path(p).resolve()) for p in assets['packageFolders']}!={str(run/'packages')}: raise RuntimeError('Non-public restore source/cache')
         execute(['dotnet','publish','-c','Release','--no-restore','-o',str(app/'publish'),'-p:CustomAfterMicrosoftCommonTargets='+str(app/'linker.targets')],'publish')
         stdout=execute(['wasmtime',str(app/'publish/NetWasmApp.wasm')],'run')
-        expected={'hello':'42\n','linq':'Even sum: 120\n','json-dom':'Name: Ada\nAge: 29\nTags: 2\n','json-generated':'{"Name":"Ada","Score":42}\n'}
+        expected={'regex':'Ada: 42\nGrace: 99\nAda scored 42, Grace scored 99\n','di':'Hello, Ada!\n','hashing':'CRC32: CBF43926\n','hello':'42\n','linq':'Even sum: 120\n','json-dom':'Name: Ada\nAge: 29\nTags: 2\n','json-generated':'{"Name":"Ada","Score":42}\n'}
         if recipe=='allocation':
             if not stdout.startswith('Survivor: 42\nGuest collections: ') or int(stdout.strip().split(': ')[-1])<1: raise RuntimeError('Guest GC output mismatch')
         elif stdout!=expected[recipe]: raise RuntimeError('Example output mismatch')

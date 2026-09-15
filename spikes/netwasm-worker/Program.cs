@@ -81,7 +81,8 @@ public static partial class Program
         double generatorMilliseconds = 0;
         try
         {
-            if (trustedRecipe is not (null or "json" or "tunit"))
+            if (trustedRecipe is not (null or "json" or "tunit" or "di") ||
+                (trustedRecipe == "di" && !TrustedGeneratorAssets.DependencyInjectionAvailable))
                 return JsonSerializer.Serialize(new { schemaVersion = 1, success = false, stage = "request", code = "unsupported-generator-recipe", recoverable = true, diagnostics = Array.Empty<object>() });
             var tunit = trustedRecipe == "tunit";
             Stage("roslyn");
@@ -105,9 +106,12 @@ public static partial class Program
             {
                 Stage("generator");
                 var generatorStarted = Stopwatch.GetTimestamp();
-                IIncrementalGenerator[] generators = tunit
-                    ? [new TestMetadataGenerator(), new HookMetadataGenerator(), new AotConverterGenerator(), new PropertyInjectionSourceGenerator()]
-                    : [new JsonSourceGenerator()];
+                IIncrementalGenerator[] generators = trustedRecipe switch
+                {
+                    "tunit" => [new TestMetadataGenerator(), new HookMetadataGenerator(), new AotConverterGenerator(), new PropertyInjectionSourceGenerator()],
+                    "di" => [TrustedGeneratorAssets.CreateDependencyInjectionGenerator()],
+                    _ => [new JsonSourceGenerator()],
+                };
                 GeneratorDriver driver = CSharpGeneratorDriver.Create(generators.Select(generator => generator.AsSourceGenerator()),
                     parseOptions: parse, optionsProvider: new TrustedOptionsProvider(tunit));
                 driver = driver.RunGeneratorsAndUpdateCompilation(compilation, out generatedCompilation, out generatorDiagnostics);
