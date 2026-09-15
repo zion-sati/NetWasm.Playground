@@ -22,7 +22,38 @@ justifies more. Start feasibility work with a tiny page and worker; add Monaco
 after the compiler/linker/run path works. Prefer existing NetWasm contracts and
 published tools. Do not copy the private compiler project's process overhead.
 
-## Verify in proportion to the change
+## Models, delegation and review checkpoints
+
+Default main thread: `gpt-5.6-sol`, reasoning `low`. It implements ordinary
+slices, integrates changes and owns the external plan. This routing is an
+engineering recommendation for this workload, not a measured model benchmark.
+
+Ask a `gpt-6-astra` / `high` subagent for a focused independent review at three
+checkpoints: the proven compiler/request contract before the large toolchain
+build; the first real compile/run/download slice; and the guest isolation and
+failure-recovery boundary before launch. The external plan specifies evidence
+for each. Reviewers read the actual diff, public source contracts and test
+results. They report concrete correctness/capability defects or missing evidence,
+not speculative abstractions or demands for blanket coverage.
+
+Keep routine work on the main thread. Delegate a bounded compiler/AOT, LLD,
+Binaryen, generator or host-integration blocker to Sol/high when it needs deeper
+investigation. Terra/high (`gpt-5.6-terra`, reasoning `high`) is an optional worker
+for independent UI, example or test tasks with settled interfaces. Do not split
+tightly coupled work just to use more models. If delegation is unavailable,
+continue routine work and mark the independent review pending explicitly.
+
+Use at most two subagents and one expensive LLVM/.NET AOT build at a time.
+Give each implementation worker a disjoint file scope or isolated owned worktree,
+the pinned inputs, expected behavior and relevant checks. Record owned worktrees
+and processes in the external plan. Review agents are read-only. Implementation
+workers return their diff/commit and evidence; the main thread reviews, integrates,
+signs and pushes the slice. Clean only those owned worktrees after integration.
+
+Do not repeat a completed review after compaction or for unrelated text/version
+edits. Reopen only the changed boundary when new evidence or code requires it.
+
+## Verification scope
 
 | Change | Useful verification |
 | --- | --- |

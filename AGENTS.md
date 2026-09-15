@@ -20,6 +20,10 @@ linking, componentization, execution, or toolchain assets.
 - The owner authorizes implementation, focused verification, signed commits and
   pushes to this repo after each completed slice. Do not stop to request another
   approval for those routine actions. Work on `main` unless isolation is useful.
+- Model routing and delegation are authorized: use Sol/low for normal execution,
+  Astra/high for the three technical review checkpoints in the external plan, and
+  bounded implementation delegation when it helps. Follow the delivery skill's
+  model/review rules; the owner need not switch the main-thread model each phase.
 - Author and committer: `Zion Sati`,
   `283163728+zion-sati@users.noreply.github.com`. Use the locally configured
   signing key. Never commit a private key, token, personal identity or absolute
