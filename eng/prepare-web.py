@@ -48,12 +48,13 @@ def verify_staged(folder):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--baseline', type=Path, default=ROOT / '.cache/desktop-baseline-verified-20260915-d')
-    parser.add_argument('--compiler', type=Path, default=ROOT / '.cache/netwasm-worker-ui-host-20260916')
+    parser.add_argument('--compiler', type=Path, default=ROOT / '.cache/netwasm-worker-examples-host-20260916')
     parser.add_argument('--tools', type=Path, default=ROOT / '.cache/browser-tools-probe-20260915')
     parser.add_argument('--lld', type=Path, default=ROOT / '.cache/browser-lld-20260915')
     parser.add_argument('--component', type=Path, default=ROOT / '.cache/browser-component-20260916/final')
     parser.add_argument('--source', type=Path, default=ROOT / '.cache/public-netwasm')
     parser.add_argument('--workers', type=Path, default=ROOT / 'src/workers')
+    parser.add_argument('--examples', type=Path, default=ROOT / '.cache/desktop-examples-20260916', help='Receipt-verified public desktop example inputs')
     parser.add_argument('--output', type=Path, default=ROOT / 'public/toolchain')
     parser.add_argument('--verify', type=Path, help='Verify an already staged version without rebuilding')
     args = parser.parse_args()
@@ -63,6 +64,8 @@ def main():
     subprocess.run(['python3', str(ROOT / 'eng/desktop-baseline.py'), str(args.baseline), '--verify'], check=True)
     for folder in [args.compiler, args.tools, args.component]:
         verify_receipt(folder)
+    if args.examples:
+        verify_receipt(args.examples)
     build = json.loads((args.lld / 'build-receipt.json').read_text())
     baseline_pins = json.loads((args.baseline / 'receipt.json').read_text())['toolchain']
     for key, baseline_key in [('llvm', 'llvmLld'), ('emscripten', 'emscripten'), ('node', 'node')]:
@@ -99,6 +102,24 @@ def main():
             if path.is_file():
                 copy(path, Path('runtime') / path.relative_to(args.component / 'site/runtime'))
         copy(args.component / 'site/command.wit.wasm', 'command.wit.wasm')
+        if args.examples:
+            example_pins = json.loads((args.examples / 'receipt.json').read_text())['pins']['sources']
+            if example_pins['libraries'] != pins['libraries'] or example_pins['netwasm']['commit'] != pins['netwasm']['commit']:
+                raise ValueError('Example package/source pins do not match the toolchain')
+            for path in sorted(args.examples.glob('*/recipe-inputs.json')):
+                recipe = json.loads(path.read_text())
+                references, implementations = {}, {}
+                for name, relative in recipe['libraries'].items():
+                    for role, destination in [('references', references), ('implementations', implementations)]:
+                        asset = f'{role}/{name}'
+                        if (stage / asset).exists() and fingerprint(stage / asset) != fingerprint(args.examples / relative):
+                            raise ValueError(f'Conflicting recipe assembly: {name}')
+                        copy(args.examples / relative, asset)
+                        destination[name] = asset
+                (stage / 'recipes').mkdir(exist_ok=True)
+                (stage / 'recipes' / f"{recipe['id']}.json").write_bytes(encoded({
+                    'schemaVersion': 1, 'id': recipe['id'], 'references': references, 'implementations': implementations,
+                    'packages': recipe['packages'], 'version': recipe['version']}))
         commit = pins['netwasm']['browserToolHostCommit']
         for name in ['binaryen-host.mjs', 'tool-inputs.mjs', 'wasm-tools-host.mjs']:
             content = subprocess.check_output(['git', '-C', str(args.source), 'show', f'{commit}:src/NetWasm.Toolchain/Browser/Tools/{name}'])

@@ -7,13 +7,16 @@ The project is in development. The local editor compiles, links and packages
 real C# programs in browser workers, then runs the downloaded component in a
 separate guest worker.
 
+Editable examples cover Hello World, allocation and guest GC, LINQ, and
+read-only JSON parsing.
+
 ## Local development
 
 Use the pinned Node version in the public NetWasm toolchain manifest.
 
 ```sh
 npm ci
-python3 eng/prepare-web.py --baseline <verified-baseline> --compiler <verified-compiler-host> --tools <verified-tools> --lld <verified-browser-lld> --component <verified-component-probe> --source <public-netwasm-checkout>
+python3 eng/prepare-web.py --baseline <verified-baseline> --compiler <verified-compiler-host> --tools <verified-tools> --lld <verified-browser-lld> --component <verified-component-probe> --examples <verified-desktop-examples> --source <public-netwasm-checkout>
 npm run dev
 ```
 
@@ -32,6 +35,11 @@ PLAYGROUND_URL=http://127.0.0.1:5173/playground/ PLAYGROUND_EVIDENCE=.cache/ui-s
 
 The smoke expects a running development server with the same base path and
 Playwright's Chromium installed. It exercises the actual compiler and guest.
+
+`eng/desktop-examples.py` creates the example inputs using a fresh NuGet.org-only
+workspace. `eng/browser-smoke/examples.mjs` checks all four examples and compares
+their downloads with those desktop builds; set `PLAYGROUND_DESKTOP_EXAMPLES` to
+the verified workspace alongside the smoke environment variables above.
 
 Built on [NetWasm](https://github.com/zion-sati/NetWasm), with examples using
 [NetWasm libraries](https://github.com/zion-sati/NetWasm.Libraries) and

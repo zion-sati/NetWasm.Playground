@@ -41,6 +41,11 @@ public static partial class Program
 
     [JSExport]
     public static string Compile(string source, string reference, string supportJson, string implementation, string witJson, string witBytes, string runtimeManifest)
+        => CompileRecipe(source, reference, supportJson, implementation, witJson, witBytes, runtimeManifest, "{}", "{}");
+
+    [JSExport]
+    public static string CompileRecipe(string source, string reference, string supportJson, string implementation, string witJson, string witBytes, string runtimeManifest,
+        string additionalReferencesJson, string additionalImplementationsJson)
     {
         try
         {
@@ -53,7 +58,8 @@ public static partial class Program
                 .Concat(JsonSerializer.Deserialize<SupportSource[]>(supportJson)!
                     .Select(file => CSharpSyntaxTree.ParseText(SourceText.From(file.text, Encoding.UTF8), parse, file.path)));
             var compilation = CSharpCompilation.Create("NetWasmApp", trees,
-                new[] { MetadataReference.CreateFromImage(Convert.FromBase64String(reference)) },
+                new[] { reference }.Concat(JsonSerializer.Deserialize<Dictionary<string, string>>(additionalReferencesJson)!.Values)
+                    .Select(bytes => MetadataReference.CreateFromImage(Convert.FromBase64String(bytes))),
                 new CSharpCompilationOptions(OutputKind.ConsoleApplication,
                     optimizationLevel: OptimizationLevel.Release,
                     nullableContextOptions: NullableContextOptions.Enable,
@@ -66,9 +72,11 @@ public static partial class Program
             Stage("netwasm");
             started = Stopwatch.GetTimestamp();
             var images = new Dictionary<string,byte[]> { ["NetWasmApp.dll"] = pe.ToArray(), ["NetWasm.CoreLib.dll"] = Convert.FromBase64String(implementation) };
+            var additionalImplementations = JsonSerializer.Deserialize<Dictionary<string, string>>(additionalImplementationsJson)!;
+            foreach (var image in additionalImplementations) images.Add(image.Key, Convert.FromBase64String(image.Value));
             images["compiler.wit.wasm"] = Convert.FromBase64String(witBytes);
             var options = new CompilerOptions(
-                "NetWasmApp.dll", ["NetWasm.CoreLib.dll"], "Program", "<Main>$", [],
+                "NetWasmApp.dll", ["NetWasm.CoreLib.dll", .. additionalImplementations.Keys], "Program", "<Main>$", [],
                 WitPath: "compiler.wit.wasm", WitWorld: "netwasm:platform@1.0.0/platform",
                 EntryPointKind: CompilerEntryPointKind.ManagedExecutable);
             var compiled = BrowserCompiler.Compile(new BrowserCompilationRequest(options, images,

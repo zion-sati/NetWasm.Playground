@@ -65,10 +65,10 @@ export class PlaygroundPipeline {
     const epoch = this.epoch; this.context = snapshot; const timings: StageTiming[] = [];
     const result = { requestId: snapshot.requestId, revision: snapshot.revision, diagnostics: [], timings };
     try {
-      if (snapshot.recipeId !== 'hello') throw new Error('Unknown compilation recipe');
+      if (!['hello', 'allocation', 'linq', 'json-dom'].includes(snapshot.recipeId)) throw new Error('Unknown compilation recipe');
       await this.stage('download', timings, () => this.initialize());
       await this.stage('compiler-initialize', timings, () => this.channel('compiler').request({ operation: 'initialize' }));
-      const compilation = await this.stage('compile', timings, () => this.channel('compiler').request({ operation: 'compile', recipe: 'hello', source: snapshot.source }));
+      const compilation = await this.stage('compile', timings, () => this.channel('compiler').request({ operation: 'compile', recipe: snapshot.recipeId, source: snapshot.source }));
       for (const timing of compilation.timings ?? []) this.emit({ type: 'stage', stage: timing.stage, state: 'complete', milliseconds: timing.milliseconds });
       if (!compilation.success) return { ...result, success: false, diagnostics: compilation.diagnostics ?? [], stage: compilation.stage, assets: { ...this.assets } };
       if (compilation.timings) timings.push(...compilation.timings);

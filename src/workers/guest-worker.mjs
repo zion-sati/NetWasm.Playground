@@ -63,8 +63,11 @@ serveWorker(async (data, report) => {
     begin('instantiate');
     const cli = cliModule.createCli({ arguments: [], environment: {}, initialCwd: '/',
       stdout: capture('stdout'), stderr: capture('stderr') });
+    // Each WASI getter returns an owned stream. Dropping one write's handle
+    // must not close the stream returned by a later Console.WriteLine.
     const imports = { 'wasi:cli/environment': cli.environment, 'wasi:cli/exit': cli.exit,
-      'wasi:cli/stderr': cli.stderr, 'wasi:cli/stdout': cli.stdout,
+      'wasi:cli/stderr': { getStderr: () => io.outputStreamCreate(capture('stderr')) },
+      'wasi:cli/stdout': { getStdout: () => io.outputStreamCreate(capture('stdout')) },
       'wasi:io/error': io.error, 'wasi:io/streams': io.streams };
     url = URL.createObjectURL(new Blob([files['guest.js']], { type: 'text/javascript' }));
     const main = await import(url);

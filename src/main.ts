@@ -7,13 +7,14 @@ import 'monaco-editor/features/hover/register';
 import EditorWorker from 'monaco-editor/editor/editor.worker?worker';
 import { PlaygroundPipeline } from './pipeline';
 import type { CompilationResult, Diagnostic, PipelineEvent, SourceSnapshot, StageTiming } from './contracts';
+import { examples } from './examples';
 import './style.css';
 
 (globalThis as typeof globalThis & { MonacoEnvironment: unknown }).MonacoEnvironment = { getWorker: () => new EditorWorker() };
 document.querySelector<HTMLDivElement>('#app')!.innerHTML = `
 <header><a class="brand" href="./">NetWasm <span>Playground</span></a><span class="badge">C# → WebAssembly</span></header>
 <main><section class="intro"><h1>Small code. Real WebAssembly.</h1><p>Compiled locally in your browser. Your source code never leaves this page.</p></section>
-<section class="workbench" aria-label="C# playground"><div class="toolbar"><label class="recipe">Example <select aria-label="Example"><option value="hello">Hello World</option></select></label><div class="actions"><button id="compile">Compile</button><button id="run" class="primary">Run <span aria-hidden="true">▶</span></button><button id="stop" disabled>Stop</button><button id="download" disabled>Download</button></div></div>
+<section class="workbench" aria-label="C# playground"><div class="toolbar"><label class="recipe">Example <select id="example" aria-label="Example"></select></label><div class="actions"><button id="compile">Compile</button><button id="run" class="primary">Run <span aria-hidden="true">▶</span></button><button id="stop" disabled>Stop</button><button id="download" disabled>Download</button></div></div>
 <div class="panes"><section class="source-pane"><div class="pane-heading"><h2>Program.cs</h2><span>C# · Release</span></div><div id="editor" aria-label="C# source editor"></div></section><section class="results-pane"><div class="pane-heading"><h2>Console</h2><span id="exit"></span></div><pre id="output" tabindex="0" aria-label="Program output"></pre><div class="diagnostic-heading"><h2>Diagnostics</h2><span id="diagnostic-count">0</span></div><div id="diagnostics" aria-label="Compiler diagnostics"><p class="empty">Compile to check your source.</p></div></section></div>
 <footer class="results"><div id="status" role="status" aria-live="polite">Ready</div><div id="size">No component yet</div></footer><div class="details"><ol id="stages" aria-label="Pipeline progress"></ol><div id="timings"></div><div id="assets"></div></div></section><p class="footnote">One file, no setup. Download the compiled WASI Preview 2 component to run with Wasmtime.</p></main>`;
 const el = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id)! as T;
@@ -21,7 +22,9 @@ const compileButton = el<HTMLButtonElement>('compile');
 const runButton = el<HTMLButtonElement>('run');
 const stopButton = el<HTMLButtonElement>('stop');
 const downloadButton = el<HTMLButtonElement>('download');
-const editor = monaco.editor.create(el('editor'), { value: 'using System;\n\nConsole.WriteLine("Hello, World!");\n', language: 'csharp', theme: 'vs', automaticLayout: true, minimap: { enabled: false }, fontSize: 14, lineHeight: 23, scrollBeyondLastLine: false, padding: { top: 18 }, tabSize: 4, fixedOverflowWidgets: true, accessibilitySupport: 'auto' });
+const exampleSelect = el<HTMLSelectElement>('example');
+for (const example of examples) { const option = document.createElement('option'); option.value = example.id; option.textContent = example.name; exampleSelect.append(option); }
+const editor = monaco.editor.create(el('editor'), { value: examples[0].source, language: 'csharp', theme: 'vs', automaticLayout: true, minimap: { enabled: false }, fontSize: 14, lineHeight: 23, scrollBeyondLastLine: false, padding: { top: 18 }, tabSize: 4, fixedOverflowWidgets: true, accessibilitySupport: 'auto' });
 let revision = 0;
 let nextRequest = 0;
 let active: SourceSnapshot | undefined;
@@ -50,7 +53,17 @@ function onEvent(event: PipelineEvent) {
   if (event.type === 'stage') { let item = stages.get(event.stage); if (!item) { item = document.createElement('li'); item.textContent = event.stage; stages.set(event.stage, item); el('stages').append(item); } item.dataset.state = event.state; el('status').textContent = event.state === 'running' ? event.stage : `${event.stage} complete`; }
 }
 editor.onDidChangeModelContent(() => { revision++; invalidateDownload(); setDiagnostics([]); el('status').textContent = active ? 'Source changed · result pending for earlier revision' : 'Source changed'; });
-function snapshot(): SourceSnapshot { return { requestId: ++nextRequest, revision, source: editor.getValue(), recipeId: 'hello' }; }
+exampleSelect.onchange = () => {
+  const example = examples.find(example => example.id === exampleSelect.value);
+  if (!example) return;
+  const previousRevision = revision;
+  editor.setValue(example.source);
+  // A recipe change must invalidate its artifact even when the source is equal.
+  if (revision === previousRevision) { revision++; invalidateDownload(); setDiagnostics([]); el('status').textContent = 'Example changed'; }
+  editor.setScrollTop(0);
+  editor.setPosition({ lineNumber: 1, column: 1 });
+};
+function snapshot(): SourceSnapshot { return { requestId: ++nextRequest, revision, source: editor.getValue(), recipeId: exampleSelect.value }; }
 function request(run: boolean) { const job = { snapshot: snapshot(), run }; if (active) { queued = job; el('status').textContent = 'Latest request queued'; } else void execute(job); }
 async function execute(job: { snapshot: SourceSnapshot; run: boolean }) {
   active = job.snapshot; stopped = false; stopButton.disabled = false; stages.clear(); el('stages').replaceChildren(); el('output').textContent = ''; el('exit').textContent = ''; el('timings').textContent = ''; el('status').textContent = 'Starting';
