@@ -17,6 +17,11 @@ try {
     return;
   }
   try {
+    if (data.operation === 'prune') {
+      const module = exports.NetWasm.Playground.CompilerProbe.Program.RetainComponentExports(data.module, data.prefix);
+      self.postMessage({id:data.id, result:{success:true, module}});
+      return;
+    }
     const result = JSON.parse(exports.NetWasm.Playground.CompilerProbe.Program.Compile(
       data.source, reference, support, implementation, witJson, witBytes, runtimeManifest));
     result.hostLinearMemoryBytes = runtime.Module?.HEAPU8?.buffer?.byteLength ?? null;

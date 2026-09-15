@@ -7,7 +7,8 @@
       "tag": "v0.1.0",
       "packageVersion": "0.1.0",
       "toolchainManifest": "eng/toolchain.json",
-      "browserCompilerCommit": "c67044def25e891376d06caae3768a6da2989d4e"
+      "browserCompilerCommit": "45d7a7118c3cd60df74ba8067b4500527a9b2391",
+      "browserLinkerCommit": "b89839a8c748c9edd58bce00c30a5a60a2972fbc"
     },
     "libraries": {
       "repository": "https://github.com/zion-sati/NetWasm.Libraries",

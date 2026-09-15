@@ -13,6 +13,8 @@ using NetWasm.Compiler.Browser;
 using NetWasm.Compiler.Core;
 using System.Collections.Generic;
 using NetWasm.Runtime.Pack.Planning;
+using NetWasm.Compiler.ComponentModel;
+using NetWasm.Compiler.ComponentModel.Browser;
 
 [assembly: SupportedOSPlatform("browser")]
 
@@ -54,7 +56,13 @@ public static partial class Program
                 EntryPointKind: CompilerEntryPointKind.ManagedExecutable);
             var compiled = BrowserCompiler.Compile(new BrowserCompilationRequest(options, images,
                 new Dictionary<string,string> { ["compiler.wit.wasm"] = witJson }, selectManagedExecutableEntryPoint: true));
-            var runtimeLinkPlan = RuntimeLinkPlanner.Plan(new(runtimeManifest, "wasm32", compiled.StaticDataEnd));
+            var runtimeLinkPlan = RuntimeLinkPlanner.Plan(new(runtimeManifest, "wasm32", compiled.StaticDataEnd,
+                AssetRoot: "/netwasm-link/runtime", OutputPath: "/netwasm-link/runtime.wasm"));
+            var coreLinkPlan = BrowserComponentCoreModules.CreateLinkPlan(
+                new("/netwasm-link/application.wasm", "/netwasm-link/runtime.wasm", "/netwasm-link/linked.wasm",
+                    ComponentTarget.Wasm32Wasi02, compiled.EntryPoint.Abi),
+                new("/netwasm-link/environment.wasm", "/netwasm-link/host.wasm", "/netwasm-link/command.wasm",
+                    "/netwasm-link/merged.wasm", "/netwasm-link/sanitized.wasm"));
             return JsonSerializer.Serialize(new {
                 schemaVersion = 1, success = emitted.Success,
                 application = Convert.ToBase64String(compiled.ApplicationModule),
@@ -64,6 +72,7 @@ public static partial class Program
                 interopManifest = compiled.InteropManifest,
                 entryPoint = compiled.EntryPoint,
                 runtimeLinkPlan,
+                coreLinkPlan,
                 diagnostics = emitted.Diagnostics.Take(128).Select(d => new { code = d.Id, message = Bound(d.GetMessage()),
                     severity = d.Severity.ToString(), path = d.Location.GetLineSpan().Path,
                     line = d.Location.GetLineSpan().StartLinePosition.Line,
@@ -83,4 +92,8 @@ public static partial class Program
             return JsonSerializer.Serialize(new { schemaVersion = 1, success = false, stage = "compiler-host", code = "host-error", recoverable = true, error = Bound(error.ToString()) });
         }
     }
+
+    [JSExport]
+    public static string RetainComponentExports(string module, string prefix) =>
+        Convert.ToBase64String(BrowserComponentCoreModules.RetainComponentExports(Convert.FromBase64String(module), prefix));
 }

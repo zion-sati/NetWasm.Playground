@@ -20,7 +20,10 @@ selects the managed entry from PE bytes. The public C# runtime planner returns
 the complete linker arguments, virtual asset paths and SHA-256 hashes using each
 application's static-data end. Compiler failures include a stage/code and bounded messages.
 This feasibility bridge uses base64 JSON; the final UI worker protocol will transfer
-owned buffers. Runtime linking and component execution are later slices.
+owned buffers. The public component core-link plan also supplies adapter WAT,
+merge arguments, export-pruning policy and Release optimization arguments.
+[The browser link smoke](../browser-link/README.md) executes that plan; component
+packaging and guest execution remain subsequent slices.
 
 Chromium exercises edited source, malformed source and recovery in one worker,
 then the editable page. The receipt verifies actual emitted modules and compares

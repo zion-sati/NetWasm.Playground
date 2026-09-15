@@ -180,10 +180,10 @@ def main():
         runtime_inputs = []
         for asset in capture["inputs"]:
             relative = asset["path"].split(f"/netwasm.runtime.pack/{version}/runtime/", 1)[1]
-            path = "/runtime/" + relative
+            path = "/netwasm-link/runtime/" + relative
             arguments[asset["argumentIndex"]] = path
             runtime_inputs.append({"path": path, "sha256": asset["sha256"]})
-        arguments[-1] = "/runtime-linked.wasm"
+        arguments[-1] = "/netwasm-link/runtime.wasm"
         expected_runtime_plan = {"arguments": arguments, "inputs": runtime_inputs}
     (run / "inputs.json").write_text(json.dumps({
         "source": source, "support": support, "assemblyName": "NetWasmApp",
