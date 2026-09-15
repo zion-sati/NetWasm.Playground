@@ -5,6 +5,7 @@ using System.Text.Json;
 using System.Runtime.InteropServices.JavaScript;
 using System.Runtime.Versioning;
 using System.Text;
+using System.Diagnostics;
 using Microsoft.CodeAnalysis.Text;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
@@ -23,6 +24,16 @@ namespace NetWasm.Playground.CompilerProbe;
 public static partial class Program
 {
     public sealed record SupportSource(string path, string text);
+    private sealed record StageTiming(string stage, double milliseconds);
+    private static bool progressEnabled;
+
+    [JSImport("reportStage", "compiler-progress")]
+    private static partial void ReportStage(string stage);
+
+    [JSExport]
+    public static void EnableProgress() => progressEnabled = true;
+
+    private static void Stage(string stage) { if (progressEnabled) ReportStage(stage); }
 
     public static void Main() { }
 
@@ -33,6 +44,9 @@ public static partial class Program
     {
         try
         {
+            var timings = new List<StageTiming>();
+            Stage("roslyn");
+            var started = Stopwatch.GetTimestamp();
             var parse = new CSharpParseOptions(LanguageVersion.Latest,
                 preprocessorSymbols: ["TRACE", "NETWASM", "NETWASM0_1", "RELEASE"]);
             var trees = new[] { CSharpSyntaxTree.ParseText(SourceText.From(source, Encoding.UTF8), parse, "Program.cs") }
@@ -46,8 +60,11 @@ public static partial class Program
                     concurrentBuild: false, deterministic: true));
             using var pe = new MemoryStream();
             var emitted = compilation.Emit(pe);
+            timings.Add(new("roslyn", Stopwatch.GetElapsedTime(started).TotalMilliseconds));
             if (!emitted.Success) return JsonSerializer.Serialize(new { schemaVersion = 1, success = false, stage = "roslyn", code = "source-diagnostics", recoverable = true,
-                diagnostics = emitted.Diagnostics.Take(128).Select(d => new {code=d.Id,message=Bound(d.GetMessage()),severity=d.Severity.ToString(),path=d.Location.GetLineSpan().Path,line=d.Location.GetLineSpan().StartLinePosition.Line,column=d.Location.GetLineSpan().StartLinePosition.Character}), pe=(string?)null });
+                diagnostics = emitted.Diagnostics.Take(128).Select(d => new {code=d.Id,message=Bound(d.GetMessage()),severity=d.Severity.ToString(),path=d.Location.GetLineSpan().Path,line=d.Location.GetLineSpan().StartLinePosition.Line,column=d.Location.GetLineSpan().StartLinePosition.Character}), pe=(string?)null, timings });
+            Stage("netwasm");
+            started = Stopwatch.GetTimestamp();
             var images = new Dictionary<string,byte[]> { ["NetWasmApp.dll"] = pe.ToArray(), ["NetWasm.CoreLib.dll"] = Convert.FromBase64String(implementation) };
             images["compiler.wit.wasm"] = Convert.FromBase64String(witBytes);
             var options = new CompilerOptions(
@@ -56,6 +73,7 @@ public static partial class Program
                 EntryPointKind: CompilerEntryPointKind.ManagedExecutable);
             var compiled = BrowserCompiler.Compile(new BrowserCompilationRequest(options, images,
                 new Dictionary<string,string> { ["compiler.wit.wasm"] = witJson }, selectManagedExecutableEntryPoint: true));
+            timings.Add(new("netwasm", Stopwatch.GetElapsedTime(started).TotalMilliseconds));
             var runtimeLinkPlan = RuntimeLinkPlanner.Plan(new(runtimeManifest, "wasm32", compiled.StaticDataEnd,
                 AssetRoot: "/netwasm-link/runtime", OutputPath: "/netwasm-link/runtime.wasm"));
             var coreLinkPlan = BrowserComponentCoreModules.CreateLinkPlan(
@@ -73,6 +91,7 @@ public static partial class Program
                 entryPoint = compiled.EntryPoint,
                 runtimeLinkPlan,
                 coreLinkPlan,
+                timings,
                 diagnostics = emitted.Diagnostics.Take(128).Select(d => new { code = d.Id, message = Bound(d.GetMessage()),
                     severity = d.Severity.ToString(), path = d.Location.GetLineSpan().Path,
                     line = d.Location.GetLineSpan().StartLinePosition.Line,

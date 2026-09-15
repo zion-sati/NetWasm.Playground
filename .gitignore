@@ -18,3 +18,4 @@ coverage/
 !.env.example
 .DS_Store
 NetWasm-Playground-Plan.md
+/public/toolchain/
