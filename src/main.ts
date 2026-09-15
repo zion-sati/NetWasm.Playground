@@ -26,7 +26,9 @@ const stopButton = el<HTMLButtonElement>('stop');
 const downloadButton = el<HTMLButtonElement>('download');
 const exampleSelect = el<HTMLSelectElement>('example');
 for (const example of examples) { const option = document.createElement('option'); option.value = example.id; option.textContent = example.name; exampleSelect.append(option); }
-const editor = monaco.editor.create(el('editor'), { value: examples[0].source, language: 'csharp', theme: 'vs', automaticLayout: true, minimap: { enabled: false }, fontSize: 14, lineHeight: 23, scrollBeyondLastLine: false, padding: { top: 18 }, tabSize: 4, fixedOverflowWidgets: true, accessibilitySupport: 'auto' });
+const colorScheme = window.matchMedia('(prefers-color-scheme: dark)');
+const editor = monaco.editor.create(el('editor'), { value: examples[0].source, language: 'csharp', theme: colorScheme.matches ? 'vs-dark' : 'vs', automaticLayout: true, minimap: { enabled: false }, fontSize: 14, lineHeight: 23, scrollBeyondLastLine: false, padding: { top: 18 }, tabSize: 4, fixedOverflowWidgets: true, accessibilitySupport: 'auto' });
+colorScheme.addEventListener('change', event => monaco.editor.setTheme(event.matches ? 'vs-dark' : 'vs'));
 let revision = 0;
 let nextRequest = 0;
 let active: SourceSnapshot | undefined;
