@@ -12,7 +12,7 @@ using NetWasm.Compiler;
 using NetWasm.Compiler.Browser;
 using NetWasm.Compiler.Core;
 using System.Collections.Generic;
-using System.Reflection.PortableExecutable;
+using NetWasm.Runtime.Pack.Planning;
 
 [assembly: SupportedOSPlatform("browser")]
 
@@ -27,7 +27,7 @@ public static partial class Program
     private static string Bound(string text) => text.Length <= 4096 ? text : text[..4096];
 
     [JSExport]
-    public static string Compile(string source, string reference, string supportJson, string implementation, string witJson, string witBytes)
+    public static string Compile(string source, string reference, string supportJson, string implementation, string witJson, string witBytes, string runtimeManifest)
     {
         try
         {
@@ -48,14 +48,13 @@ public static partial class Program
                 diagnostics = emitted.Diagnostics.Take(128).Select(d => new {code=d.Id,message=Bound(d.GetMessage()),severity=d.Severity.ToString(),path=d.Location.GetLineSpan().Path,line=d.Location.GetLineSpan().StartLinePosition.Line,column=d.Location.GetLineSpan().StartLinePosition.Character}), pe=(string?)null });
             var images = new Dictionary<string,byte[]> { ["NetWasmApp.dll"] = pe.ToArray(), ["NetWasm.CoreLib.dll"] = Convert.FromBase64String(implementation) };
             images["compiler.wit.wasm"] = Convert.FromBase64String(witBytes);
-            using var metadata = new PEReader(new MemoryStream(pe.ToArray()));
-            var token = metadata.PEHeaders.CorHeader!.EntryPointTokenOrRelativeVirtualAddress;
             var options = new CompilerOptions(
                 "NetWasmApp.dll", ["NetWasm.CoreLib.dll"], "Program", "<Main>$", [],
                 WitPath: "compiler.wit.wasm", WitWorld: "netwasm:platform@1.0.0/platform",
-                EntryMethodToken: token, EntryPointKind: CompilerEntryPointKind.ManagedExecutable);
+                EntryPointKind: CompilerEntryPointKind.ManagedExecutable);
             var compiled = BrowserCompiler.Compile(new BrowserCompilationRequest(options, images,
-                new Dictionary<string,string> { ["compiler.wit.wasm"] = witJson }));
+                new Dictionary<string,string> { ["compiler.wit.wasm"] = witJson }, selectManagedExecutableEntryPoint: true));
+            var runtimeLinkPlan = RuntimeLinkPlanner.Plan(new(runtimeManifest, "wasm32", compiled.StaticDataEnd));
             return JsonSerializer.Serialize(new {
                 schemaVersion = 1, success = emitted.Success,
                 application = Convert.ToBase64String(compiled.ApplicationModule),
@@ -64,6 +63,7 @@ public static partial class Program
                 imports = compiled.FunctionImports,
                 interopManifest = compiled.InteropManifest,
                 entryPoint = compiled.EntryPoint,
+                runtimeLinkPlan,
                 diagnostics = emitted.Diagnostics.Take(128).Select(d => new { code = d.Id, message = Bound(d.GetMessage()),
                     severity = d.Severity.ToString(), path = d.Location.GetLineSpan().Path,
                     line = d.Location.GetLineSpan().StartLinePosition.Line,

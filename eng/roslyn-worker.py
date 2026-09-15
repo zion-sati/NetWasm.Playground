@@ -45,6 +45,11 @@ def verify(run):
             raise RuntimeError("Browser interop manifest differs from desktop fixture")
         if first["staticDataEnd"] != comparison["staticDataEnd"]:
             raise RuntimeError("Browser static data differs from desktop fixture")
+        inputs = json.loads((run / "inputs.json").read_text())
+        if inputs.get("expectedRuntimePlan"):
+            plan = camel_case(first["runtimeLinkPlan"])
+            if plan["arguments"] != inputs["expectedRuntimePlan"]["arguments"] or plan["inputs"] != inputs["expectedRuntimePlan"]["inputs"]:
+                raise RuntimeError("Browser runtime plan differs from captured desktop linker policy")
     print("PASS: browser fixture hashes and managed output match", flush=True)
 
 
@@ -149,6 +154,8 @@ def main():
     reference = baseline / f"packages/netwasm.ref/{version}/ref/NetWasm,Version=v0.1/NetWasm.CoreLib.dll"
     shutil.copyfile(reference, web / "target-reference.dll")
     if compiler_pin:
+        shutil.copyfile(baseline / f"packages/netwasm.runtime.pack/{version}/runtime/runtime-pack.json",
+                        web / "runtime-pack.json")
         shutil.copyfile(baseline / f"packages/netwasm.runtime.wasm32/{version}/runtime/NetWasm.CoreLib.dll",
                         web / "target-implementation.dll")
         tools = baseline / f"packages/netwasm.toolchain/{version}/tools"
@@ -163,12 +170,28 @@ def main():
     support = [{"path": str(path.relative_to(baseline / "app")), "text": path.read_text()}
                for path in sorted(generated.glob("*.cs"))]
     (web / "support.json").write_text(json.dumps(support))
+    expected_runtime_plan = None
+    if compiler_pin:
+        captures = sorted((baseline / "captured-tools").glob("wasm-ld-*/invocation.json"))
+        if len(captures) != 1:
+            raise RuntimeError("Expected one authoritative desktop runtime link capture")
+        capture = json.loads(captures[0].read_text())
+        arguments = list(capture["arguments"])
+        runtime_inputs = []
+        for asset in capture["inputs"]:
+            relative = asset["path"].split(f"/netwasm.runtime.pack/{version}/runtime/", 1)[1]
+            path = "/runtime/" + relative
+            arguments[asset["argumentIndex"]] = path
+            runtime_inputs.append({"path": path, "sha256": asset["sha256"]})
+        arguments[-1] = "/runtime-linked.wasm"
+        expected_runtime_plan = {"arguments": arguments, "inputs": runtime_inputs}
     (run / "inputs.json").write_text(json.dumps({
         "source": source, "support": support, "assemblyName": "NetWasmApp",
         "referenceSha256": hashlib.sha256(reference.read_bytes()).hexdigest(),
         "desktopReceiptSha256": hashlib.sha256((baseline / "receipt.json").read_bytes()).hexdigest(),
         "toolchain": receipt["toolchain"], "compilerHost": host,
-        "browserCompilerCommit": compiler_pin}, indent=2))
+        "browserCompilerCommit": compiler_pin,
+        "expectedRuntimePlan": expected_runtime_plan}, indent=2))
     execute(["npm", "install", "--no-save", "--package-lock=false",
              "playwright@" + receipt["toolchain"]["playwright"]], "playwright-install", run)
     shutil.copyfile(fixture / "test-worker.mjs", run / "test-worker.mjs")

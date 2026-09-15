@@ -15,13 +15,18 @@ User assemblies are parsed and compiled; they are never loaded into the host.
 
 The fixed Hello recipe uses protocol schema 1. Compiler results contain application
 bytes, static-data end, runtime features, import signatures, interop metadata and
-entry identity. Compiler failures include a stage/code and bounded messages.
+entry identity and parameter/return/completion ABI. Shared public metadata policy
+selects the managed entry from PE bytes. The public C# runtime planner returns
+the complete linker arguments, virtual asset paths and SHA-256 hashes using each
+application's static-data end. Compiler failures include a stage/code and bounded messages.
 This feasibility bridge uses base64 JSON; the final UI worker protocol will transfer
 owned buffers. Runtime linking and component execution are later slices.
 
 Chromium exercises edited source, malformed source and recovery in one worker,
 then the editable page. The receipt verifies actual emitted modules and compares
 Hello's application bytes, static-data end and interop manifest with desktop.
+It also compares the browser runtime plan against the captured desktop linker
+arguments and archive hashes, after replacing only input and output paths.
 It binds served files, sources, managed/application outputs, packages and logs.
 Compile timings and exposed host linear-memory size are recorded in results;
 linear memory is not total browser process memory. Verify retained evidence with
