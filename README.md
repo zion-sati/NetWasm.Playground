@@ -37,7 +37,8 @@ It does not rebuild LLVM. Pages builds install the immutable browser bundle
 recorded in `eng/toolchain-release.json`; its archive hash, content identity and
 every staged asset are verified before use. A ready manifest identifies the
 exact archive the owner publishes as a GitHub release asset before deploying
-Pages.
+Pages. Public releases use semantic tags such as `v0.2.0`; the independent
+content-addressed toolchain ID continues to identify the exact browser bundle.
 
 ```sh
 python3 eng/toolchain-release.py install

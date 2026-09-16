@@ -21,6 +21,14 @@ def release_metadata():
     if metadata.get('status') != 'ready':
         reason = metadata.get('reason', 'No deployable browser toolchain is configured.')
         raise ValueError(f'Browser toolchain release is not ready: {reason}')
+    version = metadata.get('version')
+    tag = f'v{version}'
+    asset_name = f'netwasm-playground-toolchain-{tag}.tar.gz'
+    if metadata.get('tag') != tag or metadata.get('asset', {}).get('name') != asset_name:
+        raise ValueError('Browser toolchain release coordinates do not match its version')
+    expected_url = f'https://github.com/zion-sati/NetWasm.Playground/releases/download/{tag}/{asset_name}'
+    if metadata['asset'].get('url') != expected_url:
+        raise ValueError('Browser toolchain release URL does not match its version')
     return metadata
 
 
