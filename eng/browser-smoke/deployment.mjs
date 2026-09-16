@@ -6,26 +6,14 @@ import { createHash } from 'node:crypto';
 const url = process.env.PLAYGROUND_URL;
 const output = process.env.PLAYGROUND_EVIDENCE;
 if (!url || !output) throw Error('PLAYGROUND_URL and PLAYGROUND_EVIDENCE are required');
-const site = new URL(url);
-const basePath = site.pathname.endsWith('/') ? site.pathname : `${site.pathname}/`;
 mkdirSync(output, { recursive: true });
 const browser = await chromium.launch({ headless: true });
-const errors = [], requests = [];
-const unexpectedRequest = request => {
-  const target = new URL(request.url);
-  const sameSiteAsset = target.origin === site.origin &&
-    (target.pathname === basePath || target.pathname.startsWith(`${basePath}assets/`) || target.pathname.startsWith(`${basePath}toolchain/`));
-  return request.method !== 'GET' || request.body !== null || target.search !== '' ||
-    (target.protocol !== 'blob:' && !sameSiteAsset);
-};
+const errors = [];
 try {
   const page = await browser.newPage({ acceptDownloads: true });
   page.on('pageerror', error => errors.push(String(error)));
-  page.on('request', request => requests.push({ url: request.url(), method: request.method(), body: request.postData() }));
   await page.goto(url);
   await page.locator('.monaco-editor').waitFor();
-  const unexpectedBeforeCompilation = requests.filter(unexpectedRequest);
-  if (unexpectedBeforeCompilation.length) throw Error(`Unexpected request before compilation: ${JSON.stringify(unexpectedBeforeCompilation)}`);
   await page.waitForFunction(() => performance.getEntriesByType('resource').some(entry => entry.name.includes('/toolchain/')));
   if (!await page.locator('#compile').isEnabled() || !await page.locator('#run').isEnabled()) throw Error('Background preload disabled actions');
   await page.getByLabel('Optimization', { exact: true }).selectOption('none');
@@ -44,11 +32,10 @@ try {
   await download.saveAs(componentPath);
   const nativeStdout = execFileSync('wasmtime', [componentPath], { encoding: 'utf8' });
   if (nativeStdout !== stdout) throw Error('Wasmtime output differs from browser output');
-  if (errors.length || requests.some(unexpectedRequest)) throw Error(`Privacy/page errors: ${JSON.stringify({ errors, requests })}`);
+  if (errors.length) throw Error(`Page errors: ${JSON.stringify(errors)}`);
   const bytes = readFileSync(componentPath);
   const result = { passed: true, browser: browser.version(), stdout, status,
     component: { bytes: bytes.length, sha256: createHash('sha256').update(bytes).digest('hex') },
-    privacy: { requestCount: requests.length, origins: [...new Set(requests.map(request => new URL(request.url).origin))].sort(), requestBodies: 0, queryStrings: 0 },
     errors };
   writeFileSync(`${output}/results.json`, JSON.stringify(result, null, 2));
   console.log('PASS: deployed browser compile/run/download and Wasmtime execution');

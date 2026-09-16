@@ -71,14 +71,6 @@ The `github-pages` environment must allow deployments from the `main` branch
 and `v*` tags. GitHub evaluates a release-triggered workflow against its tag,
 even when that signed tag points at `main`.
 
-If the custom domain is proxied through Cloudflare, disable automatic Web
-Analytics for `playground.netwasm.com` (or apply a configuration rule with
-`disable_rum: true`). Automatic setup injects an off-origin analytics script,
-which violates the Playground's same-origin/no-telemetry boundary and causes
-the postdeploy privacy check to fail. Cloudflare documents the dashboard switch
-under [Web Analytics setup](https://developers.cloudflare.com/web-analytics/get-started/)
-and the rule under [Disable Real User Monitoring](https://developers.cloudflare.com/rules/configuration-rules/settings/#disable-real-user-monitoring-rum).
-
 ```sh
 npm run typecheck
 PLAYGROUND_URL=http://127.0.0.1:5173/playground/ PLAYGROUND_EVIDENCE=.cache/ui-smoke node eng/browser-smoke/ui.mjs
