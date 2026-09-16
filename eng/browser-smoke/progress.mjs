@@ -10,6 +10,7 @@ try {
   page.on('pageerror', error => errors.push(String(error)));
   await page.goto(process.env.PLAYGROUND_URL ?? 'http://127.0.0.1:5174/playground/');
   await page.locator('.monaco-editor').waitFor();
+  await page.getByLabel('Optimization', { exact: true }).selectOption('Oz');
   await page.evaluate(() => {
     window.progressStatuses = [];
     new MutationObserver(() => window.progressStatuses.push(document.querySelector('#status').textContent))

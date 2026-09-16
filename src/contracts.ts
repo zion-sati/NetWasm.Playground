@@ -1,8 +1,11 @@
+import type { OptimizationMode } from './optimization';
+
 export interface SourceSnapshot {
   requestId: number;
   revision: number;
   source: string;
   recipeId: string;
+  optimization?: OptimizationMode;
 }
 
 export interface Diagnostic {
@@ -27,6 +30,7 @@ export interface CompilationResult {
   requestId: number;
   revision: number;
   success: boolean;
+  optimization?: OptimizationMode;
   cancelled?: boolean;
   component?: Uint8Array;
   diagnostics: Diagnostic[];

@@ -15,6 +15,7 @@ try {
   page.on('request', request => requests.push({ url: request.url(), method: request.method(), body: request.postData() }));
   await page.goto(url);
   await page.locator('.monaco-editor').waitFor();
+  await page.getByLabel('Optimization', { exact: true }).selectOption('Oz');
   assert(!requests.some(request => request.url.includes('/toolchain/')), 'Toolchain fetched before first action');
   await page.screenshot({ path: `${output}/desktop.png`, fullPage: true });
   await page.setViewportSize({ width: 390, height: 844 });

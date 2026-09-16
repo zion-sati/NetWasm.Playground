@@ -25,3 +25,4 @@
 .workbench[aria-busy=true] .compile-spinner{display:inline-block;animation:compile-spin .8s linear infinite}
 @keyframes compile-spin{to{transform:rotate(360deg)}}
 @media(prefers-reduced-motion:reduce){.workbench[aria-busy=true] .compile-spinner{animation:none}}
+.options{display:flex;align-items:center;gap:18px}#comparison:not(:empty){margin:7px 0;line-height:1.8;color:#53667c}@media(prefers-color-scheme:dark){#comparison{color:#bccadb}}@media(max-width:760px){.options{width:100%;display:grid;grid-template-columns:1fr;gap:8px}.options .recipe{width:100%;justify-content:space-between}.options select{min-width:190px}}

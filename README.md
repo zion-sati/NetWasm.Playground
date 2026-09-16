@@ -11,6 +11,13 @@ Editable examples cover Hello World, allocation and guest GC, LINQ, read-only
 JSON parsing, source-generated JSON serialization, regular expressions,
 constructor-based dependency injection, CRC32 hashing, and TUnit tests.
 
+The Optimization dropdown exposes Binaryen's `-O0` through `-O4`, `-Os` and
+`-Oz` settings, plus a None option that skips `wasm-opt` for the quickest
+iteration. The page retains each setting's build time and component size for
+the current source so the tradeoff can be compared directly. C# remains a
+Release compilation for every setting; this control changes the final
+WebAssembly optimization pass.
+
 ## Local development
 
 Use the pinned Node version in the public NetWasm toolchain manifest.

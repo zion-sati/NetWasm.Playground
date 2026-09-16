@@ -12,7 +12,9 @@ const errors = [], results = [];
 try {
   const page = await browser.newPage({ acceptDownloads: true });
   page.on('pageerror', error => errors.push(String(error)));
-  await page.goto(url); await page.locator('.monaco-editor').waitFor();
+  await page.goto(url);
+  await page.locator('.monaco-editor').waitFor();
+  if (process.env.PLAYGROUND_COMPARE_DESKTOP_BYTES === '1') await page.getByLabel('Optimization', { exact: true }).selectOption('Oz');
   await page.getByLabel('Example', { exact: true }).selectOption('json-generated');
   async function run(stdout) {
     await page.locator('#run').click();

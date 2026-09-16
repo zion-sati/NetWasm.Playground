@@ -1,5 +1,6 @@
 import type { CompilationResult, PipelineEvent, RunResult, SourceSnapshot, StageTiming } from './contracts';
 import { WorkerChannel } from './worker-channel';
+import { optimizationArguments, optimizationModes } from './optimization';
 const basename = (path: string) => path.slice(path.lastIndexOf('/') + 1);
 export class PlaygroundPipeline {
   private channels = new Map<string, WorkerChannel>();
@@ -66,11 +67,13 @@ export class PlaygroundPipeline {
     return result.files as Record<string, Uint8Array>;
   }
   async compile(snapshot: SourceSnapshot): Promise<CompilationResult> {
+    const optimization = snapshot.optimization ?? 'Oz';
     const epoch = this.epoch; this.context = snapshot; const timings: StageTiming[] = [];
-    const result = { requestId: snapshot.requestId, revision: snapshot.revision, diagnostics: [], timings };
+    const result = { requestId: snapshot.requestId, revision: snapshot.revision, optimization, diagnostics: [], timings };
     let recycleCompiler = false;
     try {
       if (!['hello', 'allocation', 'linq', 'json-dom', 'json-generated', 'tunit', 'regex', 'di', 'hashing'].includes(snapshot.recipeId)) throw new Error('Unknown compilation recipe');
+      if (!optimizationModes.includes(optimization)) throw new Error('Unknown optimization mode');
       if (snapshot.source.length > 65536 || new TextEncoder().encode(snapshot.source).byteLength > 65536) throw new Error('Source limit exceeded (64 KiB)');
       await this.stage('download', timings, () => this.initialize());
       await this.stage('compiler-initialize', timings, () => this.channel('compiler').request({ operation: 'initialize' }));
@@ -95,8 +98,9 @@ export class PlaygroundPipeline {
       const module = merged[mergedName];
       const pruned = await this.stage('prune', timings, () => this.channel('compiler').request({ operation: 'prune', module, prefix: plan.ExportPruning.Prefix }, [module.buffer]));
       recycleCompiler ||= pruned.hostLinearMemoryBytes >= 512 * 1048576;
-      const optimized = await this.stage('optimize', timings, () => this.tool('wasm-opt', args(plan.Optimization), { [basename(plan.ExportPruning.OutputPath)]: pruned.module }, ['linked.wasm']));
-      const linked = optimized['linked.wasm'];
+      const linked = optimization === 'none' ? pruned.module : (await this.stage('optimize', timings, () =>
+        this.tool('wasm-opt', optimizationArguments(args(plan.Optimization), optimization),
+          { [basename(plan.ExportPruning.OutputPath)]: pruned.module }, ['linked.wasm'])))['linked.wasm'];
       await this.stage('validate', timings, () => this.tool('wasm-tools', ['validate', 'linked.wasm'], { 'linked.wasm': linked }, []));
       const witName = snapshot.recipeId === 'tunit' ? 'async-command.wit.wasm' : 'command.wit.wasm';
       const witWorld = snapshot.recipeId === 'tunit' ? 'netwasm:component/async-command@1.0.0' : 'wasi:cli/command@0.2.11';
