@@ -7,12 +7,21 @@ import io
 import json
 from pathlib import Path, PurePosixPath
 import shutil
+import sys
 import tarfile
 import tempfile
 import urllib.request
 
 ROOT = Path(__file__).resolve().parents[1]
 METADATA = ROOT / 'eng/toolchain-release.json'
+
+
+def release_metadata():
+    metadata = json.loads(METADATA.read_text())
+    if metadata.get('status') != 'ready':
+        reason = metadata.get('reason', 'No deployable browser toolchain is configured.')
+        raise ValueError(f'Browser toolchain release is not ready: {reason}')
+    return metadata
 
 
 def sha256(path):
@@ -46,7 +55,7 @@ def verify_staged(folder, metadata):
 
 
 def pack(source, output):
-    metadata = json.loads(METADATA.read_text())
+    metadata = release_metadata()
     verify_staged(source, metadata)
     output.parent.mkdir(parents=True, exist_ok=True)
     with output.open('wb') as raw:
@@ -65,7 +74,7 @@ def pack(source, output):
 
 
 def install(output, archive=None):
-    metadata = json.loads(METADATA.read_text())
+    metadata = release_metadata()
     output = output.resolve()
     output.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix='toolchain-release-', dir=output.parent) as temporary:
@@ -102,10 +111,14 @@ def main():
     installer.add_argument('--output', type=Path, default=ROOT / 'public/toolchain')
     installer.add_argument('--archive', type=Path)
     args = parser.parse_args()
-    if args.command == 'pack':
-        pack(args.source.resolve(), args.output.resolve())
-    else:
-        install(args.output, args.archive)
+    try:
+        if args.command == 'pack':
+            pack(args.source.resolve(), args.output.resolve())
+        else:
+            install(args.output, args.archive)
+    except ValueError as error:
+        print(f'ERROR: {error}', file=sys.stderr)
+        raise SystemExit(1) from None
 
 
 if __name__ == '__main__':

@@ -1,8 +1,6 @@
 name: Pages
 
 on:
-  push:
-    branches: [main]
   workflow_dispatch:
 
 concurrency:
@@ -14,7 +12,7 @@ permissions:
 
 jobs:
   build-and-test:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - name: Check out source
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
@@ -39,9 +37,9 @@ jobs:
         run: |
           curl --fail --location --retry 3 --output /tmp/wasmtime.tar.xz \
             https://github.com/bytecodealliance/wasmtime/releases/download/v47.0.3/wasmtime-v47.0.3-x86_64-linux.tar.xz
-          curl --fail --location --retry 3 --output /tmp/wasmtime.sha256 \
-            https://github.com/bytecodealliance/wasmtime/releases/download/v47.0.3/SHASUMS256.txt
-          grep ' wasmtime-v47.0.3-x86_64-linux.tar.xz$' /tmp/wasmtime.sha256 | sed 's#  wasmtime-v47.0.3-x86_64-linux.tar.xz#  /tmp/wasmtime.tar.xz#' | sha256sum --check --strict
+          printf '%s  %s\n' \
+            'ca1fc56d1afc40c8782e96c297fd182a0da162f9a8f52a1e7b094e1dd648e178' \
+            /tmp/wasmtime.tar.xz | sha256sum --check --strict
           tar -xJf /tmp/wasmtime.tar.xz -C /tmp
           echo "/tmp/wasmtime-v47.0.3-x86_64-linux" >> "$GITHUB_PATH"
       - name: Smoke-test production build
@@ -66,7 +64,7 @@ jobs:
 
   deploy:
     needs: build-and-test
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     permissions:
       pages: write
       id-token: write

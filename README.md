@@ -32,9 +32,11 @@ npm run dev
 The asset preparation command checks the existing verification receipts and
 stages assets under an ignored, content-addressed `public/toolchain/` directory.
 It consumes the public inputs produced by the runners under `eng/` and `spikes/`.
-It does not rebuild LLVM. CI and Pages builds install the immutable release
+It does not rebuild LLVM. Pages builds install the immutable browser bundle
 recorded in `eng/toolchain-release.json`; its archive hash, content identity and
-every staged asset are verified before use.
+every staged asset are verified before use. The manifest remains pending until
+the bundle has been rebuilt exclusively from packages available on NuGet.org
+and the owner has published its GitHub release asset manually.
 
 ```sh
 python3 eng/toolchain-release.py install
@@ -52,11 +54,14 @@ PLAYGROUND_BASE=/playground/ npm run preview -- --port 5174
 Open `http://127.0.0.1:5174/playground/`. Rebuilding with the default base
 while this preview is running will break its asset URLs.
 
-Pull requests run the frontend CI workflow. Pushes to `main` build the site
-with GitHub Pages' configured base path, run an actual Chromium compile/run/
-download smoke test, execute that download with pinned Wasmtime, and deploy the
-verified `dist/` artifact. Configure Pages with **GitHub Actions** as its source;
-publishing directly from the repository root does not build this Vite project.
+Pull requests and pushes to `main` run type checking and build the application
+shell without downloading an unpublished toolchain. The Pages workflow is
+manual: after the owner publishes the browser bundle asset recorded in
+`eng/toolchain-release.json`, it builds with GitHub Pages' configured base path,
+runs an actual Chromium compile/run/download smoke test, executes that download
+with pinned Wasmtime, and deploys the verified `dist/` artifact. Configure Pages
+with **GitHub Actions** as its source; publishing directly from the repository
+root does not build this Vite project.
 
 ```sh
 npm run typecheck

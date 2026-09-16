@@ -1,14 +1,5 @@
 {
   "schemaVersion": 1,
-  "tag": "browser-toolchain-f8616fd4d5d8",
-  "index": {
-    "id": "f8616fd4d5d86d8164845db2bcaabded16295ff6c9ad4f43f6742f3b9db26f0e",
-    "manifestSha256": "e6c22e2ee609d5f499b2419b36d8269cc536309f09869b56e82439acbdd88b09"
-  },
-  "asset": {
-    "name": "netwasm-playground-toolchain-f8616fd4d5d8.tar.gz",
-    "url": "https://github.com/zion-sati/NetWasm.Playground/releases/download/browser-toolchain-f8616fd4d5d8/netwasm-playground-toolchain-f8616fd4d5d8.tar.gz",
-    "bytes": 93389169,
-    "sha256": "76f69216a6ee185a68821adf8f5727ef5f124fe728e2030587f8f1da70be2126"
-  }
+  "status": "pending",
+  "reason": "Awaiting a browser bundle rebuilt from publicly released NuGet.org packages."
 }
