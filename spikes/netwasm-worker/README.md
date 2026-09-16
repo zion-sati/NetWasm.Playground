@@ -1,14 +1,18 @@
 # NetWasm browser compiler feasibility harness
 
 Run from the repository root with a verified public desktop baseline and the
-published checkout pinned by `browserCompilerCommit` in `eng/upstream-sources.json`:
+exact package version pinned in `eng/upstream-sources.json`:
 
 ```sh
-python3 eng/roslyn-worker.py .cache/desktop-baseline .cache/netwasm-worker --compiler-source .cache/public-netwasm
+python3 eng/roslyn-worker.py .cache/desktop-baseline .cache/netwasm-worker \
+  --compiler-package-version <public-version> \
+  --json-example <verified-json-example> \
+  --tunit-example <verified-tunit-example>
 ```
 
-The run directory must be new. The runner builds the public browser adapter
-from source with a fresh NuGet.org-only cache and the pinned .NET browser host.
+The run directory must be new. The runner restores the public browser compiler
+and runtime planner packages with a fresh NuGet.org-only cache and the pinned
+.NET browser host.
 Roslyn emits a managed PE against NetWasm.Ref. NetWasm compiles that PE using the
 separate implementation CoreLib and explicit packaged compiler WIT world.
 User assemblies are parsed and compiled; they are never loaded into the host.

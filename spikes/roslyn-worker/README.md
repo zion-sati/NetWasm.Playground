@@ -3,7 +3,7 @@
 From the repository root, run against a verified public desktop baseline:
 
 ```sh
-python3 eng/roslyn-worker.py .cache/desktop-baseline .cache/roslyn-worker
+python3 eng/roslyn-worker.py .cache/desktop-baseline .cache/roslyn-worker --roslyn-only
 ```
 
 The run directory must be new. The runner selects the desktop fixture's .NET SDK

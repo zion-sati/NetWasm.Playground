@@ -19,7 +19,9 @@
     <Reference Include="Microsoft.CodeAnalysis.CSharp">
       <HintPath>$(MSBuildSDKsPath)/../Roslyn/bincore/Microsoft.CodeAnalysis.CSharp.dll</HintPath>
     </Reference>
-    <ProjectReference Include="$(BrowserCompilerSource)/src/NetWasm.Compiler.Browser/NetWasm.Compiler.Browser.csproj" />
-    <ProjectReference Include="$(BrowserCompilerSource)/src/NetWasm.Runtime.Pack/NetWasm.Runtime.Pack.csproj" />
+    <PackageReference Include="NetWasm.Compiler.Browser"
+                      Version="[$(NetWasmCompilerPackageVersion)]" />
+    <PackageReference Include="NetWasm.Runtime.Pack"
+                      Version="[$(NetWasmCompilerPackageVersion)]" />
   </ItemGroup>
 </Project>

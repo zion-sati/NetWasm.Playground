@@ -25,13 +25,14 @@ Use the pinned Node version in the public NetWasm toolchain manifest.
 ```sh
 npm ci
 python3 eng/browser-notices.py --packages <verified-baseline>/packages --packages <verified-generator-host>/packages --packages <verified-tunit-template>/packages --cache <notice-cache> --output <verified-notices>
-python3 eng/prepare-web.py --baseline <verified-baseline> --compiler <verified-compiler-host> --tools <verified-tools> --lld <verified-browser-lld> --component <verified-component-probe> --examples <verified-desktop-examples> --generated-json <verified-generated-json> --additional-examples <verified-extra-examples> --tunit <verified-tunit-template> --source <public-netwasm-checkout> --notices <verified-notices>
+python3 eng/prepare-web.py --baseline <verified-baseline> --compiler <verified-compiler-host> --tools <verified-tools> --lld <verified-browser-lld> --component <verified-component-probe> --examples <verified-desktop-examples> --generated-json <verified-generated-json> --additional-examples <verified-extra-examples> --tunit <verified-tunit-template> --notices <verified-notices>
 npm run dev
 ```
 
 The asset preparation command checks the existing verification receipts and
 stages assets under an ignored, content-addressed `public/toolchain/` directory.
-It consumes the public inputs produced by the runners under `eng/` and `spikes/`.
+It consumes the public NuGet.org packages and verified inputs produced by the
+runners under `eng/` and `spikes/`; it does not read NetWasm source checkouts.
 It does not rebuild LLVM. Pages builds install the immutable browser bundle
 recorded in `eng/toolchain-release.json`; its archive hash, content identity and
 every staged asset are verified before use. The manifest remains pending until
@@ -94,11 +95,14 @@ memory policy; Playground caps guest memory at 256 MiB. TUnit downloads use NetW
 asynchronous component contract and require its host.
 
 Build the compiler host with `eng/roslyn-worker.py`, supplying the verified
-baseline, an output directory, `--compiler-source`, `--json-example` and
-`--tunit-example`. Only the pinned JSON and TUnit generators run; user code
+baseline, an output directory, `--compiler-package-version`, `--json-example`
+and `--tunit-example`. The compiler and runtime planner restore only their exact
+pinned public NuGet.org packages; source checkouts and local package feeds are
+rejected. Only the pinned JSON and TUnit generators run; user code
 cannot supply packages or analyzers. Repeat host builds can use
-`--reuse-verified-host <previous-host>`; `--skip-trusted-probes` keeps a focused
-compiler-only check while retaining verification of generator inputs.
+`--reuse-verified-host <previous-host>` for Playwright, while the compiler
+packages still restore into a fresh cache. `--skip-trusted-probes` keeps a
+focused compiler-only check while retaining verification of generator inputs.
 
 ## Limits and browser checks
 

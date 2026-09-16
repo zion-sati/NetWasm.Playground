@@ -292,7 +292,7 @@ try {
 '''
 
 
-def finalize_evidence(run, baseline, compiler_pin):
+def finalize_evidence(run, baseline, compiler_package_version):
     web = run / "publish/wwwroot"
     app = run / "app"
     retained = [*web.rglob("*"), *app.glob("*"), *run.glob("managed-*.dll"),
@@ -303,7 +303,7 @@ def finalize_evidence(run, baseline, compiler_pin):
     evidence = {"schemaVersion": 1,
         "files": {str(path.relative_to(run)): fingerprint(path)
                   for path in retained if path.is_file()}}
-    if compiler_pin:
+    if compiler_package_version:
         desktop = baseline / "app/bin/Release/netwasm0.1"
         evidence["desktopComparison"] = {
             "applicationSha256": fingerprint(desktop / "NetWasmApp.core.wasm")["sha256"],
@@ -318,13 +318,15 @@ def main():
     parser.add_argument("desktop_baseline", type=Path)
     parser.add_argument("run_directory", type=Path)
     parser.add_argument("--verify", action="store_true")
-    parser.add_argument("--compiler-source", type=Path,
-                        help="Published public NetWasm checkout for the real compiler probe")
+    parser.add_argument("--compiler-package-version",
+                        help="Exact publicly released NetWasm.Compiler.Browser package version")
+    parser.add_argument("--roslyn-only", action="store_true",
+                        help="Run only the historical Roslyn worker without NetWasm")
     parser.add_argument("--json-example", type=Path, help="Verified desktop JSON source-generation recipe")
     parser.add_argument("--tunit-example", type=Path, help="Verified ordinary dotnet test template comparison")
     parser.add_argument("--di-example", type=Path, help="Verified desktop DI recipe and its packaged trusted generator")
     parser.add_argument("--reuse-verified-host", type=Path,
-                        help="Reuse a retained, receipt-verified public host package cache and Playwright installation")
+                        help="Reuse a receipt-verified Playwright installation; Roslyn-only runs may also reuse its package cache")
     parser.add_argument("--skip-trusted-probes", action="store_true",
                         help="Run compiler compatibility checks without repeating the trusted generator matrix")
     args = parser.parse_args()
@@ -333,6 +335,8 @@ def main():
     if args.verify:
         verify(run)
         return
+    if bool(args.compiler_package_version) == args.roslyn_only:
+        parser.error("choose exactly one of --compiler-package-version or --roslyn-only")
     reused_host = args.reuse_verified_host.resolve() if args.reuse_verified_host else None
     if reused_host:
         verify(reused_host)
@@ -346,25 +350,20 @@ def main():
     if shutil.disk_usage(run).free < 100 * 1024 ** 3:
         raise RuntimeError("At least 100 GiB free space is required")
     app = run / "app"
-    fixture = ROOT / "spikes" / ("netwasm-worker" if args.compiler_source else "roslyn-worker")
-    source_options = []
-    compiler_pin = None
-    if args.compiler_source:
-        compiler_source = args.compiler_source.resolve()
-        compiler_pin = json.loads((ROOT / "eng/upstream-sources.json").read_text())["sources"]["netwasm"]["browserCompilerCommit"]
-        actual = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=compiler_source, text=True).strip()
-        if actual != compiler_pin:
-            raise RuntimeError("Compiler source does not match published browser compiler pin")
-        if subprocess.check_output(["git", "diff", "HEAD", "--", "src", "eng", "Directory.Build.props"], cwd=compiler_source):
-            raise RuntimeError("Compiler source has uncommitted build changes")
-        if subprocess.check_output(["git", "ls-files", "--others", "--exclude-standard", "--",
-                                    "src", "eng", "Directory.Build.props"], cwd=compiler_source):
-            raise RuntimeError("Compiler source has untracked build inputs")
-        source_options = ["-p:BrowserCompilerSource=" + str(compiler_source)]
+    package_mode = args.compiler_package_version is not None
+    fixture = ROOT / "spikes" / ("netwasm-worker" if package_mode else "roslyn-worker")
+    package_options = []
+    compiler_package_version = None
+    if package_mode:
+        compiler_package_version = args.compiler_package_version
+        pinned_version = json.loads((ROOT / "eng/upstream-sources.json").read_text())["sources"]["netwasm"]["packageVersion"]
+        if compiler_package_version != pinned_version:
+            raise RuntimeError("Compiler package version does not match the public NetWasm package pin")
+        package_options = ["-p:NetWasmCompilerPackageVersion=" + compiler_package_version]
     trusted = None
-    if args.compiler_source:
+    if package_mode:
         if not args.json_example or not args.tunit_example:
-            parser.error("--compiler-source requires --json-example and --tunit-example verified inputs")
+            parser.error("--compiler-package-version requires --json-example and --tunit-example verified inputs")
         trusted = prepare_trusted_inputs(args.json_example.resolve(), args.tunit_example.resolve(), run,
                                         args.di_example.resolve() if args.di_example else None)
     shutil.copytree(fixture, app)
@@ -383,7 +382,8 @@ def main():
             "internal static global::Microsoft.CodeAnalysis.IIncrementalGenerator CreateDependencyInjectionGenerator() => " + di_factory + "; }\n")
     (app / "global.json").write_text(json.dumps({"sdk": {
         "version": receipt["toolchain"]["dotnetSdk"], "rollForward": "disable"}}, indent=2))
-    package_cache = reused_host / "packages" if reused_host else run / "packages"
+    package_cache_owner = run if package_mode or reused_host is None else reused_host
+    package_cache = package_cache_owner / "packages"
     env = dict(os.environ, NUGET_PACKAGES=str(package_cache),
                NUGET_HTTP_CACHE_PATH=str(run / "http-cache"))
     commands = []
@@ -400,13 +400,20 @@ def main():
             raise RuntimeError(f"{name} failed; inspect {run / (name + '.stderr')}")
 
     print("Restoring and publishing the untrimmed interpreter compiler host", flush=True)
-    execute(["dotnet", "restore", runtime_option, *source_options, "--configfile", str(baseline / "NuGet.Config"),
+    execute(["dotnet", "restore", runtime_option, *package_options, "--configfile", str(baseline / "NuGet.Config"),
              "-p:DisableImplicitLibraryPacksFolder=true", "-p:DisableImplicitNuGetFallbackFolder=true",
              "-p:RestoreFallbackFolders=", "-p:RestoreAdditionalProjectSources=", "-p:RestoreAdditionalProjectFallbackFolders=", "-p:NuGetAudit=false"], "restore")
     assets = json.loads((app / "obj/project.assets.json").read_text())
     if set(assets["project"]["restore"]["sources"]) != {"https://api.nuget.org/v3/index.json"}:
         raise RuntimeError("Unexpected restore source")
-    if compiler_pin:
+    if compiler_package_version:
+        expected_packages = {
+            f"netwasm.compiler.browser/{compiler_package_version}",
+            f"netwasm.runtime.pack/{compiler_package_version}"
+        }
+        restored_packages = {key.lower() for key in assets["libraries"]}
+        if not expected_packages.issubset(restored_packages):
+            raise RuntimeError("The exact browser compiler packages were not restored")
         pending = [app / "obj/project.assets.json"]
         checked = set()
         while pending:
@@ -426,11 +433,27 @@ def main():
             for framework in restore["frameworks"].values():
                 for reference in framework.get("projectReferences", {}):
                     pending.append(Path(reference).parent / "obj/project.assets.json")
+        if len(checked) != 1:
+            raise RuntimeError("Browser compiler host must not restore source project dependencies")
+        package_origins = {}
+        for package_id in ("netwasm.compiler.browser", "netwasm.runtime.pack"):
+            package_root = package_cache / package_id / compiler_package_version
+            metadata = json.loads((package_root / ".nupkg.metadata").read_text())
+            if metadata.get("source") != "https://api.nuget.org/v3/index.json":
+                raise RuntimeError(f"{package_id} did not originate from NuGet.org")
+            archive = package_root / f"{package_id}.{compiler_package_version}.nupkg"
+            package_origins[package_id] = {
+                "version": compiler_package_version,
+                "source": metadata["source"],
+                "archive": fingerprint(archive),
+                "metadata": fingerprint(package_root / ".nupkg.metadata")
+            }
+        (run / "compiler-package-origins.json").write_text(json.dumps(package_origins, indent=2))
         (run / "restore-provenance.json").write_text(json.dumps({
             "projectsChecked": len(checked), "sources": ["https://api.nuget.org/v3/index.json"],
-            "fallbackFolders": [], "packageCache": str(package_cache.relative_to(reused_host if reused_host else run)),
+            "fallbackFolders": [], "packageCache": str(package_cache.relative_to(package_cache_owner)),
             "reusedVerifiedHostReceipt": fingerprint(reused_host / "receipt.json") if reused_host else None}, indent=2))
-    execute(["dotnet", "publish", runtime_option, *source_options, "-c", "Debug", "--no-restore", "-o", str(run / "publish")], "publish")
+    execute(["dotnet", "publish", runtime_option, *package_options, "-c", "Debug", "--no-restore", "-o", str(run / "publish")], "publish")
     shutil.copyfile(app / "bin/Debug/net10.0/NetWasm.Playground.CompilerProbe.runtimeconfig.json",
                     run / "host-runtimeconfig.json")
     web = run / "publish/wwwroot"
@@ -439,7 +462,7 @@ def main():
     version = receipt["pins"]["sources"]["netwasm"]["packageVersion"]
     reference = baseline / f"packages/netwasm.ref/{version}/ref/NetWasm,Version=v0.1/NetWasm.CoreLib.dll"
     shutil.copyfile(reference, web / "target-reference.dll")
-    if compiler_pin:
+    if compiler_package_version:
         shutil.copyfile(baseline / f"packages/netwasm.runtime.pack/{version}/runtime/runtime-pack.json",
                         web / "runtime-pack.json")
         shutil.copyfile(baseline / f"packages/netwasm.runtime.wasm32/{version}/runtime/NetWasm.CoreLib.dll",
@@ -459,7 +482,7 @@ def main():
                for path in sorted(generated.glob("*.cs"))]
     (web / "support.json").write_text(json.dumps(support))
     expected_runtime_plan = None
-    if compiler_pin:
+    if compiler_package_version:
         captures = sorted((baseline / "captured-tools").glob("wasm-ld-*/invocation.json"))
         if len(captures) != 1:
             raise RuntimeError("Expected one authoritative desktop runtime link capture")
@@ -478,7 +501,9 @@ def main():
         "referenceSha256": hashlib.sha256(reference.read_bytes()).hexdigest(),
         "desktopReceiptSha256": hashlib.sha256((baseline / "receipt.json").read_bytes()).hexdigest(),
         "toolchain": receipt["toolchain"], "compilerHost": host,
-        "browserCompilerCommit": compiler_pin,
+        "browserCompilerPackage": ({"id": "NetWasm.Compiler.Browser", "version": compiler_package_version,
+                                     "source": "https://api.nuget.org/v3/index.json"}
+                                    if compiler_package_version else None),
         "expectedRuntimePlan": expected_runtime_plan}, indent=2))
     if reused_host:
         (run / "node_modules").symlink_to(reused_host / "node_modules", target_is_directory=True)
@@ -503,7 +528,7 @@ def main():
         server.shutdown()
         server.server_close()
         thread.join()
-    finalize_evidence(run, baseline, compiler_pin)
+    finalize_evidence(run, baseline, compiler_package_version)
     print("PASS: browser Roslyn compilation, diagnostics and recovery" +
           ("; trusted generators" if trusted and not args.skip_trusted_probes else ""), flush=True)
 

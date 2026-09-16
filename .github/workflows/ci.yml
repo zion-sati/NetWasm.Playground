@@ -21,6 +21,8 @@ jobs:
           node-version: 26.7.0
           cache: npm
       - run: npm ci
+      - name: Verify public package boundaries
+        run: PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s eng/tests -p 'test_*.py'
       - run: npm run typecheck
       - name: Build application shell
         run: npm run build

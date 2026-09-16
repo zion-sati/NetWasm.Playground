@@ -7,6 +7,7 @@ import json
 from pathlib import Path
 import shutil
 import subprocess
+import sys
 import tempfile
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -25,6 +26,19 @@ def verify_receipt(folder):
     for relative, expected in receipt['files'].items():
         if fingerprint(folder / relative) != expected:
             raise ValueError(f'Receipt mismatch: {folder.name}/{relative}')
+
+
+def verify_nuget_package(baseline, receipt, package_id, version):
+    package_root = baseline / 'packages' / package_id.lower() / version
+    metadata_path = package_root / '.nupkg.metadata'
+    metadata = json.loads(metadata_path.read_text())
+    if metadata.get('source') != 'https://api.nuget.org/v3/index.json':
+        raise ValueError(f'{package_id} did not originate from NuGet.org')
+    archive = package_root / f'{package_id.lower()}.{version}.nupkg'
+    relative = str(archive.relative_to(baseline))
+    if receipt['packages'].get(relative) != fingerprint(archive):
+        raise ValueError(f'{package_id} package archive is not bound by the baseline receipt')
+    return package_root
 
 
 def verify_staged(folder):
@@ -52,7 +66,6 @@ def main():
     parser.add_argument('--tools', type=Path, default=ROOT / '.cache/browser-tools-probe-20260915')
     parser.add_argument('--lld', type=Path, default=ROOT / '.cache/browser-lld-20260915')
     parser.add_argument('--component', type=Path, default=ROOT / '.cache/browser-component-20260916/final')
-    parser.add_argument('--source', type=Path, default=ROOT / '.cache/public-netwasm')
     parser.add_argument('--workers', type=Path, default=ROOT / 'src/workers')
     parser.add_argument('--examples', type=Path, default=ROOT / '.cache/desktop-examples-20260916', help='Receipt-verified public desktop example inputs')
     parser.add_argument('--generated-json', type=Path, default=ROOT / '.cache/desktop-json-generated-20260916', help='Receipt-verified source-generated JSON example inputs')
@@ -67,6 +80,7 @@ def main():
         return
     subprocess.run(['python3', str(ROOT / 'eng/browser-notices.py'), '--verify', str(args.notices)], check=True)
     subprocess.run(['python3', str(ROOT / 'eng/desktop-baseline.py'), str(args.baseline), '--verify'], check=True)
+    baseline_receipt = json.loads((args.baseline / 'receipt.json').read_text())
     for folder in [args.compiler, args.tools, args.component]:
         verify_receipt(folder)
     additional_examples = args.additional_examples if args.additional_examples is not None else [ROOT / '.cache/desktop-extra-examples-20260916']
@@ -84,6 +98,19 @@ def main():
         if fingerprint(args.lld / 'assets' / name) != expected:
             raise ValueError(f'LLD asset mismatch: {name}')
     pins = json.loads((ROOT / 'eng/upstream-sources.json').read_text())['sources']
+    version = pins['netwasm']['packageVersion']
+    hosting_package = verify_nuget_package(args.baseline, baseline_receipt, 'NetWasm.Hosting', version)
+    toolchain_package = verify_nuget_package(args.baseline, baseline_receipt, 'NetWasm.Toolchain', version)
+    compiler_inputs = json.loads((args.compiler / 'inputs.json').read_text())
+    expected_compiler = {'id': 'NetWasm.Compiler.Browser', 'version': version,
+                         'source': 'https://api.nuget.org/v3/index.json'}
+    if compiler_inputs.get('browserCompilerPackage') != expected_compiler:
+        raise ValueError('Compiler host is not bound to the pinned public browser compiler package')
+    compiler_origins = json.loads((args.compiler / 'compiler-package-origins.json').read_text())
+    if set(compiler_origins) != {'netwasm.compiler.browser', 'netwasm.runtime.pack'} or any(
+            item.get('version') != version or item.get('source') != 'https://api.nuget.org/v3/index.json'
+            for item in compiler_origins.values()):
+        raise ValueError('Compiler host package origins are incomplete or do not match the public pin')
     worker_paths = sorted(args.workers.glob('*.mjs'))
     required = {'compiler-worker.mjs', 'tools-worker.mjs', 'lld-worker.mjs', 'guest-worker.mjs'}
     if not required.issubset({path.name for path in worker_paths}):
@@ -130,7 +157,6 @@ def main():
                 (stage / 'recipes' / f"{recipe['id']}.json").write_bytes(encoded({
                     'schemaVersion': 1, 'id': recipe['id'], 'references': references, 'implementations': implementations,
                     'packages': recipe['packages'], 'version': recipe['version']}))
-        commit = pins['netwasm']['browserToolHostCommit']
         if args.tunit:
             tunit_pins = json.loads((args.tunit / 'receipt.json').read_text())['pins']['sources']
             if (tunit_pins['tunit'] != pins['tunit'] or
@@ -160,13 +186,11 @@ def main():
             for name in ['canonical-component-binder.mjs', 'command-executor.mjs', 'component-execution-preparation.mjs',
                          'component-executor.mjs', 'execution-contracts.mjs', 'execution-result.mjs', 'execution-scope-closer.mjs',
                          'guest-wake-notifier.mjs', 'managed-process-observer.mjs', 'pollable-reactor.mjs']:
-                content = subprocess.check_output(['git', '-C', str(args.source), 'show', f'{commit}:src/NetWasm.Hosting/JavaScript/{name}'])
                 (stage / 'hosting').mkdir(exist_ok=True)
-                (stage / 'hosting' / name).write_bytes(content)
+                copy(hosting_package / 'tools/netwasm/hosting' / name, Path('hosting') / name)
         for name in ['binaryen-host.mjs', 'tool-inputs.mjs', 'wasm-tools-host.mjs', 'wasm32-memory-ceiling.mjs']:
-            content = subprocess.check_output(['git', '-C', str(args.source), 'show', f'{commit}:src/NetWasm.Toolchain/Browser/Tools/{name}'])
             (stage / 'hosts').mkdir(exist_ok=True)
-            (stage / 'hosts' / name).write_bytes(content)
+            copy(toolchain_package / 'tools/netwasm/browser' / name, Path('hosts') / name)
         for path in sorted(args.notices.rglob('*')):
             if path.is_file():
                 copy(path, Path('notices') / path.relative_to(args.notices))
@@ -202,4 +226,8 @@ def main():
 
 
 if __name__ == '__main__':
-    main()
+    try:
+        main()
+    except ValueError as error:
+        print(f'ERROR: {error}', file=sys.stderr)
+        raise SystemExit(1) from None
