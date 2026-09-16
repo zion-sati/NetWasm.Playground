@@ -57,14 +57,15 @@ Open `http://127.0.0.1:5174/playground/`. Rebuilding with the default base
 while this preview is running will break its asset URLs.
 
 Pull requests and pushes to `main` run type checking and build the application
-shell without downloading an unpublished toolchain. The Pages workflow is
-manual: after the owner publishes the browser bundle asset recorded in
-`eng/toolchain-release.json`, it builds with GitHub Pages' configured base path,
-runs an actual Chromium compile/run/download smoke test, executes that download
-with pinned Wasmtime, and deploys the verified `dist/` artifact. It then repeats
-that check against the public Pages URL and retains both evidence sets for 14
-days. Configure Pages with **GitHub Actions** as its source; publishing directly
-from the repository root does not build this Vite project.
+shell without downloading an unpublished toolchain. Publishing the versioned
+GitHub Release recorded in `eng/toolchain-release.json` triggers the Pages
+workflow. It verifies the release tag, builds with GitHub Pages' configured base
+path, runs an actual Chromium compile/run/download smoke test, executes that
+download with pinned Wasmtime, and deploys the verified `dist/` artifact. It
+then repeats that check against the public Pages URL and retains both evidence
+sets for 14 days. A manual dispatch remains available for recovery. Configure
+Pages with **GitHub Actions** as its source; publishing directly from the
+repository root does not build this Vite project.
 
 ```sh
 npm run typecheck

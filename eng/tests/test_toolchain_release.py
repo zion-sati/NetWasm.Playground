@@ -25,6 +25,12 @@ class ToolchainReleaseVersionTests(unittest.TestCase):
             f'/{metadata["tag"]}/{metadata["asset"]["name"]}'
         ))
 
+    def test_publishing_the_release_triggers_pages_for_that_tag(self):
+        workflow = (ROOT / ".github/workflows/pages.yml").read_text()
+
+        self.assertIn("release:\n    types: [published]", workflow)
+        self.assertIn("github.event.release.tag_name", workflow)
+
 
 if __name__ == "__main__":
     unittest.main()
