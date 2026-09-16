@@ -126,6 +126,21 @@ async function execute(job: { snapshot: SourceSnapshot; run: boolean }) {
 }
 unsupported = browserSupportMessage();
 if (unsupported) { compileButton.disabled = true; runButton.disabled = true; el('status').textContent = unsupported; }
+else {
+  pipeline = new PlaygroundPipeline(onEvent);
+  (document.querySelector('.workbench') as HTMLElement).dataset.toolchainPreload = 'loading';
+  el('status').textContent = 'Preparing toolchain in background…';
+  // Let the editor paint, then begin fetching and initializing the heavy toolchain
+  // without waiting for the user to choose Compile or Run.
+  setTimeout(() => void pipeline!.preload().then(assets => {
+    (document.querySelector('.workbench') as HTMLElement).dataset.toolchainPreload = 'complete';
+    el('assets').textContent = `Tool assets: ${formatBytes(assets.transferBytes)} transfer cost · ${formatBytes(assets.rawBytes)} uncompressed`;
+    if (!active && el('status').textContent === 'Preparing toolchain in background…') el('status').textContent = 'Ready · toolchain preloaded';
+  }).catch(() => {
+    (document.querySelector('.workbench') as HTMLElement).dataset.toolchainPreload = 'failed';
+    if (!active && el('status').textContent === 'Preparing toolchain in background…') el('status').textContent = 'Ready · toolchain will load when needed';
+  }), 0);
+}
 compileButton.onclick = () => request(false);
 runButton.onclick = () => request(true);
 stopButton.onclick = () => { stopped = true; queued = undefined; pipeline?.stop(); stopButton.disabled = true; el('status').textContent = 'Stopped'; };

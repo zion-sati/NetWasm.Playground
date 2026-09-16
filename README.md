@@ -77,6 +77,13 @@ spinner and numbered status show the current operation across eight steps for
 Compile + Run, seven for Compile, or one for an unchanged component rerun.
 `eng/browser-smoke/progress.mjs` checks these states and Stop recovery.
 
+After the editor mounts, the Playground starts the compiler, linker and tools
+in background workers and fills the browser cache with every executable
+toolchain asset. Each payload is checked against the immutable manifest before
+the preload is marked complete. Compile and Run remain available while this is
+happening; an early click joins the same worker initialization instead of
+starting duplicate downloads.
+
 The smoke expects a running development server with the same base path and
 Playwright's Chromium installed. It exercises the actual compiler and guest.
 

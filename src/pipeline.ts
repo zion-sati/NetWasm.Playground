@@ -6,7 +6,9 @@ export class PlaygroundPipeline {
   private channels = new Map<string, WorkerChannel>();
   private context?: SourceSnapshot;
   private root?: URL;
-  private manifest?: { assets: Record<string, { sha256: string; bytes: number }> };
+  private rootInitialization?: Promise<void>;
+  private manifest?: { assets: Record<string, { sha256: string; bytes: number; gzip?: { path: string; sha256: string; bytes: number } }> };
+  private channelInitializations = new Map<string, Promise<void>>();
   private abort?: AbortController;
   private epoch = 0;
   private assets = { rawBytes: 0, transferBytes: 0 };
@@ -16,25 +18,54 @@ export class PlaygroundPipeline {
   constructor(private onEvent: (event: PipelineEvent) => void) {}
   private emit(event: object) { if (this.context) this.onEvent({ requestId: this.context.requestId, revision: this.context.revision, ...event } as PipelineEvent); }
   private async initialize() {
-    this.abort = new AbortController();
+    if (!this.abort || this.abort.signal.aborted) this.abort = new AbortController();
     if (this.root) return;
-    const base = new URL(`${import.meta.env.BASE_URL}toolchain/`, location.origin);
-    const response = await fetch(new URL('index.json', base), { signal: this.abort.signal, cache: 'no-cache' });
-    if (!response.ok) throw new Error('Toolchain assets unavailable. Run the asset preparation command.');
-    const index = await response.json();
-    if (!/^[a-f0-9]{64}$/.test(index.id)) throw new Error('Invalid toolchain version');
-    const root = new URL(`${index.id}/`, base);
-    const manifestResponse = await fetch(new URL('asset-manifest.json', root), { signal: this.abort.signal, cache: 'force-cache' });
-    if (!manifestResponse.ok) throw new Error('Toolchain manifest unavailable');
-    const bytes = new Uint8Array(await manifestResponse.arrayBuffer());
-    await this.verify(bytes, index.manifestSha256);
-    this.manifest = JSON.parse(new TextDecoder().decode(bytes));
-    this.root = root;
+    await (this.rootInitialization ??= (async () => {
+      const signal = this.abort!.signal;
+      const base = new URL(`${import.meta.env.BASE_URL}toolchain/`, location.origin);
+      const response = await fetch(new URL('index.json', base), { signal, cache: 'no-cache' });
+      if (!response.ok) throw new Error('Toolchain assets unavailable. Run the asset preparation command.');
+      const index = await response.json();
+      if (!/^[a-f0-9]{64}$/.test(index.id)) throw new Error('Invalid toolchain version');
+      const root = new URL(`${index.id}/`, base);
+      const manifestResponse = await fetch(new URL('asset-manifest.json', root), { signal, cache: 'force-cache' });
+      if (!manifestResponse.ok) throw new Error('Toolchain manifest unavailable');
+      const bytes = new Uint8Array(await manifestResponse.arrayBuffer());
+      await this.verify(bytes, index.manifestSha256);
+      this.manifest = JSON.parse(new TextDecoder().decode(bytes));
+      this.root = root;
+    })().catch(error => { this.rootInitialization = undefined; throw error; }));
   }
   private async verify(bytes: Uint8Array, expected: string) {
     const digest = new Uint8Array(await crypto.subtle.digest('SHA-256', bytes.slice().buffer));
     const actual = Array.from(digest, byte => byte.toString(16).padStart(2, '0')).join('');
     if (actual !== expected) throw new Error('Toolchain asset integrity check failed');
+  }
+  private async preloadRemainingAssets() {
+    const entries = Object.entries(this.manifest!.assets)
+      .filter(([name]) => !name.startsWith('notices/') && !this.measuredAssets.has(name));
+    let cursor = 0;
+    const load = async () => {
+      while (cursor < entries.length) {
+        const [name, entry] = entries[cursor++];
+        if (!/^[A-Za-z0-9_.@/-]+$/.test(name) || name.startsWith('/') || name.split('/').some(part => !part || part === '.' || part === '..')) throw new Error('Invalid toolchain asset path');
+        const receipt = entry.gzip ?? entry;
+        const path = 'path' in receipt ? receipt.path : name;
+        if (!/^[A-Za-z0-9_.@/-]+$/.test(path) || path.startsWith('/') || path.split('/').some(part => !part || part === '.' || part === '..')) throw new Error('Invalid toolchain receipt path');
+        const response = await fetch(new URL(path, this.root!), { signal: this.abort!.signal, cache: 'force-cache' });
+        if (!response.ok) throw new Error(`Toolchain asset unavailable: ${name}`);
+        const bytes = new Uint8Array(await response.arrayBuffer());
+        if (bytes.byteLength !== receipt.bytes) throw new Error(`Toolchain asset length failed: ${name}`);
+        await this.verify(bytes, receipt.sha256);
+        if (!this.measuredAssets.has(name)) {
+          this.measuredAssets.add(name);
+          this.assets.rawBytes += entry.bytes;
+          this.assets.transferBytes += receipt.bytes;
+          this.emit({ type: 'assets', ...this.assets });
+        }
+      }
+    };
+    await Promise.all(Array.from({ length: Math.min(8, entries.length) }, load));
   }
   private channel(name: string) {
     let channel = this.channels.get(name);
@@ -50,6 +81,28 @@ export class PlaygroundPipeline {
       this.channels.set(name, channel);
     }
     return channel;
+  }
+  private initializeChannel(name: 'compiler' | 'lld' | 'tools') {
+    let initialization = this.channelInitializations.get(name);
+    if (!initialization) {
+      initialization = this.channel(name).request({ operation: 'initialize' })
+        .then(() => undefined);
+      this.channelInitializations.set(name, initialization);
+      void initialization.catch(() => {
+        if (this.channelInitializations.get(name) === initialization) this.channelInitializations.delete(name);
+      });
+    }
+    return initialization;
+  }
+  async preload() {
+    await this.initialize();
+    await Promise.all([
+      this.initializeChannel('compiler'),
+      this.initializeChannel('lld'),
+      this.initializeChannel('tools'),
+    ]);
+    await this.preloadRemainingAssets();
+    return { ...this.assets };
   }
   private async stage<T>(name: string, timings: StageTiming[], action: () => Promise<T>): Promise<T> {
     const epoch = this.epoch;
@@ -76,14 +129,14 @@ export class PlaygroundPipeline {
       if (!optimizationModes.includes(optimization)) throw new Error('Unknown optimization mode');
       if (snapshot.source.length > 65536 || new TextEncoder().encode(snapshot.source).byteLength > 65536) throw new Error('Source limit exceeded (64 KiB)');
       await this.stage('download', timings, () => this.initialize());
-      await this.stage('compiler-initialize', timings, () => this.channel('compiler').request({ operation: 'initialize' }));
+      await this.stage('compiler-initialize', timings, () => this.initializeChannel('compiler'));
       const compilation = await this.stage('compile', timings, () => this.channel('compiler').request({ operation: 'compile', recipe: snapshot.recipeId, source: snapshot.source }));
       recycleCompiler = compilation.hostLinearMemoryBytes >= 512 * 1048576;
       for (const timing of compilation.timings ?? []) this.emit({ type: 'stage', stage: timing.stage, state: 'complete', milliseconds: timing.milliseconds });
       if (!compilation.success) return { ...result, success: false, diagnostics: compilation.diagnostics ?? [], stage: compilation.stage, assets: { ...this.assets } };
       if (compilation.timings) timings.push(...compilation.timings);
-      await this.stage('linker-initialize', timings, () => this.channel('lld').request({ operation: 'initialize' }));
-      await this.stage('tools-initialize', timings, () => this.channel('tools').request({ operation: 'initialize' }));
+      await this.stage('linker-initialize', timings, () => this.initializeChannel('lld'));
+      await this.stage('tools-initialize', timings, () => this.initializeChannel('tools'));
       const runtime = await this.stage('link', timings, () => this.channel('lld').request({ operation: 'link', plan: compilation.runtimeLinkPlan }));
       if (!runtime.success) throw new Error(runtime.error || runtime.stderr || 'Runtime link failed');
       const plan = compilation.coreLinkPlan;
@@ -118,7 +171,7 @@ export class PlaygroundPipeline {
       return { ...result, success: true, component, assets: { ...this.assets } };
     } catch (error) { return { ...result, success: false, cancelled: epoch !== this.epoch, stage: this.currentStage, error: String(error) }; }
     finally {
-      if (recycleCompiler) { this.channels.get('compiler')?.reset(); this.channels.delete('compiler'); }
+      if (recycleCompiler) { this.channels.get('compiler')?.reset(); this.channels.delete('compiler'); this.channelInitializations.delete('compiler'); }
       this.context = undefined;
     }
   }
@@ -136,6 +189,6 @@ export class PlaygroundPipeline {
     } catch (error) { return { ...base, ...this.runOutput, success: false, cancelled: epoch !== this.epoch, stage: this.currentStage, error: String(error) }; }
     finally { this.channels.get('guest')?.reset(); this.channels.delete('guest'); this.runOutput = undefined; this.context = undefined; }
   }
-  stop() { this.epoch++; this.abort?.abort(); for (const channel of this.channels.values()) channel.reset(); }
+  stop() { this.epoch++; this.abort?.abort(); for (const channel of this.channels.values()) channel.reset(); this.channelInitializations.clear(); }
   dispose() { this.stop(); this.channels.clear(); }
 }

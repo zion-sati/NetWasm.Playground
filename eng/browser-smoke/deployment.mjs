@@ -24,11 +24,15 @@ try {
   page.on('request', request => requests.push({ url: request.url(), method: request.method(), body: request.postData() }));
   await page.goto(url);
   await page.locator('.monaco-editor').waitFor();
-  if (requests.some(unexpectedRequest)) throw Error('Unexpected request before compilation');
+  const unexpectedBeforeCompilation = requests.filter(unexpectedRequest);
+  if (unexpectedBeforeCompilation.length) throw Error(`Unexpected request before compilation: ${JSON.stringify(unexpectedBeforeCompilation)}`);
+  await page.waitForFunction(() => performance.getEntriesByType('resource').some(entry => entry.name.includes('/toolchain/')));
+  if (!await page.locator('#compile').isEnabled() || !await page.locator('#run').isEnabled()) throw Error('Background preload disabled actions');
   await page.getByLabel('Optimization', { exact: true }).selectOption('none');
   await page.locator('#run').click();
   if (await page.locator('#compile').isEnabled() || await page.locator('#run').isEnabled()) throw Error('Busy controls remain enabled');
   await page.waitForFunction(() => document.querySelector('#stop').disabled, undefined, { timeout: 240000 });
+  await page.locator('[data-toolchain-preload="complete"]').waitFor({ timeout: 240000 });
   const stdout = await page.locator('#output').textContent();
   const status = await page.locator('#status').textContent();
   if (stdout !== '42\n' || status !== 'Run complete') throw Error(`Browser run failed: ${status} ${JSON.stringify(stdout)}`);
