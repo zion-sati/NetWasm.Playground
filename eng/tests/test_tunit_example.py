@@ -23,6 +23,18 @@ class TUnitRecipeInputsTests(unittest.TestCase):
         self.assertIn("netwasm.toolchain/0.2.0/", recipe["componentWitBinary"])
         self.assertIn("netwasm.tunit/0.2.1/", recipe["generatedProgram"])
         self.assertIn("netwasm.tunit.core/0.2.1/", recipe["trustedGenerator"])
+        self.assertEqual({
+            "id": "NetWasm.TUnit.Templates",
+            "version": "0.2.1",
+            "source": MODULE.FEED,
+        }, recipe["templatePackage"])
+
+    def test_template_archive_comes_from_exact_public_version(self):
+        self.assertEqual(
+            "https://api.nuget.org/v3-flatcontainer/netwasm.tunit.templates/0.2.1/"
+            "netwasm.tunit.templates.0.2.1.nupkg",
+            MODULE.template_package_url("0.2.1"),
+        )
 
 
 if __name__ == "__main__":

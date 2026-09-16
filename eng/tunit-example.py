@@ -9,12 +9,18 @@ import shutil
 import subprocess
 import sys
 import time
+import urllib.request
 import xml.etree.ElementTree as ET
+import zipfile
 from xml.sax.saxutils import escape
 
 ROOT = Path(__file__).resolve().parents[1]
 FEED = 'https://api.nuget.org/v3/index.json'
 SDK = '10.0.302'
+
+def template_package_url(version):
+    package = 'netwasm.tunit.templates'
+    return f'https://api.nuget.org/v3-flatcontainer/{package}/{version}/{package}.{version}.nupkg'
 
 def fingerprint(path):
     return {'bytes': path.stat().st_size, 'sha256': hashlib.sha256(path.read_bytes()).hexdigest()}
@@ -27,6 +33,7 @@ def make_recipe_inputs(pins, commit, libraries):
     tunit_version = pins['sources']['tunit']['packageVersion']
     return {
         'templateCommit': commit,
+        'templatePackage': {'id': 'NetWasm.TUnit.Templates', 'version': tunit_version, 'source': FEED},
         'sdk': SDK,
         'libraries': libraries,
         'compilerWorld': 'netwasm:platform@1.0.0/async-platform',
@@ -69,14 +76,20 @@ def main():
     commit = subprocess.check_output(['git', '-C', str(source), 'rev-parse', 'HEAD'], text=True).strip()
     if commit != pins['sources']['tunit']['commit']:
         raise ValueError('Public TUnit source pin mismatch')
-    template = source / 'packaging/NetWasm.TUnit.Templates/content/NetWasmTUnitTests'
+    tunit_version = pins['sources']['tunit']['packageVersion']
+    template_archive = run / f'netwasm.tunit.templates.{tunit_version}.nupkg'
+    if not args.resume or not template_archive.exists():
+        with urllib.request.urlopen(template_package_url(tunit_version)) as response:
+            template_archive.write_bytes(response.read())
     app = run / 'app'
     app.mkdir(exist_ok=args.resume)
     original = run / 'template'
     original.mkdir(exist_ok=args.resume)
-    for name in ('Tests.cs', 'NetWasmTUnitTests.csproj', 'global.json'):
-        shutil.copyfile(template / name, original / name)
-        shutil.copyfile(template / name, app / name)
+    with zipfile.ZipFile(template_archive) as package:
+        for name in ('Tests.cs', 'NetWasmTUnitTests.csproj', 'global.json'):
+            content = package.read('content/NetWasmTUnitTests/' + name)
+            (original / name).write_bytes(content)
+            (app / name).write_bytes(content)
     global_json = json.loads((app / 'global.json').read_text())
     global_json['sdk'] = {'version': SDK, 'rollForward': 'disable', 'allowPrerelease': False}
     write_json(app / 'global.json', global_json)
@@ -112,7 +125,6 @@ def main():
         raise ValueError('Unexpected resolved package origin')
     write_json(run / 'package-origins.json', {path.relative_to(run).as_posix(): json.loads(path.read_text()) for path in metadata})
     netwasm_version = pins['sources']['netwasm']['packageVersion']
-    tunit_version = pins['sources']['tunit']['packageVersion']
     binaryen = run / f'packages/netwasm.toolchain/{netwasm_version}/tools/binaryen/bin'
     write_json(run / 'capture-config.json', {'tools': {'wasm-ld': str(linker), 'wasm-merge': str(binaryen / 'wasm-merge'), 'wasm-opt': str(binaryen / 'wasm-opt')}, 'output': str(run / 'captured-tools'), 'python': sys.executable, 'pythonAdapter': str(ROOT / 'eng/capture-tool.py')})
     wrappers = run / 'wrappers'
@@ -171,7 +183,7 @@ def main():
         outcomes.append(outcome)
         write_json(run / 'outcomes.json', outcomes)
         print(f'PASS: {name}: {passed} passed, {failed} failed', flush=True)
-    retained = [*original.rglob('*'), *logs.rglob('*'), * (run / 'cases').rglob('*'), *(run / 'captured-tools').rglob('*'), *(run / 'packages').glob('*/*/*.nupkg'), *metadata, run / 'NuGet.Config', run / 'commands.json', run / 'recipe-inputs.json', run / 'package-origins.json', run / 'outcomes.json', app / 'global.json', app / 'NetWasmTUnitTests.csproj', app / 'obj/project.assets.json', run / 'capture.targets', run / 'capture-config.json']
+    retained = [template_archive, *original.rglob('*'), *logs.rglob('*'), * (run / 'cases').rglob('*'), *(run / 'captured-tools').rglob('*'), *(run / 'packages').glob('*/*/*.nupkg'), *metadata, run / 'NuGet.Config', run / 'commands.json', run / 'recipe-inputs.json', run / 'package-origins.json', run / 'outcomes.json', app / 'global.json', app / 'NetWasmTUnitTests.csproj', app / 'obj/project.assets.json', run / 'capture.targets', run / 'capture-config.json']
     for entry in libraries.values():
         for paths in entry.values():
             retained.extend(run / path for path in paths)

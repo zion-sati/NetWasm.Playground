@@ -35,9 +35,9 @@ It consumes the public NuGet.org packages and verified inputs produced by the
 runners under `eng/` and `spikes/`; it does not read NetWasm source checkouts.
 It does not rebuild LLVM. Pages builds install the immutable browser bundle
 recorded in `eng/toolchain-release.json`; its archive hash, content identity and
-every staged asset are verified before use. The manifest remains pending until
-the bundle has been rebuilt exclusively from packages available on NuGet.org
-and the owner has published its GitHub release asset manually.
+every staged asset are verified before use. A ready manifest identifies the
+exact archive the owner publishes as a GitHub release asset before deploying
+Pages.
 
 ```sh
 python3 eng/toolchain-release.py install
@@ -81,8 +81,9 @@ Playwright's Chromium installed. It exercises the actual compiler and guest.
 workspace; `--recipe` selects a particular example. The Regex, DI and hashing
 recipes use their public NetWasm library packages. The compiler host includes
 the package-owned DI generator through `eng/roslyn-worker.py --di-example`
-with that verified workspace; it closes constructor activation at compile time. `eng/tunit-example.py` checks
-the public TUnit template using ordinary `dotnet test`.
+with that verified workspace; it closes constructor activation at compile time.
+`eng/tunit-example.py` downloads the exact released public TUnit template
+package from NuGet.org and checks it using ordinary `dotnet test`.
 `eng/browser-smoke/examples.mjs` checks the ordinary examples and compares
 their outputs with those desktop builds; set `PLAYGROUND_DESKTOP_EXAMPLES` to
 the verified workspace alongside the smoke environment variables above.

@@ -22,6 +22,8 @@ import urllib.request
 import xml.etree.ElementTree as ET
 import zipfile
 
+ROOT = Path(__file__).resolve().parents[1]
+
 
 # Public archive members and Git blobs corresponding to the shipped toolchain.
 # Update these immutable identities when the toolchain inputs change.
@@ -442,6 +444,64 @@ def load(path):
     return json.loads(path.read_text())
 
 
+DYNAMIC_PACKAGES = {
+    'netwasm.toolchain': 'netwasm',
+    'netwasm.tunit': 'tunit',
+    'netwasm.tunit.assertions': 'tunit',
+    'netwasm.tunit.core': 'tunit',
+}
+DYNAMIC_ORIGIN_FIELDS = ('archiveSha256', 'archiveSha512', 'restoreContentHash', 'url', 'version')
+
+
+def current_package_versions():
+    pins = load(ROOT / 'eng/upstream-sources.json')['sources']
+    return {package: pins[family]['packageVersion'] for package, family in DYNAMIC_PACKAGES.items()}
+
+
+def bind_catalog(package_roots):
+    catalog = json.loads(json.dumps(PUBLIC_CATALOG))
+    versions = current_package_versions()
+    for entry in catalog['files'].values():
+        source = entry['source']
+        package = source.get('package')
+        if package not in versions:
+            continue
+        version = versions[package]
+        folder = next((root / package / version for root in package_roots
+                       if (root / package / version / f'{package}.{version}.nupkg').is_file()), None)
+        if folder is None:
+            raise ValueError(f'Public package unavailable; supply its package root: {package}/{version}')
+        archive_name = f'{package}.{version}.nupkg'
+        archive = (folder / archive_name).read_bytes()
+        metadata = load(folder / '.nupkg.metadata')
+        if metadata.get('source') != 'https://api.nuget.org/v3/index.json':
+            raise ValueError('Notice package did not originate from NuGet.org')
+        source.update(version=version,
+                      url=f'https://api.nuget.org/v3-flatcontainer/{package}/{version}/{archive_name}',
+                      archiveSha256=sha256(archive),
+                      archiveSha512=base64.b64encode(hashlib.sha512(archive).digest()).decode(),
+                      restoreContentHash=metadata['contentHash'])
+    return catalog
+
+
+def normalized_catalog_files(files, validate_versions):
+    normalized = json.loads(json.dumps(files))
+    versions = current_package_versions()
+    for entry in normalized.values():
+        source = entry['source']
+        package = source.get('package')
+        if package not in versions:
+            continue
+        version = versions[package]
+        expected_url = (f'https://api.nuget.org/v3-flatcontainer/{package}/{version}/'
+                        f'{package}.{version}.nupkg')
+        if validate_versions and (source.get('version') != version or source.get('url') != expected_url):
+            raise ValueError(f'Notice package does not match the released pin: {package}/{version}')
+        for field in DYNAMIC_ORIGIN_FIELDS:
+            source[field] = '<release-bound>'
+    return normalized
+
+
 def download(url, cache, expected_sha=None, limit=2 * 1024 * 1024):
     parsed = urllib.parse.urlparse(url)
     if parsed.scheme != 'https' or parsed.hostname not in {'raw.githubusercontent.com', 'registry.npmjs.org'}:
@@ -562,7 +622,9 @@ def verify(folder):
     origins = load(folder / 'origins.json')
     if origins.get('schemaVersion') != 1:
         raise ValueError('Unknown notice origins schema')
-    if origins['files'] != PUBLIC_CATALOG['files'] or origins.get('missingSourceNotices') != PUBLIC_CATALOG['missingSourceNotices']:
+    if (normalized_catalog_files(origins['files'], True) !=
+            normalized_catalog_files(PUBLIC_CATALOG['files'], False) or
+            origins.get('missingSourceNotices') != PUBLIC_CATALOG['missingSourceNotices']):
         raise ValueError('Notice origins differ from the pinned public catalog')
     expected = {'origins.json'}
     for path, item in origins['files'].items():
@@ -595,8 +657,8 @@ def walk_strings(value):
             yield from walk_strings(item)
 
 
-def catalog_entries(args):
-    for target, entry in PUBLIC_CATALOG['files'].items():
+def catalog_entries(args, catalog):
+    for target, entry in catalog['files'].items():
         source = entry['source']
         if source['kind'] == 'git':
             data, origin = github_file({**source, 'sha256': entry['sha256']}, args.cache)
@@ -664,7 +726,8 @@ def stage(args):
     files = {}
     with tempfile.TemporaryDirectory(prefix='.notices-', dir=args.output.parent) as temporary:
         folder = Path(temporary)
-        entries = audit_entries(args) if args.audit else catalog_entries(args)
+        catalog = None if args.audit else bind_catalog(args.packages)
+        entries = audit_entries(args) if args.audit else catalog_entries(args, catalog)
         for target, data, covers, origin in entries:
             if target in files:
                 raise ValueError('Duplicate staged notice path')
@@ -674,7 +737,7 @@ def stage(args):
             files[target] = {'bytes': len(data), 'sha256': sha256(data), 'covers': covers, 'source': origin}
         origins = {'schemaVersion': 1, 'files': files,
                    'missingSourceNotices': (load(args.audit)['missingPublicSourceInputs'] if args.audit
-                                            else PUBLIC_CATALOG['missingSourceNotices']),
+                                            else catalog['missingSourceNotices']),
                    'coverageNotes': [
                        'License texts and notices are retained unchanged from their identified public inputs.',
                        'Source license maps describe the applicable NetWasm paths and retained third-party attribution.',
