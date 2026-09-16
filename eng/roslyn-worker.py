@@ -87,6 +87,28 @@ def camel_case(value):
     return value
 
 
+def verified_package_member(directory, relative):
+    """Return a receipt-bound extraction after matching its public package archive."""
+    relative = Path(relative)
+    parts = relative.parts
+    if relative.is_absolute() or len(parts) < 4 or parts[0] != "packages" or \
+            any(part in ("", ".", "..") for part in parts):
+        raise RuntimeError("Unapproved trusted package path")
+    package_id, version = parts[1:3]
+    if not package_id or not version:
+        raise RuntimeError("Unapproved trusted package path")
+    archive = directory / "packages" / package_id / version / f"{package_id}.{version}.nupkg"
+    try:
+        with zipfile.ZipFile(archive) as package:
+            original = package.read("/".join(parts[3:]))
+    except (FileNotFoundError, KeyError, zipfile.BadZipFile) as error:
+        raise RuntimeError("Trusted input is absent from its public package archive") from error
+    path = directory / relative
+    if not path.is_file() or path.read_bytes() != original:
+        raise RuntimeError("Trusted extracted input differs from public archive")
+    return path
+
+
 def prepare_trusted_inputs(json_run, tunit_run, run, di_run=None):
     """Snapshot only approved package executables and separately identify guest metadata."""
     for directory in (json_run, tunit_run, *([di_run] if di_run else [])):
@@ -94,48 +116,40 @@ def prepare_trusted_inputs(json_run, tunit_run, run, di_run=None):
         for relative, expected in receipt["files"].items():
             if fingerprint(directory / relative) != expected:
                 raise RuntimeError("Trusted recipe receipt changed")
-    def package_member(directory, relative):
-        parts = Path(relative).parts
-        if len(parts) < 4 or parts[0] != "packages" or parts[2] != "0.1.0":
-            raise RuntimeError("Unapproved trusted package path")
-        archive = directory / Path(*parts[:3]) / (parts[1] + ".0.1.0.nupkg")
-        with zipfile.ZipFile(archive) as package:
-            original = package.read("/".join(parts[3:]))
-        path = directory / relative
-        if path.read_bytes() != original:
-            raise RuntimeError("Trusted extracted input differs from public archive")
-        return path
     json_recipe = json.loads((json_run / "json-generated/recipe-inputs.json").read_text())
     tunit_recipe = json.loads((tunit_run / "recipe-inputs.json").read_text())
+    di_recipe = json.loads((di_run / "di/recipe-inputs.json").read_text()) if di_run else None
     generators = {
-        "System.Text.Json.SourceGeneration": package_member(json_run, "packages/netwasm.system.text.json/0.1.0/analyzers/dotnet/cs/System.Text.Json.SourceGeneration.dll"),
-        "TUnit.Core.SourceGenerator": package_member(tunit_run, tunit_recipe["trustedGenerator"]),
+        "System.Text.Json.SourceGeneration": verified_package_member(
+            json_run,
+            f"packages/netwasm.system.text.json/{json_recipe['version']}/analyzers/dotnet/cs/System.Text.Json.SourceGeneration.dll"),
+        "TUnit.Core.SourceGenerator": verified_package_member(tunit_run, tunit_recipe["trustedGenerator"]),
     }
-    if di_run:
-        generators["NetWasm.Microsoft.Extensions.DependencyInjection.Generator"] = package_member(di_run,
-            "packages/netwasm.microsoft.extensions.dependencyinjection/0.1.0/analyzers/dotnet/cs/NetWasm.Microsoft.Extensions.DependencyInjection.Generator.dll")
+    if di_run and di_recipe:
+        generators["NetWasm.Microsoft.Extensions.DependencyInjection.Generator"] = verified_package_member(
+            di_run,
+            f"packages/netwasm.microsoft.extensions.dependencyinjection/{di_recipe['version']}/analyzers/dotnet/cs/NetWasm.Microsoft.Extensions.DependencyInjection.Generator.dll")
     approved = run / "approved-generators"
     approved.mkdir()
     for name, path in list(generators.items()):
         shutil.copyfile(path, approved / (name + ".dll"))
         generators[name] = approved / (name + ".dll")
-    program = package_member(tunit_run, tunit_recipe["generatedProgram"])
-    json_libraries = {name: package_member(json_run, relative) for name, relative in json_recipe["libraries"].items()}
+    program = verified_package_member(tunit_run, tunit_recipe["generatedProgram"])
+    json_libraries = {name: verified_package_member(json_run, relative) for name, relative in json_recipe["libraries"].items()}
     tunit_references = {}
     tunit_implementations = {}
     for entry in tunit_recipe["libraries"].values():
         for kind, destination in (("compile", tunit_references), ("runtime", tunit_implementations)):
             for relative in entry.get(kind, []):
                 if Path(relative).name != "NetWasm.CoreLib.dll":
-                    destination[Path(relative).name] = package_member(tunit_run, relative)
+                    destination[Path(relative).name] = verified_package_member(tunit_run, relative)
     result = {"generators": generators, "program": program.read_text(), "recipes": {
         "json": {"source": (json_run / "json-generated/Program.cs").read_text(), "support": json_recipe["support"], "references": json_libraries, "implementations": json_libraries},
         "tunit": {"source": (tunit_run / "cases/template/Tests.cs").read_text(), "secondSource": (tunit_run / "cases/second-test/Tests.cs").read_text(), "support": [{"path": "obj/Release/netwasm0.1/" + path.name, "text": path.read_text()} for path in sorted((tunit_run / "cases/template/obj").glob("*.cs"))], "references": tunit_references, "implementations": tunit_implementations},
     }}
     receipts = {"json": fingerprint(json_run / "receipt.json"), "tunit": fingerprint(tunit_run / "receipt.json")}
     if di_run:
-        di_recipe = json.loads((di_run / "di/recipe-inputs.json").read_text())
-        di_libraries = {name: package_member(di_run, relative) for name, relative in di_recipe["libraries"].items()}
+        di_libraries = {name: verified_package_member(di_run, relative) for name, relative in di_recipe["libraries"].items()}
         result["recipes"]["di"] = {"source": (di_run / "di/Program.cs").read_text(), "support": di_recipe["support"],
             "references": di_libraries, "implementations": di_libraries}
         receipts["di"] = fingerprint(di_run / "receipt.json")

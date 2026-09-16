@@ -22,6 +22,24 @@ def fingerprint(path):
 def write_json(path, value):
     path.write_text(json.dumps(value, indent=2) + '\n')
 
+def make_recipe_inputs(pins, commit, libraries):
+    netwasm_version = pins['sources']['netwasm']['packageVersion']
+    tunit_version = pins['sources']['tunit']['packageVersion']
+    return {
+        'templateCommit': commit,
+        'sdk': SDK,
+        'libraries': libraries,
+        'compilerWorld': 'netwasm:platform@1.0.0/async-platform',
+        'componentContract': 'async-command',
+        'entryType': 'NetWasm.TUnit.Generated.NetWasmTestProgram',
+        'entryMethod': 'Main',
+        'coreLibImplementation': f'packages/netwasm.runtime.wasm32/{netwasm_version}/runtime/NetWasm.CoreLib.dll',
+        'compilerWitBinary': f'packages/netwasm.toolchain/{netwasm_version}/tools/wit-packages/compiler.wit.wasm',
+        'componentWitBinary': f'packages/netwasm.toolchain/{netwasm_version}/tools/wit-packages/async-command.wit.wasm',
+        'generatedProgram': f'packages/netwasm.tunit/{tunit_version}/build/NetWasm,Version=v0.1/NetWasm.TUnit.Program.cs',
+        'trustedGenerator': f'packages/netwasm.tunit.core/{tunit_version}/analyzers/dotnet/roslyn4.14/cs/TUnit.Core.SourceGenerator.dll',
+    }
+
 def verify(run):
     receipt = json.loads((run / 'receipt.json').read_text())
     for name, expected in receipt['files'].items():
@@ -93,8 +111,9 @@ def main():
     if not metadata or any(json.loads(path.read_text()).get('source') != FEED for path in metadata):
         raise ValueError('Unexpected resolved package origin')
     write_json(run / 'package-origins.json', {path.relative_to(run).as_posix(): json.loads(path.read_text()) for path in metadata})
-    version = pins['sources']['netwasm']['packageVersion']
-    binaryen = run / f'packages/netwasm.toolchain/{version}/tools/binaryen/bin'
+    netwasm_version = pins['sources']['netwasm']['packageVersion']
+    tunit_version = pins['sources']['tunit']['packageVersion']
+    binaryen = run / f'packages/netwasm.toolchain/{netwasm_version}/tools/binaryen/bin'
     write_json(run / 'capture-config.json', {'tools': {'wasm-ld': str(linker), 'wasm-merge': str(binaryen / 'wasm-merge'), 'wasm-opt': str(binaryen / 'wasm-opt')}, 'output': str(run / 'captured-tools'), 'python': sys.executable, 'pythonAdapter': str(ROOT / 'eng/capture-tool.py')})
     wrappers = run / 'wrappers'
     wrappers.mkdir(exist_ok=args.resume)
@@ -110,7 +129,7 @@ def main():
             for relative in entry.get(kind, {}):
                 if relative.endswith('.dll'):
                     libraries.setdefault(package, {}).setdefault(kind, []).append((Path('packages') / assets['libraries'][package]['path'] / relative).as_posix())
-    write_json(run / 'recipe-inputs.json', {'templateCommit': commit, 'sdk': SDK, 'libraries': libraries, 'compilerWorld': 'netwasm:platform@1.0.0/async-platform', 'componentContract': 'async-command', 'entryType': 'NetWasm.TUnit.Generated.NetWasmTestProgram', 'entryMethod': 'Main', 'coreLibImplementation': f'packages/netwasm.runtime.wasm32/{version}/runtime/NetWasm.CoreLib.dll', 'compilerWitBinary': f'packages/netwasm.toolchain/{version}/tools/wit-packages/compiler.wit.wasm', 'componentWitBinary': f'packages/netwasm.toolchain/{version}/tools/wit-packages/async-command.wit.wasm', 'generatedProgram': f'packages/netwasm.tunit/{version}/build/NetWasm,Version=v0.1/NetWasm.TUnit.Program.cs', 'trustedGenerator': f'packages/netwasm.tunit.core/{version}/analyzers/dotnet/roslyn4.14/cs/TUnit.Core.SourceGenerator.dll'})
+    write_json(run / 'recipe-inputs.json', make_recipe_inputs(pins, commit, libraries))
     template_source = (original / 'Tests.cs').read_text()
     second_source = template_source.rsplit('}', 1)[0] + '''    [Test]
     public async Task SecondAnswerIsFortyTwo()
@@ -156,10 +175,10 @@ def main():
     for entry in libraries.values():
         for paths in entry.values():
             retained.extend(run / path for path in paths)
-    retained.extend((run / f'packages/netwasm.runtime.wasm32/{version}/runtime').glob('*.dll'))
-    retained.extend((run / f'packages/netwasm.tunit/{version}/build').rglob('*.cs'))
-    retained.extend((run / f'packages/netwasm.tunit.core/{version}/analyzers/dotnet/roslyn4.14/cs').glob('*.dll'))
-    retained.extend((run / f'packages/netwasm.toolchain/{version}/tools/wit-packages').glob('*.wasm'))
+    retained.extend((run / f'packages/netwasm.runtime.wasm32/{netwasm_version}/runtime').glob('*.dll'))
+    retained.extend((run / f'packages/netwasm.tunit/{tunit_version}/build').rglob('*.cs'))
+    retained.extend((run / f'packages/netwasm.tunit.core/{tunit_version}/analyzers/dotnet/roslyn4.14/cs').glob('*.dll'))
+    retained.extend((run / f'packages/netwasm.toolchain/{netwasm_version}/tools/wit-packages').glob('*.wasm'))
     files = {path.relative_to(run).as_posix(): fingerprint(path) for path in retained if path.is_file()}
     write_json(run / 'receipt.json', {'schemaVersion': 1, 'pins': pins, 'files': files, 'outcomes': outcomes, 'packageCount': len(metadata), 'identities': {'dotnet': SDK, 'lld': lld_identity}})
     verify(run)

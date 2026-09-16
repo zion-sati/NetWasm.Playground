@@ -136,8 +136,9 @@ produce a message before compilation.
 Focused development-server checks:
 
 ```sh
+NETWASM_VERSION="$(python3 -c 'import json; print(json.load(open("eng/upstream-sources.json"))["sources"]["netwasm"]["packageVersion"])')"
 PLAYGROUND_URL=http://127.0.0.1:5173/playground/ node eng/browser-smoke/worker-channel.mjs
-PLAYGROUND_URL=http://127.0.0.1:5173/playground/ PLAYGROUND_EVIDENCE=<evidence-dir> PLAYGROUND_WASM_TOOLS=<verified-baseline>/packages/netwasm.toolchain/0.1.0/tools/wasm-tools node eng/browser-smoke/reliability.mjs
+PLAYGROUND_URL=http://127.0.0.1:5173/playground/ PLAYGROUND_EVIDENCE=<evidence-dir> PLAYGROUND_WASM_TOOLS=<verified-baseline>/packages/netwasm.toolchain/$NETWASM_VERSION/tools/wasm-tools node eng/browser-smoke/reliability.mjs
 PLAYGROUND_URL=http://127.0.0.1:5173/playground/ PLAYGROUND_EVIDENCE=<evidence-dir> node eng/browser-smoke/resource.mjs
 ```
 
