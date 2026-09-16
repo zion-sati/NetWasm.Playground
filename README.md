@@ -32,7 +32,13 @@ npm run dev
 The asset preparation command checks the existing verification receipts and
 stages assets under an ignored, content-addressed `public/toolchain/` directory.
 It consumes the public inputs produced by the runners under `eng/` and `spikes/`.
-It does not rebuild LLVM. A reusable toolchain release bundle is still planned.
+It does not rebuild LLVM. CI and Pages builds install the immutable release
+recorded in `eng/toolchain-release.json`; its archive hash, content identity and
+every staged asset are verified before use.
+
+```sh
+python3 eng/toolchain-release.py install
+```
 
 For a static build, run `npm run build`. Set `PLAYGROUND_BASE=/playground/`
 when building for a nested path. The default base is `/`.
@@ -45,6 +51,12 @@ PLAYGROUND_BASE=/playground/ npm run preview -- --port 5174
 
 Open `http://127.0.0.1:5174/playground/`. Rebuilding with the default base
 while this preview is running will break its asset URLs.
+
+Pull requests run the frontend CI workflow. Pushes to `main` build the site
+with GitHub Pages' configured base path, run an actual Chromium compile/run/
+download smoke test, execute that download with pinned Wasmtime, and deploy the
+verified `dist/` artifact. Configure Pages with **GitHub Actions** as its source;
+publishing directly from the repository root does not build this Vite project.
 
 ```sh
 npm run typecheck
