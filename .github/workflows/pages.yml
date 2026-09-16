@@ -61,10 +61,18 @@ jobs:
         uses: actions/upload-pages-artifact@7b1f4a764d45c48632c6b24a0339c27f5614fb0b # v4
         with:
           path: dist
+      - name: Retain predeploy smoke evidence
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: pages-predeploy-${{ github.run_id }}
+          path: .cache/pages-smoke
+          retention-days: 14
 
   deploy:
     needs: build-and-test
     runs-on: ubuntu-24.04
+    outputs:
+      page_url: ${{ steps.deployment.outputs.page_url }}
     permissions:
       pages: write
       id-token: write
@@ -75,3 +83,58 @@ jobs:
       - name: Deploy Pages artifact
         id: deployment
         uses: actions/deploy-pages@d6db90164ac5ed86f2b6aed7e0febac5b3c0c03e # v4
+
+  verify-live:
+    needs: deploy
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check out source
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - name: Set up Node.js
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: 26.7.0
+          cache: npm
+      - run: npm ci
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+      - name: Install pinned Wasmtime
+        run: |
+          curl --fail --location --retry 3 --output /tmp/wasmtime.tar.xz \
+            https://github.com/bytecodealliance/wasmtime/releases/download/v47.0.3/wasmtime-v47.0.3-x86_64-linux.tar.xz
+          printf '%s  %s\n' \
+            'ca1fc56d1afc40c8782e96c297fd182a0da162f9a8f52a1e7b094e1dd648e178' \
+            /tmp/wasmtime.tar.xz | sha256sum --check --strict
+          tar -xJf /tmp/wasmtime.tar.xz -C /tmp
+          echo "/tmp/wasmtime-v47.0.3-x86_64-linux" >> "$GITHUB_PATH"
+      - name: Wait for the deployed toolchain
+        env:
+          PLAYGROUND_URL: ${{ needs.deploy.outputs.page_url }}
+        run: |
+          expected_id=$(python3 -c 'import json; print(json.load(open("eng/toolchain-release.json"))["index"]["id"])')
+          index_url="${PLAYGROUND_URL%/}/toolchain/index.json"
+          for attempt in {1..60}; do
+            if curl --fail --silent --show-error --output /tmp/live-toolchain-index.json "$index_url"; then
+              actual_id=$(python3 -c 'import json; print(json.load(open("/tmp/live-toolchain-index.json"))["id"])' 2>/dev/null || true)
+              if [ "$actual_id" = "$expected_id" ]; then
+                exit 0
+              fi
+            fi
+            echo "Waiting for deployed toolchain (attempt $attempt of 60)"
+            sleep 5
+          done
+          echo "Expected deployed toolchain $expected_id was not available at $index_url" >&2
+          exit 1
+      - name: Smoke-test the public deployment
+        env:
+          PLAYGROUND_URL: ${{ needs.deploy.outputs.page_url }}
+          PLAYGROUND_EVIDENCE: .cache/pages-live-smoke
+        run: node eng/browser-smoke/deployment.mjs
+      - name: Retain public deployment evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: pages-live-${{ github.run_id }}
+          path: .cache/pages-live-smoke
+          if-no-files-found: warn
+          retention-days: 14
