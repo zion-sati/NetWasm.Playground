@@ -1,7 +1,7 @@
 {
   "schemaVersion": 2,
   "archive": {
-    "url": "https://github.com/zion-sati/NetWasm.Playground/releases/download/v0.2.4/netwasm-playground-toolchain-v0.2.4.tar.gz",
+    "url": "https://github.com/zion-sati/NetWasm.Playground/releases/download/v0.2.5/netwasm-playground-toolchain-v0.2.5.tar.gz",
     "bytes": 47440110,
     "sha256": "0640e4cc893174d1a3ccd7dd0d7deeb81f91791596c660f6109109df4cd1a708"
   },

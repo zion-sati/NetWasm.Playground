@@ -33,8 +33,9 @@ export function createAssetLoader(report = () => {}) {
   const manifestDocument = () => manifestPromise ??= (async () => {
     const response = await originalFetch(new URL('asset-manifest.json', assetRoot), { cache: 'force-cache' });
     const parsed = JSON.parse(new TextDecoder().decode(await boundedBytes(response, 1048576)));
-    if (parsed.schemaVersion !== 2 || !parsed.assets || typeof parsed.assets !== 'object' || Array.isArray(parsed.assets) ||
-        !parsed.bundles || typeof parsed.bundles !== 'object' || Array.isArray(parsed.bundles)) throw Error('Invalid tool asset manifest');
+    if (parsed.schemaVersion !== 3 || !parsed.assets || typeof parsed.assets !== 'object' || Array.isArray(parsed.assets) ||
+        !parsed.bundles || typeof parsed.bundles !== 'object' || Array.isArray(parsed.bundles) ||
+        Object.keys(parsed.bundles).sort().join(',') !== 'compiler,guest,linker,tools') throw Error('Invalid tool asset manifest');
     return parsed;
   })().catch(error => { manifestPromise = undefined; throw error; });
   const manifest = async () => (await manifestDocument()).assets;
@@ -44,9 +45,10 @@ export function createAssetLoader(report = () => {}) {
       const receipt = (await manifestDocument()).bundles[name];
       if (!receipt || !Number.isSafeInteger(receipt.bytes) || receipt.bytes < 0 || receipt.bytes > 134217728 ||
           !Number.isSafeInteger(receipt.rawBytes) || receipt.rawBytes !== receipt.bytes ||
-          !Number.isSafeInteger(receipt.assets) || receipt.assets < 1 || !/^[a-f0-9]{64}$/.test(receipt.sha256))
+          !Number.isSafeInteger(receipt.assets) || receipt.assets < 1 || !/^[a-f0-9]{64}$/.test(receipt.sha256) ||
+          receipt.path !== `bundles/${name}.${receipt.sha256}.bin`)
         throw Error(`Invalid tool bundle receipt: ${name}`);
-      const response = await originalFetch(new URL(name, assetRoot), { cache: 'force-cache' });
+      const response = await originalFetch(new URL(receipt.path, assetRoot), { cache: 'force-cache' });
       let reported = 0;
       const bytes = await boundedBytes(response, receipt.bytes, loadedBytes => {
         if (loadedBytes !== receipt.bytes && loadedBytes - reported < 524288) return;

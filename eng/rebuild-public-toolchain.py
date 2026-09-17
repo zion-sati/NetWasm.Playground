@@ -82,7 +82,8 @@ def main():
         stage.mkdir()
         entries = [(name, receipt) for name, receipt in manifest['assets'].items()
                    if not name.startswith('compiler/_framework/') and not name.startswith('workers/')]
-        bundle_payloads = {name: (manifest_root / name).read_bytes() for name in manifest['bundles']}
+        bundle_payloads = {name: (manifest_root / receipt.get('path', name)).read_bytes()
+                           for name, receipt in manifest['bundles'].items()}
         for name, receipt in entries:
             path = safe_path(name)
             if not isinstance(receipt.get('bytes'), int) or receipt['bytes'] < 0 or not isinstance(receipt.get('sha256'), str):
@@ -106,7 +107,7 @@ def main():
         for path in workers:
             shutil.copyfile(path, stage / 'workers' / path.name)
         assets, bundles = PREPARE.pack_staged_assets(stage)
-        identity = {'schemaVersion': 2, 'pins': manifest['pins'], 'assets': assets, 'bundles': bundles}
+        identity = {'schemaVersion': 3, 'pins': manifest['pins'], 'assets': assets, 'bundles': bundles}
         digest = sha256(encoded(identity))
         document = {**identity, 'id': digest, 'rawBytes': sum(asset['bytes'] for asset in assets.values()),
                     'bundleBytes': sum(bundle['bytes'] for bundle in bundles.values())}

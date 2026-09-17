@@ -12,6 +12,7 @@ const errors = [];
 const requests = [];
 const consoleErrors = [];
 const bundleStarts = new Map();
+const bundleResponses = new Map();
 let resolveBundleStarts;
 const bundlesStarted = new Promise(resolve => { resolveBundleStarts = resolve; });
 try {
@@ -26,7 +27,49 @@ try {
       if (bundleStarts.size === 4) resolveBundleStarts();
     }
   });
+  page.on('response', response => {
+    const name = new URL(response.url()).pathname.split('/').at(-1);
+    if (name?.endsWith('.bin')) {
+      const headers = response.headers();
+      bundleResponses.set(name, {
+        status: response.status(),
+        cacheControl: headers['cache-control'] ?? null,
+        cfCacheStatus: headers['cf-cache-status'] ?? null,
+        age: headers.age ?? null,
+        contentEncoding: headers['content-encoding'] ?? null,
+      });
+    }
+  });
   await page.goto(url);
+  const toolchainManifest = await page.evaluate(async () => {
+    const base = new URL('toolchain/', location.href);
+    const index = await (await fetch(new URL('index.json', base), { cache: 'no-cache' })).json();
+    return (await fetch(new URL(`${index.id}/asset-manifest.json`, base), { cache: 'force-cache' })).json();
+  });
+  if (toolchainManifest.schemaVersion !== 3 ||
+      Object.keys(toolchainManifest.bundles).sort().join(',') !== 'compiler,guest,linker,tools')
+    throw Error(`Unexpected toolchain manifest: ${JSON.stringify(toolchainManifest.bundles)}`);
+  for (const [role, receipt] of Object.entries(toolchainManifest.bundles)) {
+    if (receipt.path !== `bundles/${role}.${receipt.sha256}.bin` || !/^[a-f0-9]{64}$/.test(receipt.sha256))
+      throw Error(`Bundle is not content addressed: ${JSON.stringify({ role, receipt })}`);
+  }
+  await page.setViewportSize({ width: 780, height: 900 });
+  const toolbarLayout = await page.evaluate(() => {
+    const toolbar = document.querySelector('.toolbar');
+    const controls = [...document.querySelectorAll('.actions button')].map(button => {
+      const box = button.getBoundingClientRect();
+      return { id: button.id, left: box.left, right: box.right, width: box.width };
+    });
+    return { viewport: innerWidth, scrollWidth: document.documentElement.scrollWidth,
+      toolbar: toolbar ? { clientWidth: toolbar.clientWidth, scrollWidth: toolbar.scrollWidth } : null, controls };
+  });
+  if (!toolbarLayout.toolbar || toolbarLayout.scrollWidth > toolbarLayout.viewport ||
+      toolbarLayout.toolbar.scrollWidth > toolbarLayout.toolbar.clientWidth ||
+      toolbarLayout.controls.length !== 4 || toolbarLayout.controls.some(control =>
+        control.width <= 0 || control.left < 0 || control.right > toolbarLayout.viewport))
+    throw Error(`Responsive toolbar overflow: ${JSON.stringify(toolbarLayout)}`);
+  await page.screenshot({ path: `${output}/responsive-toolbar.png`, fullPage: false });
+  await page.setViewportSize({ width: 1280, height: 900 });
   const pageContract = await page.evaluate(async () => {
     const csp = document.querySelector('meta[http-equiv="Content-Security-Policy"]')?.content ?? '';
     const icons = [...document.querySelectorAll('link[rel="icon"]')].map(link => link.href);
@@ -85,8 +128,8 @@ try {
     throw Error(`Page errors: ${JSON.stringify({ errors, consoleErrors })}`);
   const toolchainRequests = [...new Set(requests.filter(request => request.includes('/toolchain/')).map(request => new URL(request).pathname))];
   const bundleRequests = toolchainRequests.filter(request => request.endsWith('.bin'));
-  const expectedBundles = ['compiler.bin', 'guest.bin', 'linker.bin', 'tools.bin'];
-  if (bundleRequests.map(request => request.slice(request.lastIndexOf('/') + 1)).sort().join(',') !== expectedBundles.join(','))
+  const expectedBundles = Object.values(toolchainManifest.bundles).map(receipt => receipt.path).sort();
+  if (bundleRequests.map(request => request.slice(request.indexOf('/bundles/') + 1)).sort().join(',') !== expectedBundles.join(','))
     throw Error(`Unexpected bundle requests: ${JSON.stringify(bundleRequests)}`);
   const directPayloads = toolchainRequests.filter(request => /\.(?:wasm|dll|a|dat|json)$/.test(request) &&
     !request.endsWith('/index.json') && !request.endsWith('/asset-manifest.json'));
@@ -95,7 +138,8 @@ try {
   const bytes = readFileSync(componentPath);
   const result = { passed: true, browser: browser.version(), stdout, status,
     component: { bytes: bytes.length, sha256: createHash('sha256').update(bytes).digest('hex') },
-    toolchainRequests: { unique: toolchainRequests.length, bundles: bundleRequests, parallelStartSpreadMs: bundleStartSpreadMs }, pageContract, errors, consoleErrors };
+    toolchainRequests: { unique: toolchainRequests.length, bundles: bundleRequests, parallelStartSpreadMs: bundleStartSpreadMs,
+      responses: Object.fromEntries(bundleResponses) }, toolbarLayout, pageContract, errors, consoleErrors };
   writeFileSync(`${output}/results.json`, JSON.stringify(result, null, 2));
   console.log('PASS: deployed browser compile/run/download and Wasmtime execution');
 } finally {

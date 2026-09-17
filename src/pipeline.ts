@@ -3,7 +3,8 @@ import { WorkerChannel } from './worker-channel';
 import { optimizationArguments, optimizationModes } from './optimization';
 const basename = (path: string) => path.slice(path.lastIndexOf('/') + 1);
 type AssetReceipt = { sha256: string; bytes: number; bundle?: string; offset?: number };
-type BundleReceipt = { sha256: string; bytes: number; rawBytes: number; assets: number };
+type BundleRole = 'compiler' | 'linker' | 'tools' | 'guest';
+type BundleReceipt = { path: string; sha256: string; bytes: number; rawBytes: number; assets: number };
 type ToolchainManifest = { schemaVersion: number; assets: Record<string, AssetReceipt>; bundles: Record<string, BundleReceipt> };
 export class PlaygroundPipeline {
   private channels = new Map<string, WorkerChannel>();
@@ -69,8 +70,9 @@ export class PlaygroundPipeline {
       const bytes = new Uint8Array(await manifestResponse.arrayBuffer());
       await this.verify(bytes, index.manifestSha256);
       const manifest = JSON.parse(new TextDecoder().decode(bytes)) as ToolchainManifest;
-      if (manifest.schemaVersion !== 2 || !manifest.assets || Array.isArray(manifest.assets) ||
-          !manifest.bundles || Array.isArray(manifest.bundles) || Object.keys(manifest.bundles).length === 0)
+      if (manifest.schemaVersion !== 3 || !manifest.assets || Array.isArray(manifest.assets) ||
+          !manifest.bundles || Array.isArray(manifest.bundles) ||
+          Object.keys(manifest.bundles).sort().join(',') !== 'compiler,guest,linker,tools')
         throw new Error('Invalid toolchain manifest');
       this.manifest = manifest;
       this.root = root;
@@ -82,10 +84,11 @@ export class PlaygroundPipeline {
     if (actual !== expected) throw new Error('Toolchain asset integrity check failed');
   }
   private async fetchBundle(name: string, entry: BundleReceipt) {
-    if (!entry || !/^bundles\/[a-z]+\.bin$/.test(name) || !Number.isSafeInteger(entry.bytes) || entry.bytes < 1 || entry.bytes > 134217728 ||
+    if (!entry || !/^(?:compiler|linker|tools|guest)$/.test(name) ||
+        entry.path !== `bundles/${name}.${entry.sha256}.bin` || !Number.isSafeInteger(entry.bytes) || entry.bytes < 1 || entry.bytes > 134217728 ||
         entry.rawBytes !== entry.bytes || !Number.isSafeInteger(entry.assets) || entry.assets < 1 || !/^[a-f0-9]{64}$/.test(entry.sha256))
       throw new Error(`Invalid toolchain bundle receipt: ${name}`);
-    const url = new URL(name, this.root!);
+    const url = new URL(entry.path, this.root!);
     const response = await fetch(url, { signal: this.abort!.signal, cache: 'force-cache' });
     if (!response.ok) throw new Error(`Toolchain bundle unavailable: ${name}`);
     const reader = response.body?.getReader();
@@ -170,7 +173,7 @@ export class PlaygroundPipeline {
   private initializeChannel(name: 'compiler' | 'lld' | 'tools') {
     let initialization = this.channelInitializations.get(name);
     if (!initialization) {
-      const bundleName = `bundles/${name === 'lld' ? 'linker' : name}.bin`;
+      const bundleName: BundleRole = name === 'lld' ? 'linker' : name;
       initialization = this.preloadBundle(bundleName, this.manifest!.bundles[bundleName])
         .then(() => this.channel(name).request({ operation: 'initialize' }))
         .then(() => undefined);
@@ -276,7 +279,7 @@ export class PlaygroundPipeline {
       await this.initialize(); this.channels.get('guest')?.reset(); this.channels.delete('guest');
       const component = compilation.component.slice();
       const result = await this.stage('run', timings, async () => {
-        const bundleName = 'bundles/guest.bin';
+        const bundleName: BundleRole = 'guest';
         await this.preloadBundle(bundleName, this.manifest!.bundles[bundleName]);
         return this.channel('guest').request({ operation: 'run', component, recipe: snapshot.recipeId }, [component.buffer], 60_000, 5_000);
       });

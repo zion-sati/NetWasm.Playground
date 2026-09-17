@@ -67,8 +67,12 @@ def verify_staged(folder):
     if manifest['id'] != index['id']:
         raise ValueError('Toolchain content identity mismatch')
     assets, bundle_receipts = manifest.get('assets'), manifest.get('bundles')
-    if manifest.get('schemaVersion') != 2 or not isinstance(assets, dict) or not isinstance(bundle_receipts, dict) or set(bundle_receipts) != {
-            'bundles/compiler.bin', 'bundles/linker.bin', 'bundles/tools.bin', 'bundles/guest.bin'}:
+    schema = manifest.get('schemaVersion')
+    legacy_bundles = {'bundles/compiler.bin', 'bundles/linker.bin', 'bundles/tools.bin', 'bundles/guest.bin'}
+    bundle_roles = {'compiler', 'linker', 'tools', 'guest'}
+    if not isinstance(assets, dict) or not isinstance(bundle_receipts, dict) or not (
+            (schema == 2 and set(bundle_receipts) == legacy_bundles) or
+            (schema == 3 and set(bundle_receipts) == bundle_roles)):
         raise ValueError('Toolchain bundle manifest mismatch')
     identity = {key: manifest[key] for key in ('schemaVersion', 'pins', 'assets', 'bundles')}
     if hashlib.sha256(encoded(identity)).hexdigest() != index['id']:
@@ -76,14 +80,18 @@ def verify_staged(folder):
     bundles = {}
     counts = {name: 0 for name in bundle_receipts}
     raw_bytes = {name: 0 for name in bundle_receipts}
-    for relative, expected in bundle_receipts.items():
+    for name, expected in bundle_receipts.items():
         if not isinstance(expected, dict) or not isinstance(expected.get('bytes'), int) or expected['bytes'] < 1 or \
-                not isinstance(expected.get('sha256'), str) or len(expected['sha256']) != 64:
-            raise ValueError(f'Invalid toolchain bundle receipt: {relative}')
+                not isinstance(expected.get('sha256'), str) or len(expected['sha256']) != 64 or \
+                any(character not in '0123456789abcdef' for character in expected['sha256']):
+            raise ValueError(f'Invalid toolchain bundle receipt: {name}')
+        relative = expected.get('path', name)
+        if schema == 3 and relative != f"bundles/{name}.{expected['sha256']}.bin":
+            raise ValueError(f'Invalid toolchain bundle path: {name}')
         path = staged_path(manifest_path.parent, relative)
         if path.stat().st_size != expected['bytes'] or sha256(path) != expected['sha256']:
             raise ValueError(f'Toolchain bundle mismatch: {relative}')
-        bundles[relative] = path.read_bytes()
+        bundles[name] = path.read_bytes()
     for relative, expected in assets.items():
         if not isinstance(expected, dict) or not isinstance(expected.get('bytes'), int) or expected['bytes'] < 0 or \
                 not isinstance(expected.get('sha256'), str) or len(expected['sha256']) != 64:
@@ -103,9 +111,9 @@ def verify_staged(folder):
                 raise ValueError(f'Toolchain bundled asset mismatch: {relative}')
             counts[bundle] += 1
             raw_bytes[bundle] += length
-    for relative, expected in bundle_receipts.items():
-        if counts[relative] != expected.get('assets') or raw_bytes[relative] != expected.get('rawBytes'):
-            raise ValueError(f'Toolchain bundle inventory mismatch: {relative}')
+    for name, expected in bundle_receipts.items():
+        if counts[name] != expected.get('assets') or raw_bytes[name] != expected.get('rawBytes'):
+            raise ValueError(f'Toolchain bundle inventory mismatch: {name}')
     print(f"PASS: verified {len(assets)} immutable assets in {len(bundles)} bundles")
 
 

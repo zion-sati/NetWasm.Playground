@@ -36,7 +36,7 @@ jobs:
           fi
       - name: Build compiler framework from public packages
         run: python3 eng/build-release-compiler.py --output .cache/release/compiler-framework
-      - name: Build browser toolchain
+      - name: Build content-addressed browser toolchain manifest
         run: python3 eng/rebuild-public-toolchain.py --compiler-framework .cache/release/compiler-framework --output public/toolchain
       - name: Package reproducible release asset
         run: |

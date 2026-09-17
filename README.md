@@ -35,8 +35,9 @@ It consumes the public NuGet.org packages and verified inputs produced by the
 runners under `eng/` and `spikes/`; it does not read NetWasm source checkouts.
 It does not rebuild LLVM. Release builds run on a clean GitHub Actions runner:
 they compile the browser compiler host from pinned public NuGet packages,
-rebuild the four phase bundles from the receipt-verified public base, and
-verify every content receipt. Pages then installs the browser bundle published
+rebuild the four phase bundles from the receipt-verified public base, generate
+the manifest that maps each phase to a SHA-256-named `.bin` file, and verify
+every content receipt. Pages then installs the browser bundle published
 under the semantic version in `eng/toolchain-release.json`. Its self-contained
 content identity, manifest, bundles and every asset slice are verified before
 use. Public releases use tags
@@ -87,12 +88,15 @@ Compile + Run, seven for Compile, or one for an unchanged component rerun.
 After the editor mounts, the Playground starts the compiler, linker and tools
 in background workers and fetches four phase-specific binary bundles for the
 compiler, linker, WebAssembly tools and guest runtime. The browser-addressable
-module graph is collapsed to 12 entry files. Each whole bundle and every asset
-slice are checked against the immutable manifest before use. Compile and Run
-remain available while this is happening; an early click joins the same worker
+module graph is collapsed to 12 entry files. CI names every bundle
+`<phase>.<sha256>.bin` and records that immutable URL in the generated manifest.
+Each whole bundle and every asset slice are checked against the manifest before
+use. Compile and Run remain available while this is happening; an early click joins the same worker
 initialization instead of starting duplicate downloads. The progress bar reports
 completed bundles and encoded transfer bytes. The hosting edge can negotiate
 Brotli or Gzip for the `.bin` responses through standard HTTP content encoding.
+The content-addressed filenames are safe to retain in a CDN cache indefinitely;
+`toolchain/index.json` remains the short-lived pointer to the current manifest.
 
 The smoke expects a running development server with the same base path and
 Playwright's Chromium installed. It exercises the actual compiler and guest.

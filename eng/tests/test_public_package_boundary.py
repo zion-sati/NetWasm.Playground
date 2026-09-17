@@ -45,19 +45,20 @@ class PublicPackageBoundaryTests(unittest.TestCase):
                 path.write_bytes(payload)
 
             assets, bundles = PREPARE_WEB.pack_staged_assets(stage)
-            manifest = {'schemaVersion': 2, 'assets': assets, 'bundles': bundles}
+            manifest = {'schemaVersion': 3, 'assets': assets, 'bundles': bundles}
             PREPARE_WEB.verify_bundle_layout(stage, manifest)
 
-            self.assertEqual({
-                'bundles/compiler.bin', 'bundles/linker.bin',
-                'bundles/tools.bin', 'bundles/guest.bin',
-            }, set(bundles))
+            self.assertEqual({'compiler', 'linker', 'tools', 'guest'}, set(bundles))
+            for role, receipt in bundles.items():
+                self.assertEqual(
+                    f'bundles/{role}.{receipt["sha256"]}.bin', receipt['path'])
+                self.assertTrue((stage / receipt['path']).exists())
             self.assertFalse((stage / 'compiler/a.wasm').exists())
             self.assertFalse((stage / 'wasm-opt.js').exists())
             self.assertTrue((stage / 'workers/worker.mjs').exists())
             self.assertTrue((stage / 'notices/LICENSE.txt').exists())
 
-            (stage / 'bundles/compiler.bin').write_bytes(b'corrupt')
+            (stage / bundles['compiler']['path']).write_bytes(b'corrupt')
             with self.assertRaisesRegex(ValueError, 'Staged bundle mismatch'):
                 PREPARE_WEB.verify_bundle_layout(stage, manifest)
 

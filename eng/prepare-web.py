@@ -20,19 +20,29 @@ def encoded(value):
     return (json.dumps(value, sort_keys=True, indent=2) + '\n').encode()
 
 
-def bundle_name(relative):
+BUNDLE_ROLES = {'compiler', 'linker', 'tools', 'guest'}
+
+
+def bundle_role(relative):
     path = Path(relative)
     if relative in {'wasm-merge.js', 'wasm-opt.js', 'path-browserify.js'}:
-        return 'bundles/tools.bin'
+        return 'tools'
     if relative.startswith('notices/') or path.suffix in {'.js', '.mjs'}:
         return None
     if relative.startswith(('compiler/', 'references/', 'implementations/', 'recipes/')):
-        return 'bundles/compiler.bin'
+        return 'compiler'
     if relative.startswith(('lld/', 'runtime/')):
-        return 'bundles/linker.bin'
+        return 'linker'
     if relative.startswith(('jco/', 'hosting/')):
-        return 'bundles/guest.bin'
-    return 'bundles/tools.bin'
+        return 'guest'
+    return 'tools'
+
+
+def bundle_path(role, sha256):
+    if role not in BUNDLE_ROLES or not isinstance(sha256, str) or len(sha256) != 64 or \
+            any(character not in '0123456789abcdef' for character in sha256):
+        raise ValueError(f'Invalid bundle identity: {role}')
+    return f'bundles/{role}.{sha256}.bin'
 
 
 def pack_staged_assets(folder):
@@ -42,23 +52,27 @@ def pack_staged_assets(folder):
             continue
         relative = path.relative_to(folder).as_posix()
         entry = fingerprint(path)
-        bundle = bundle_name(relative)
+        bundle = bundle_role(relative)
         if bundle:
             grouped.setdefault(bundle, []).append((relative, path, entry))
         assets[relative] = entry
 
     bundles = {}
-    for name, members in sorted(grouped.items()):
-        destination = folder / name
-        destination.parent.mkdir(parents=True, exist_ok=True)
+    for role, members in sorted(grouped.items()):
+        temporary = folder / 'bundles' / f'.{role}.tmp'
+        temporary.parent.mkdir(parents=True, exist_ok=True)
         offset = 0
-        with destination.open('wb') as output:
+        with temporary.open('wb') as output:
             for relative, path, entry in members:
                 payload = path.read_bytes()
                 output.write(payload)
-                entry.update({'bundle': name, 'offset': offset})
+                entry.update({'bundle': role, 'offset': offset})
                 offset += len(payload)
-        bundles[name] = {**fingerprint(destination), 'assets': len(members), 'rawBytes': offset}
+        receipt = fingerprint(temporary)
+        relative = bundle_path(role, receipt['sha256'])
+        destination = folder / relative
+        temporary.replace(destination)
+        bundles[role] = {'path': relative, **receipt, 'assets': len(members), 'rawBytes': offset}
         for _, path, _ in members:
             path.unlink()
     return assets, bundles
@@ -66,26 +80,28 @@ def pack_staged_assets(folder):
 
 def verify_bundle_layout(folder, manifest):
     assets, bundles = manifest['assets'], manifest.get('bundles')
-    if manifest.get('schemaVersion') != 2 or not isinstance(bundles, dict) or not bundles:
+    if manifest.get('schemaVersion') != 3 or not isinstance(bundles, dict) or not bundles:
         raise ValueError('Staged bundle manifest is invalid')
-    expected_names = {'bundles/compiler.bin', 'bundles/linker.bin', 'bundles/tools.bin', 'bundles/guest.bin'}
-    if set(bundles) != expected_names:
+    if set(bundles) != BUNDLE_ROLES:
         raise ValueError('Staged bundle set is invalid')
     payloads = {}
-    for relative, expected in bundles.items():
+    for role, expected in bundles.items():
+        relative = expected.get('path')
+        if relative != bundle_path(role, expected.get('sha256', '')):
+            raise ValueError(f'Staged bundle path is invalid: {role}')
         path = folder / relative
         if fingerprint(path) != {key: expected[key] for key in ['bytes', 'sha256']}:
             raise ValueError(f'Staged bundle mismatch: {relative}')
-        payloads[relative] = path.read_bytes()
-    counts = {name: 0 for name in bundles}
-    raw_bytes = {name: 0 for name in bundles}
+        payloads[role] = path.read_bytes()
+    counts = {role: 0 for role in bundles}
+    raw_bytes = {role: 0 for role in bundles}
     for relative, expected in assets.items():
         bundle = expected.get('bundle')
         if bundle is None:
             if fingerprint(folder / relative) != {key: expected[key] for key in ['bytes', 'sha256']}:
                 raise ValueError(f'Staged asset mismatch: {relative}')
             continue
-        if bundle != bundle_name(relative) or bundle not in payloads:
+        if bundle != bundle_role(relative) or bundle not in payloads:
             raise ValueError(f'Invalid staged asset bundle: {relative}')
         offset, length = expected.get('offset'), expected.get('bytes')
         if not isinstance(offset, int) or offset < 0 or not isinstance(length, int) or length < 0:
@@ -95,9 +111,9 @@ def verify_bundle_layout(folder, manifest):
             raise ValueError(f'Staged bundled asset mismatch: {relative}')
         counts[bundle] += 1
         raw_bytes[bundle] += length
-    for name, expected in bundles.items():
-        if counts[name] != expected.get('assets') or raw_bytes[name] != expected.get('rawBytes'):
-            raise ValueError(f'Staged bundle inventory mismatch: {name}')
+    for role, expected in bundles.items():
+        if counts[role] != expected.get('assets') or raw_bytes[role] != expected.get('rawBytes'):
+            raise ValueError(f'Staged bundle inventory mismatch: {role}')
 
 
 def verify_receipt(folder):
@@ -272,7 +288,7 @@ def main():
             copy(path, Path('workers') / path.name)
         subprocess.run(['node', str(ROOT / 'eng/bundle-toolchain-modules.mjs'), str(stage)], check=True)
         assets, bundles = pack_staged_assets(stage)
-        identity = {'schemaVersion': 2, 'pins': pins, 'assets': assets, 'bundles': bundles}
+        identity = {'schemaVersion': 3, 'pins': pins, 'assets': assets, 'bundles': bundles}
         digest = hashlib.sha256(encoded(identity)).hexdigest()
         manifest = {**identity, 'id': digest, 'rawBytes': sum(a['bytes'] for a in assets.values()),
                     'bundleBytes': sum(bundle['bytes'] for bundle in bundles.values())}
