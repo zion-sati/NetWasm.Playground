@@ -1,12 +1,12 @@
 {
   "schemaVersion": 2,
   "archive": {
-    "url": "https://github.com/zion-sati/NetWasm.Playground/releases/download/v0.2.3/netwasm-playground-toolchain-v0.2.3.tar.gz",
-    "bytes": 47440033,
-    "sha256": "ea882e97d459d8a117043d5cf70f7ee0f10254bbf8eb331347653737a1c069ed"
+    "url": "https://github.com/zion-sati/NetWasm.Playground/releases/download/v0.2.4/netwasm-playground-toolchain-v0.2.4.tar.gz",
+    "bytes": 47440110,
+    "sha256": "0640e4cc893174d1a3ccd7dd0d7deeb81f91791596c660f6109109df4cd1a708"
   },
   "index": {
-    "id": "c8c945b4a21a971f2b25ebd9e90bb1790affb550c9895bf1c82f0c9867b8bf68",
-    "manifestSha256": "b293ab41b1b5ac6d69a6c3d301d13978cb4017814651510aa2026c745237a609"
+    "id": "f886da857c1bbcb80eff72705b0379fdc7a8c8bdffd6eb523277d116d2528624",
+    "manifestSha256": "b296a56b78f36de56953408ee2d1f365ba9515dfd62fe49f4263fce7e0dbe398"
   }
 }

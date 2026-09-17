@@ -17,21 +17,12 @@ export class PlaygroundPipeline {
   private assets = { rawBytes: 0, transferBytes: 0 };
   private measuredResources = new Set<string>();
   private bundleProgress = new Map<string, number>();
+  private bundleDownloads = new Map<string, Promise<void>>();
   private onPreloadProgress?: (progress: ToolchainPreloadProgress) => void;
-  private foregroundOperations = 0;
-  private backgroundWaiters: Array<() => void> = [];
   private currentStage = 'download';
   private runOutput?: { stdout: string; stderr: string };
   constructor(private onEvent: (event: PipelineEvent) => void) {}
   private emit(event: object) { if (this.context) this.onEvent({ requestId: this.context.requestId, revision: this.context.revision, ...event } as PipelineEvent); }
-  private beginForeground() { this.foregroundOperations++; }
-  private endForeground() {
-    if (--this.foregroundOperations !== 0) return;
-    for (const resume of this.backgroundWaiters.splice(0)) resume();
-  }
-  private async waitForBackgroundTurn() {
-    if (this.foregroundOperations) await new Promise<void>(resolve => this.backgroundWaiters.push(resolve));
-  }
   private reportPreloadProgress() {
     if (!this.onPreloadProgress) return;
     const names = this.manifest ? Object.keys(this.manifest.bundles) : [];
@@ -123,6 +114,17 @@ export class PlaygroundPipeline {
     this.recordResource(name, entry.rawBytes, timing?.encodedBodySize || entry.bytes);
     return bytes;
   }
+  private preloadBundle(name: string, entry: BundleReceipt) {
+    let download = this.bundleDownloads.get(name);
+    if (!download) {
+      download = this.fetchBundle(name, entry).then(() => undefined);
+      this.bundleDownloads.set(name, download);
+      void download.catch(() => {
+        if (this.bundleDownloads.get(name) === download) this.bundleDownloads.delete(name);
+      });
+    }
+    return download;
+  }
   private async loadAsset(name: string) {
     const entry = this.manifest!.assets[name];
     if (!entry || !Number.isSafeInteger(entry.bytes) || entry.bytes < 0 || !/^[a-f0-9]{64}$/.test(entry.sha256))
@@ -144,18 +146,8 @@ export class PlaygroundPipeline {
     return bytes;
   }
   private async preloadRemainingBundles() {
-    const entries = Object.entries(this.manifest!.bundles)
-      .filter(([name]) => !this.measuredResources.has(name));
-    let cursor = 0;
-    const load = async () => {
-      while (cursor < entries.length) {
-        await this.waitForBackgroundTurn();
-        if (cursor >= entries.length) return;
-        const [name, entry] = entries[cursor++];
-        await this.fetchBundle(name, entry);
-      }
-    };
-    await Promise.all(Array.from({ length: entries.length }, load));
+    await Promise.all(Object.entries(this.manifest!.bundles)
+      .map(([name, entry]) => this.preloadBundle(name, entry)));
   }
   private channel(name: string) {
     let channel = this.channels.get(name);
@@ -178,7 +170,9 @@ export class PlaygroundPipeline {
   private initializeChannel(name: 'compiler' | 'lld' | 'tools') {
     let initialization = this.channelInitializations.get(name);
     if (!initialization) {
-      initialization = this.channel(name).request({ operation: 'initialize' })
+      const bundleName = `bundles/${name === 'lld' ? 'linker' : name}.bin`;
+      initialization = this.preloadBundle(bundleName, this.manifest!.bundles[bundleName])
+        .then(() => this.channel(name).request({ operation: 'initialize' }))
         .then(() => undefined);
       this.channelInitializations.set(name, initialization);
       void initialization.catch(() => {
@@ -193,14 +187,12 @@ export class PlaygroundPipeline {
     try {
       await this.initialize();
       this.reportPreloadProgress();
-      await this.initializeChannel('compiler');
-      await this.waitForBackgroundTurn();
       await Promise.all([
+        this.preloadRemainingBundles(),
+        this.initializeChannel('compiler'),
         this.initializeChannel('lld'),
         this.initializeChannel('tools'),
       ]);
-      await this.waitForBackgroundTurn();
-      await this.preloadRemainingBundles();
       this.reportPreloadProgress();
       return { ...this.assets };
     } finally {
@@ -225,7 +217,6 @@ export class PlaygroundPipeline {
   async compile(snapshot: SourceSnapshot): Promise<CompilationResult> {
     const optimization = snapshot.optimization ?? 'Oz';
     const epoch = this.epoch; this.context = snapshot; const timings: StageTiming[] = [];
-    this.beginForeground();
     const result = { requestId: snapshot.requestId, revision: snapshot.revision, optimization, diagnostics: [], timings };
     let recycleCompiler = false;
     try {
@@ -274,23 +265,25 @@ export class PlaygroundPipeline {
     finally {
       if (recycleCompiler) { this.channels.get('compiler')?.reset(); this.channels.delete('compiler'); this.channelInitializations.delete('compiler'); }
       this.context = undefined;
-      this.endForeground();
     }
   }
   async run(compilation: CompilationResult, snapshot: SourceSnapshot): Promise<RunResult> {
     this.context = snapshot; const epoch = this.epoch; const timings: StageTiming[] = [];
-    this.beginForeground();
     this.runOutput = { stdout: '', stderr: '' };
     const base = { requestId: snapshot.requestId, revision: snapshot.revision, timings, stdout: '', stderr: '' };
     try {
       if (!compilation.component) throw new Error('No compiled component');
       await this.initialize(); this.channels.get('guest')?.reset(); this.channels.delete('guest');
       const component = compilation.component.slice();
-      const result = await this.stage('run', timings, () => this.channel('guest').request({ operation: 'run', component, recipe: snapshot.recipeId }, [component.buffer], 60_000, 5_000));
+      const result = await this.stage('run', timings, async () => {
+        const bundleName = 'bundles/guest.bin';
+        await this.preloadBundle(bundleName, this.manifest!.bundles[bundleName]);
+        return this.channel('guest').request({ operation: 'run', component, recipe: snapshot.recipeId }, [component.buffer], 60_000, 5_000);
+      });
       for (const timing of result.timings ?? []) this.emit({ type: 'stage', stage: timing.stage, state: 'complete', milliseconds: timing.milliseconds });
       return { ...base, ...result, timings: [...timings, ...(result.timings ?? [])] };
     } catch (error) { return { ...base, ...this.runOutput, success: false, cancelled: epoch !== this.epoch, stage: this.currentStage, error: String(error) }; }
-    finally { this.channels.get('guest')?.reset(); this.channels.delete('guest'); this.runOutput = undefined; this.context = undefined; this.endForeground(); }
+    finally { this.channels.get('guest')?.reset(); this.channels.delete('guest'); this.runOutput = undefined; this.context = undefined; }
   }
   stop() { this.epoch++; this.abort?.abort(); for (const channel of this.channels.values()) channel.reset(); this.channelInitializations.clear(); }
   dispose() { this.stop(); this.channels.clear(); }

@@ -11,11 +11,21 @@ const browser = await chromium.launch({ headless: true });
 const errors = [];
 const requests = [];
 const consoleErrors = [];
+const bundleStarts = new Map();
+let resolveBundleStarts;
+const bundlesStarted = new Promise(resolve => { resolveBundleStarts = resolve; });
 try {
   const page = await browser.newPage({ acceptDownloads: true });
   page.on('pageerror', error => errors.push(String(error)));
   page.on('console', message => { if (message.type() === 'error') consoleErrors.push(message.text()); });
-  page.on('request', request => requests.push(request.url()));
+  page.on('request', request => {
+    requests.push(request.url());
+    const name = new URL(request.url()).pathname.split('/').at(-1);
+    if (name?.endsWith('.bin') && !bundleStarts.has(name)) {
+      bundleStarts.set(name, Date.now());
+      if (bundleStarts.size === 4) resolveBundleStarts();
+    }
+  });
   await page.goto(url);
   const pageContract = await page.evaluate(async () => {
     const csp = document.querySelector('meta[http-equiv="Content-Security-Policy"]')?.content ?? '';
@@ -32,6 +42,12 @@ try {
     throw Error(`Page resource contract failed: ${JSON.stringify(pageContract)}`);
   await page.locator('.monaco-editor').waitFor();
   await page.waitForFunction(() => performance.getEntriesByType('resource').some(entry => entry.name.includes('/toolchain/')));
+  await Promise.race([
+    bundlesStarted,
+    page.waitForTimeout(30000).then(() => { throw Error(`Bundle requests did not start together: ${JSON.stringify([...bundleStarts])}`); }),
+  ]);
+  const bundleStartSpreadMs = Math.max(...bundleStarts.values()) - Math.min(...bundleStarts.values());
+  if (bundleStartSpreadMs > 1000) throw Error(`Bundle requests were serialized: ${JSON.stringify([...bundleStarts])}`);
   await page.waitForFunction(() => Number(document.querySelector('#toolchain-progress')?.dataset.totalBundles) > 0 &&
     Number(document.querySelector('#toolchain-progress')?.dataset.loadedBundleBytes) > 0);
   const preload = await page.evaluate(() => ({
@@ -79,7 +95,7 @@ try {
   const bytes = readFileSync(componentPath);
   const result = { passed: true, browser: browser.version(), stdout, status,
     component: { bytes: bytes.length, sha256: createHash('sha256').update(bytes).digest('hex') },
-    toolchainRequests: { unique: toolchainRequests.length, bundles: bundleRequests }, pageContract, errors, consoleErrors };
+    toolchainRequests: { unique: toolchainRequests.length, bundles: bundleRequests, parallelStartSpreadMs: bundleStartSpreadMs }, pageContract, errors, consoleErrors };
   writeFileSync(`${output}/results.json`, JSON.stringify(result, null, 2));
   console.log('PASS: deployed browser compile/run/download and Wasmtime execution');
 } finally {
