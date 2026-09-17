@@ -1,4 +1,4 @@
-import type { CompilationResult, PipelineEvent, RunResult, SourceSnapshot, StageTiming } from './contracts';
+import type { CompilationResult, PipelineEvent, RunResult, SourceSnapshot, StageTiming, ToolchainPreloadProgress } from './contracts';
 import { WorkerChannel } from './worker-channel';
 import { optimizationArguments, optimizationModes } from './optimization';
 const basename = (path: string) => path.slice(path.lastIndexOf('/') + 1);
@@ -7,16 +7,36 @@ export class PlaygroundPipeline {
   private context?: SourceSnapshot;
   private root?: URL;
   private rootInitialization?: Promise<void>;
-  private manifest?: { assets: Record<string, { sha256: string; bytes: number; gzip?: { path: string; sha256: string; bytes: number } }> };
+  private manifest?: { assets: Record<string, { sha256: string; bytes: number }> };
   private channelInitializations = new Map<string, Promise<void>>();
   private abort?: AbortController;
   private epoch = 0;
   private assets = { rawBytes: 0, transferBytes: 0 };
   private measuredAssets = new Set<string>();
+  private onPreloadProgress?: (progress: ToolchainPreloadProgress) => void;
+  private foregroundOperations = 0;
+  private backgroundWaiters: Array<() => void> = [];
   private currentStage = 'download';
   private runOutput?: { stdout: string; stderr: string };
   constructor(private onEvent: (event: PipelineEvent) => void) {}
   private emit(event: object) { if (this.context) this.onEvent({ requestId: this.context.requestId, revision: this.context.revision, ...event } as PipelineEvent); }
+  private beginForeground() { this.foregroundOperations++; }
+  private endForeground() {
+    if (--this.foregroundOperations !== 0) return;
+    for (const resume of this.backgroundWaiters.splice(0)) resume();
+  }
+  private async waitForBackgroundTurn() {
+    if (this.foregroundOperations) await new Promise<void>(resolve => this.backgroundWaiters.push(resolve));
+  }
+  private reportPreloadProgress() {
+    if (!this.onPreloadProgress) return;
+    const names = this.manifest ? Object.keys(this.manifest.assets).filter(name => !name.startsWith('notices/')) : [];
+    this.onPreloadProgress({
+      completedAssets: names.filter(name => this.measuredAssets.has(name)).length,
+      totalAssets: names.length,
+      ...this.assets,
+    });
+  }
   private async initialize() {
     if (!this.abort || this.abort.signal.aborted) this.abort = new AbortController();
     if (this.root) return;
@@ -47,21 +67,23 @@ export class PlaygroundPipeline {
     let cursor = 0;
     const load = async () => {
       while (cursor < entries.length) {
+        await this.waitForBackgroundTurn();
+        if (cursor >= entries.length) return;
         const [name, entry] = entries[cursor++];
         if (!/^[A-Za-z0-9_.@/-]+$/.test(name) || name.startsWith('/') || name.split('/').some(part => !part || part === '.' || part === '..')) throw new Error('Invalid toolchain asset path');
-        const receipt = entry.gzip ?? entry;
-        const path = 'path' in receipt ? receipt.path : name;
-        if (!/^[A-Za-z0-9_.@/-]+$/.test(path) || path.startsWith('/') || path.split('/').some(part => !part || part === '.' || part === '..')) throw new Error('Invalid toolchain receipt path');
-        const response = await fetch(new URL(path, this.root!), { signal: this.abort!.signal, cache: 'force-cache' });
+        const url = new URL(name, this.root!);
+        const response = await fetch(url, { signal: this.abort!.signal, cache: 'force-cache' });
         if (!response.ok) throw new Error(`Toolchain asset unavailable: ${name}`);
         const bytes = new Uint8Array(await response.arrayBuffer());
-        if (bytes.byteLength !== receipt.bytes) throw new Error(`Toolchain asset length failed: ${name}`);
-        await this.verify(bytes, receipt.sha256);
+        if (bytes.byteLength !== entry.bytes) throw new Error(`Toolchain asset length failed: ${name}`);
+        await this.verify(bytes, entry.sha256);
         if (!this.measuredAssets.has(name)) {
+          const timing = performance.getEntriesByName(response.url).at(-1) as PerformanceResourceTiming | undefined;
           this.measuredAssets.add(name);
           this.assets.rawBytes += entry.bytes;
-          this.assets.transferBytes += receipt.bytes;
+          this.assets.transferBytes += timing?.encodedBodySize || entry.bytes;
           this.emit({ type: 'assets', ...this.assets });
+          this.reportPreloadProgress();
         }
       }
     };
@@ -76,7 +98,7 @@ export class PlaygroundPipeline {
           if (this.runOutput && (data.console === 'stdout' || data.console === 'stderr')) this.runOutput[data.console as 'stdout' | 'stderr'] += data.text ?? '';
           this.emit({ type: 'console', stream: data.console, text: data.text ?? '' });
         }
-        if (data.assets && !this.measuredAssets.has(data.assets.name)) { this.measuredAssets.add(data.assets.name); this.assets.rawBytes += data.assets.rawBytes; this.assets.transferBytes += data.assets.transferBytes; this.emit({ type: 'assets', ...this.assets }); }
+        if (data.assets && !this.measuredAssets.has(data.assets.name)) { this.measuredAssets.add(data.assets.name); this.assets.rawBytes += data.assets.rawBytes; this.assets.transferBytes += data.assets.transferBytes; this.emit({ type: 'assets', ...this.assets }); this.reportPreloadProgress(); }
       });
       this.channels.set(name, channel);
     }
@@ -94,15 +116,25 @@ export class PlaygroundPipeline {
     }
     return initialization;
   }
-  async preload() {
-    await this.initialize();
-    await Promise.all([
-      this.initializeChannel('compiler'),
-      this.initializeChannel('lld'),
-      this.initializeChannel('tools'),
-    ]);
-    await this.preloadRemainingAssets();
-    return { ...this.assets };
+  async preload(onProgress: (progress: ToolchainPreloadProgress) => void = () => {}) {
+    this.onPreloadProgress = onProgress;
+    this.reportPreloadProgress();
+    try {
+      await this.initialize();
+      this.reportPreloadProgress();
+      await this.initializeChannel('compiler');
+      await this.waitForBackgroundTurn();
+      await Promise.all([
+        this.initializeChannel('lld'),
+        this.initializeChannel('tools'),
+      ]);
+      await this.waitForBackgroundTurn();
+      await this.preloadRemainingAssets();
+      this.reportPreloadProgress();
+      return { ...this.assets };
+    } finally {
+      this.onPreloadProgress = undefined;
+    }
   }
   private async stage<T>(name: string, timings: StageTiming[], action: () => Promise<T>): Promise<T> {
     const epoch = this.epoch;
@@ -122,6 +154,7 @@ export class PlaygroundPipeline {
   async compile(snapshot: SourceSnapshot): Promise<CompilationResult> {
     const optimization = snapshot.optimization ?? 'Oz';
     const epoch = this.epoch; this.context = snapshot; const timings: StageTiming[] = [];
+    this.beginForeground();
     const result = { requestId: snapshot.requestId, revision: snapshot.revision, optimization, diagnostics: [], timings };
     let recycleCompiler = false;
     try {
@@ -173,10 +206,12 @@ export class PlaygroundPipeline {
     finally {
       if (recycleCompiler) { this.channels.get('compiler')?.reset(); this.channels.delete('compiler'); this.channelInitializations.delete('compiler'); }
       this.context = undefined;
+      this.endForeground();
     }
   }
   async run(compilation: CompilationResult, snapshot: SourceSnapshot): Promise<RunResult> {
     this.context = snapshot; const epoch = this.epoch; const timings: StageTiming[] = [];
+    this.beginForeground();
     this.runOutput = { stdout: '', stderr: '' };
     const base = { requestId: snapshot.requestId, revision: snapshot.revision, timings, stdout: '', stderr: '' };
     try {
@@ -187,7 +222,7 @@ export class PlaygroundPipeline {
       for (const timing of result.timings ?? []) this.emit({ type: 'stage', stage: timing.stage, state: 'complete', milliseconds: timing.milliseconds });
       return { ...base, ...result, timings: [...timings, ...(result.timings ?? [])] };
     } catch (error) { return { ...base, ...this.runOutput, success: false, cancelled: epoch !== this.epoch, stage: this.currentStage, error: String(error) }; }
-    finally { this.channels.get('guest')?.reset(); this.channels.delete('guest'); this.runOutput = undefined; this.context = undefined; }
+    finally { this.channels.get('guest')?.reset(); this.channels.delete('guest'); this.runOutput = undefined; this.context = undefined; this.endForeground(); }
   }
   stop() { this.epoch++; this.abort?.abort(); for (const channel of this.channels.values()) channel.reset(); this.channelInitializations.clear(); }
   dispose() { this.stop(); this.channels.clear(); }

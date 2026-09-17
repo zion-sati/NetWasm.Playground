@@ -1,9 +1,9 @@
-export const optimizationModes = ['none', 'O0', 'O1', 'O2', 'O3', 'O4', 'Os', 'Oz'] as const;
+export const optimizationModes = ['none', 'O0', 'O1', 'O2', 'O3', 'Os', 'Oz'] as const;
 export type OptimizationMode = typeof optimizationModes[number];
 
 export const optimizationLabels: Record<OptimizationMode, string> = {
   none: 'None (fastest)', O0: '-O0', O1: '-O1', O2: '-O2',
-  O3: '-O3', O4: '-O4', Os: '-Os', Oz: '-Oz (smallest)',
+  O3: '-O3', Os: '-Os', Oz: '-Oz (smallest)',
 };
 
 export function optimizationArguments(arguments_: readonly string[], mode: OptimizationMode): string[] {

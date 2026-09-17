@@ -1,16 +1,16 @@
 {
   "schemaVersion": 1,
   "status": "ready",
-  "version": "0.2.1",
-  "tag": "v0.2.1",
+  "version": "0.2.2",
+  "tag": "v0.2.2",
   "index": {
-    "id": "dd39312f26476cdb426ebe26da092141ab7d56fc18c3bf4c19e7602a92e8eb35",
-    "manifestSha256": "d8862f97572ea210683f47ab72d868ae3b7257caa9e9e8b0a92e058c489e7a05"
+    "id": "b8da62635f8cd2bdd5e917eb459929058012f66a239a539b7ce20142b335cb3c",
+    "manifestSha256": "cdaf73c70c1c86a4f365f9a950ae06d4a51538a2163b2095408d97da636a9a2a"
   },
   "asset": {
-    "name": "netwasm-playground-toolchain-v0.2.1.tar.gz",
-    "url": "https://github.com/zion-sati/NetWasm.Playground/releases/download/v0.2.1/netwasm-playground-toolchain-v0.2.1.tar.gz",
-    "bytes": 93346589,
-    "sha256": "7c6de124479af87d36ff3c24f33028f71782a2b4d8a688102375693d664cc98e"
+    "name": "netwasm-playground-toolchain-v0.2.2.tar.gz",
+    "url": "https://github.com/zion-sati/NetWasm.Playground/releases/download/v0.2.2/netwasm-playground-toolchain-v0.2.2.tar.gz",
+    "bytes": 46843314,
+    "sha256": "f8e35ff0432b2a3e504f797cbcfad961ef8182b8867f77fe19ef0b5f8c1ad45e"
   }
 }

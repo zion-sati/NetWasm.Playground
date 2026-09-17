@@ -11,7 +11,7 @@ Editable examples cover Hello World, allocation and guest GC, LINQ, read-only
 JSON parsing, source-generated JSON serialization, regular expressions,
 constructor-based dependency injection, CRC32 hashing, and TUnit tests.
 
-The Optimization dropdown exposes Binaryen's `-O0` through `-O4`, `-Os` and
+The Optimization dropdown exposes Binaryen's `-O0` through `-O3`, `-Os` and
 `-Oz` settings, plus a None option that skips `wasm-opt` for the quickest
 iteration. The page retains each setting's build time and component size for
 the current source so the tradeoff can be compared directly. C# remains a
@@ -86,7 +86,10 @@ in background workers and fills the browser cache with every executable
 toolchain asset. Each payload is checked against the immutable manifest before
 the preload is marked complete. Compile and Run remain available while this is
 happening; an early click joins the same worker initialization instead of
-starting duplicate downloads.
+starting duplicate downloads. The progress bar reports completed assets and
+encoded transfer bytes while the preload runs. Toolchain files are requested in
+their original form so the hosting edge can negotiate Brotli or Gzip through
+standard HTTP content encoding.
 
 The smoke expects a running development server with the same base path and
 Playwright's Chromium installed. It exercises the actual compiler and guest.

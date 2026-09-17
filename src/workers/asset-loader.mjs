@@ -34,22 +34,18 @@ export function createAssetLoader(report = () => {}) {
     if (!parsed.assets || typeof parsed.assets !== 'object' || Array.isArray(parsed.assets)) throw Error('Invalid tool asset manifest');
     return parsed.assets;
   })().catch(error => { manifestPromise = undefined; throw error; });
-  async function load(name, { javascript = false } = {}) {
+  async function load(name) {
     pathName(name);
     if (!cache.has(name)) cache.set(name, (async () => {
       const entry = (await manifest())[name];
       if (!entry || !Number.isSafeInteger(entry.bytes) || entry.bytes < 0 || entry.bytes > 134217728 ||
           !/^[a-f0-9]{64}$/.test(entry.sha256)) throw Error(`Invalid tool asset receipt: ${name}`);
-      const compressed = !javascript && typeof DecompressionStream === 'function' && entry.gzip;
-      const receipt = compressed || entry;
-      if (!Number.isSafeInteger(receipt.bytes) || receipt.bytes < 0 || receipt.bytes > 134217728 ||
-          !/^[a-f0-9]{64}$/.test(receipt.sha256)) throw Error('Invalid compressed asset receipt');
-      const response = await fetch(new URL(pathName(compressed ? receipt.path : name), assetRoot), { cache: 'force-cache' });
-      const transfer = await boundedBytes(response, receipt.bytes);
-      if (transfer.byteLength !== receipt.bytes || await digest(transfer) !== receipt.sha256) throw Error(`Tool asset integrity failed: ${name}`);
-      const bytes = compressed ? await boundedBytes(new Response(new Blob([transfer]).stream().pipeThrough(new DecompressionStream('gzip'))), entry.bytes) : transfer;
+      const response = await fetch(new URL(name, assetRoot), { cache: 'force-cache' });
+      const bytes = await boundedBytes(response, entry.bytes);
       if (bytes.byteLength !== entry.bytes || await digest(bytes) !== entry.sha256) throw Error(`Tool asset integrity failed: ${name}`);
-      report({ name, rawBytes: bytes.byteLength, transferBytes: transfer.byteLength });
+      const timing = performance.getEntriesByName(response.url).at(-1);
+      report({ name, rawBytes: bytes.byteLength,
+        transferBytes: timing?.encodedBodySize > 0 ? timing.encodedBodySize : bytes.byteLength });
       return bytes;
     })().catch(error => { cache.delete(name); throw error; }));
     return (await cache.get(name)).slice();

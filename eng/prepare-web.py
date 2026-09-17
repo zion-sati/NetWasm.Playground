@@ -61,16 +61,16 @@ def verify_staged(folder):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--baseline', type=Path, default=ROOT / '.cache/desktop-baseline-verified-20260915-d')
-    parser.add_argument('--compiler', type=Path, default=ROOT / '.cache/phase6-di-compiler-host-20260916')
-    parser.add_argument('--tools', type=Path, default=ROOT / '.cache/browser-tools-probe-20260915')
-    parser.add_argument('--lld', type=Path, default=ROOT / '.cache/browser-lld-20260915')
-    parser.add_argument('--component', type=Path, default=ROOT / '.cache/browser-component-20260916/final')
+    parser.add_argument('--baseline', type=Path)
+    parser.add_argument('--compiler', type=Path)
+    parser.add_argument('--tools', type=Path)
+    parser.add_argument('--lld', type=Path)
+    parser.add_argument('--component', type=Path)
     parser.add_argument('--workers', type=Path, default=ROOT / 'src/workers')
-    parser.add_argument('--examples', type=Path, default=ROOT / '.cache/desktop-examples-20260916', help='Receipt-verified public desktop example inputs')
-    parser.add_argument('--generated-json', type=Path, default=ROOT / '.cache/desktop-json-generated-20260916', help='Receipt-verified source-generated JSON example inputs')
-    parser.add_argument('--tunit', type=Path, default=ROOT / '.cache/tunit-example-20260916/final', help='Receipt-verified public TUnit template inputs')
-    parser.add_argument('--notices', type=Path, default=ROOT / '.cache/extra-examples-notices-20260916/notices', help='Verified public notices and portable origins.json')
+    parser.add_argument('--examples', type=Path, help='Receipt-verified public desktop example inputs')
+    parser.add_argument('--generated-json', type=Path, help='Separate receipt-verified source-generated JSON inputs, when needed')
+    parser.add_argument('--tunit', type=Path, help='Receipt-verified public TUnit template inputs')
+    parser.add_argument('--notices', type=Path, help='Verified public notices and portable origins.json')
     parser.add_argument('--output', type=Path, default=ROOT / 'public/toolchain')
     parser.add_argument('--additional-examples', type=Path, action='append', help='Additional receipt-verified public example inputs')
     parser.add_argument('--verify', type=Path, help='Verify an already staged version without rebuilding')
@@ -78,12 +78,16 @@ def main():
     if args.verify:
         verify_staged(args.verify.resolve())
         return
+    required = ['baseline', 'compiler', 'tools', 'lld', 'component', 'examples', 'tunit', 'notices']
+    missing = [f'--{name}' for name in required if getattr(args, name) is None]
+    if missing:
+        parser.error('staging requires ' + ', '.join(missing))
     subprocess.run(['python3', str(ROOT / 'eng/browser-notices.py'), '--verify', str(args.notices)], check=True)
     subprocess.run(['python3', str(ROOT / 'eng/desktop-baseline.py'), str(args.baseline), '--verify'], check=True)
     baseline_receipt = json.loads((args.baseline / 'receipt.json').read_text())
     for folder in [args.compiler, args.tools, args.component]:
         verify_receipt(folder)
-    additional_examples = args.additional_examples if args.additional_examples is not None else [ROOT / '.cache/desktop-extra-examples-20260916']
+    additional_examples = args.additional_examples or []
     example_folders = [folder for folder in [args.examples, args.generated_json, *additional_examples] if folder]
     for folder in example_folders:
         verify_receipt(folder)
@@ -202,15 +206,10 @@ def main():
                 continue
             relative = path.relative_to(stage).as_posix()
             entry = fingerprint(path)
-            if path.suffix in {'.wasm', '.dll', '.a', '.dat'} or path.name in {'wasm-merge.js', 'wasm-opt.js'}:
-                compressed = path.with_name(path.name + '.gz.bin')
-                compressed.write_bytes(gzip.compress(path.read_bytes(), compresslevel=9, mtime=0))
-                entry['gzip'] = {'path': relative + '.gz.bin', **fingerprint(compressed)}
             assets[relative] = entry
         identity = {'schemaVersion': 1, 'pins': pins, 'assets': assets}
         digest = hashlib.sha256(encoded(identity)).hexdigest()
-        manifest = {**identity, 'id': digest, 'rawBytes': sum(a['bytes'] for a in assets.values()),
-                    'gzipBytes': sum(a.get('gzip', a)['bytes'] for a in assets.values())}
+        manifest = {**identity, 'id': digest, 'rawBytes': sum(a['bytes'] for a in assets.values())}
         (stage / 'asset-manifest.json').write_bytes(encoded(manifest))
         destination = args.output / digest
         if destination.exists():
@@ -222,7 +221,7 @@ def main():
         temporary_index.write_bytes(encoded(index))
         temporary_index.replace(args.output / 'index.json')
     verify_staged(destination)
-    print(json.dumps({**index, 'rawBytes': manifest['rawBytes'], 'gzipBytes': manifest['gzipBytes']}))
+    print(json.dumps({**index, 'rawBytes': manifest['rawBytes']}))
 
 
 if __name__ == '__main__':

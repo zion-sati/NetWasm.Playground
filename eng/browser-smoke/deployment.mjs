@@ -15,6 +15,14 @@ try {
   await page.goto(url);
   await page.locator('.monaco-editor').waitFor();
   await page.waitForFunction(() => performance.getEntriesByType('resource').some(entry => entry.name.includes('/toolchain/')));
+  await page.waitForFunction(() => Number(document.querySelector('#toolchain-progress')?.dataset.totalAssets) > 0);
+  const preload = await page.evaluate(() => ({
+    hidden: document.querySelector('#toolchain-progress').hidden,
+    completed: Number(document.querySelector('#toolchain-progress').dataset.completedAssets),
+    total: Number(document.querySelector('#toolchain-progress').dataset.totalAssets),
+    detail: document.querySelector('#toolchain-progress-detail').textContent,
+  }));
+  if (preload.hidden || preload.completed >= preload.total || !preload.detail.includes(`of ${preload.total} assets`)) throw Error(`Preload progress missing: ${JSON.stringify(preload)}`);
   if (!await page.locator('#compile').isEnabled() || !await page.locator('#run').isEnabled()) throw Error('Background preload disabled actions');
   await page.getByLabel('Optimization', { exact: true }).selectOption('none');
   await page.locator('#run').click();

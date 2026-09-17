@@ -12,6 +12,8 @@ try {
   page.on('pageerror', error => errors.push(String(error)));
   await page.goto(process.env.PLAYGROUND_URL ?? 'http://127.0.0.1:5173/playground/');
   await page.locator('.monaco-editor').waitFor();
+  const modes = await page.getByLabel('Optimization', { exact: true }).locator('option').evaluateAll(options => options.map(option => option.value));
+  if (modes.includes('O4') || !['none', 'O0', 'O1', 'O2', 'O3', 'Os', 'Oz'].every(mode => modes.includes(mode))) throw Error(`Unexpected optimization modes: ${modes}`);
   await page.getByLabel('Example', { exact: true }).selectOption('json-generated');
   for (const mode of ['none', 'Oz']) {
     await page.getByLabel('Optimization', { exact: true }).selectOption(mode);
