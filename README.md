@@ -41,7 +41,7 @@ every content receipt. Pages then installs the browser bundle published
 under the semantic version in `eng/toolchain-release.json`. Its self-contained
 content identity, manifest, bundles and every asset slice are verified before
 use. Public releases use tags
-such as `v0.2.5`; the independently computed toolchain ID identifies the exact
+such as `v0.2.6`; the independently computed toolchain ID identifies the exact
 browser bundle built by that release.
 
 ```sh
