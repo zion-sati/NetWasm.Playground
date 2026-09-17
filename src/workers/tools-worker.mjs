@@ -5,14 +5,9 @@ const loader = createAssetLoader(assets => report({ assets }));
 const limits = { maximumInputBytes: 4 * 1048576, maximumOutputBytes: 4 * 1048576 };
 async function initialize() {
   return initialized ??= (async () => {
-    const graphs = await Promise.allSettled([loader.verifyGraph('hosts/'), loader.verifyGraph('wasi-shim/')]);
-    const failed = graphs.find(result => result.status === 'rejected');
-    if (failed) throw failed.reason;
-    const [{ createWasmToolsHost }, { createBinaryenHost }, shim] = await Promise.all([
-      import(loader.url('hosts/wasm-tools-host.mjs')), import(loader.url('hosts/binaryen-host.mjs')),
-      import(loader.url('wasi-shim/index.js')),
-    ]);
-    return { wasmTools: createWasmToolsHost({ loadAsset: loader.load, wasiShim: shim, limits }),
+    await loader.verifyGraph('hosts/');
+    const { createWasmToolsHost, createBinaryenHost, wasiShim } = await import(loader.url('hosts/tools-runtime.mjs'));
+    return { wasmTools: createWasmToolsHost({ loadAsset: loader.load, wasiShim, limits }),
       binaryen: createBinaryenHost({ loadAsset: loader.load, limits }) };
   })().catch(error => { initialized = undefined; throw error; });
 }

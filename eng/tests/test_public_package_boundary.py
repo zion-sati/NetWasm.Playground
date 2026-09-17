@@ -16,6 +16,40 @@ SPEC.loader.exec_module(PREPARE_WEB)
 
 
 class PublicPackageBoundaryTests(unittest.TestCase):
+    def test_stager_packs_payloads_into_four_verified_phase_bundles(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            stage = Path(temporary)
+            fixtures = {
+                'compiler/a.wasm': b'compiler',
+                'lld/b.wasm': b'linker',
+                'jco/c.wasm': b'guest',
+                'command.wit.wasm': b'tools',
+                'wasm-opt.js': b'tool-script',
+                'workers/worker.mjs': b'export {};',
+                'notices/LICENSE.txt': b'license',
+            }
+            for relative, payload in fixtures.items():
+                path = stage / relative
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_bytes(payload)
+
+            assets, bundles = PREPARE_WEB.pack_staged_assets(stage)
+            manifest = {'schemaVersion': 2, 'assets': assets, 'bundles': bundles}
+            PREPARE_WEB.verify_bundle_layout(stage, manifest)
+
+            self.assertEqual({
+                'bundles/compiler.bin', 'bundles/linker.bin',
+                'bundles/tools.bin', 'bundles/guest.bin',
+            }, set(bundles))
+            self.assertFalse((stage / 'compiler/a.wasm').exists())
+            self.assertFalse((stage / 'wasm-opt.js').exists())
+            self.assertTrue((stage / 'workers/worker.mjs').exists())
+            self.assertTrue((stage / 'notices/LICENSE.txt').exists())
+
+            (stage / 'bundles/compiler.bin').write_bytes(b'corrupt')
+            with self.assertRaisesRegex(ValueError, 'Staged bundle mismatch'):
+                PREPARE_WEB.verify_bundle_layout(stage, manifest)
+
     def test_compiler_host_uses_exact_public_packages_without_project_references(self):
         project = ET.parse(
             ROOT / "spikes/netwasm-worker/CompilerProbe.csproj").getroot()

@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 """Stage receipt-verified browser assets at an immutable, content-addressed path."""
 import argparse
-import gzip
 import hashlib
 import json
 from pathlib import Path
@@ -19,6 +18,86 @@ def fingerprint(path):
 
 def encoded(value):
     return (json.dumps(value, sort_keys=True, indent=2) + '\n').encode()
+
+
+def bundle_name(relative):
+    path = Path(relative)
+    if relative in {'wasm-merge.js', 'wasm-opt.js', 'path-browserify.js'}:
+        return 'bundles/tools.bin'
+    if relative.startswith('notices/') or path.suffix in {'.js', '.mjs'}:
+        return None
+    if relative.startswith(('compiler/', 'references/', 'implementations/', 'recipes/')):
+        return 'bundles/compiler.bin'
+    if relative.startswith(('lld/', 'runtime/')):
+        return 'bundles/linker.bin'
+    if relative.startswith(('jco/', 'hosting/')):
+        return 'bundles/guest.bin'
+    return 'bundles/tools.bin'
+
+
+def pack_staged_assets(folder):
+    assets, grouped = {}, {}
+    for path in sorted(folder.rglob('*')):
+        if not path.is_file() or path.name == 'asset-manifest.json' or 'bundles' in path.relative_to(folder).parts:
+            continue
+        relative = path.relative_to(folder).as_posix()
+        entry = fingerprint(path)
+        bundle = bundle_name(relative)
+        if bundle:
+            grouped.setdefault(bundle, []).append((relative, path, entry))
+        assets[relative] = entry
+
+    bundles = {}
+    for name, members in sorted(grouped.items()):
+        destination = folder / name
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        offset = 0
+        with destination.open('wb') as output:
+            for relative, path, entry in members:
+                payload = path.read_bytes()
+                output.write(payload)
+                entry.update({'bundle': name, 'offset': offset})
+                offset += len(payload)
+        bundles[name] = {**fingerprint(destination), 'assets': len(members), 'rawBytes': offset}
+        for _, path, _ in members:
+            path.unlink()
+    return assets, bundles
+
+
+def verify_bundle_layout(folder, manifest):
+    assets, bundles = manifest['assets'], manifest.get('bundles')
+    if manifest.get('schemaVersion') != 2 or not isinstance(bundles, dict) or not bundles:
+        raise ValueError('Staged bundle manifest is invalid')
+    expected_names = {'bundles/compiler.bin', 'bundles/linker.bin', 'bundles/tools.bin', 'bundles/guest.bin'}
+    if set(bundles) != expected_names:
+        raise ValueError('Staged bundle set is invalid')
+    payloads = {}
+    for relative, expected in bundles.items():
+        path = folder / relative
+        if fingerprint(path) != {key: expected[key] for key in ['bytes', 'sha256']}:
+            raise ValueError(f'Staged bundle mismatch: {relative}')
+        payloads[relative] = path.read_bytes()
+    counts = {name: 0 for name in bundles}
+    raw_bytes = {name: 0 for name in bundles}
+    for relative, expected in assets.items():
+        bundle = expected.get('bundle')
+        if bundle is None:
+            if fingerprint(folder / relative) != {key: expected[key] for key in ['bytes', 'sha256']}:
+                raise ValueError(f'Staged asset mismatch: {relative}')
+            continue
+        if bundle != bundle_name(relative) or bundle not in payloads:
+            raise ValueError(f'Invalid staged asset bundle: {relative}')
+        offset, length = expected.get('offset'), expected.get('bytes')
+        if not isinstance(offset, int) or offset < 0 or not isinstance(length, int) or length < 0:
+            raise ValueError(f'Invalid staged asset range: {relative}')
+        payload = payloads[bundle][offset:offset + length]
+        if len(payload) != length or hashlib.sha256(payload).hexdigest() != expected['sha256']:
+            raise ValueError(f'Staged bundled asset mismatch: {relative}')
+        counts[bundle] += 1
+        raw_bytes[bundle] += length
+    for name, expected in bundles.items():
+        if counts[name] != expected.get('assets') or raw_bytes[name] != expected.get('rawBytes'):
+            raise ValueError(f'Staged bundle inventory mismatch: {name}')
 
 
 def verify_receipt(folder):
@@ -43,20 +122,11 @@ def verify_nuget_package(baseline, receipt, package_id, version):
 
 def verify_staged(folder):
     manifest = json.loads((folder / 'asset-manifest.json').read_text())
-    assets = manifest['assets']
-    for relative, expected in assets.items():
-        if fingerprint(folder / relative) != {key: expected[key] for key in ['bytes', 'sha256']}:
-            raise ValueError(f'Staged asset mismatch: {relative}')
-        if 'gzip' in expected:
-            compressed = expected['gzip']
-            if fingerprint(folder / compressed['path']) != {key: compressed[key] for key in ['bytes', 'sha256']}:
-                raise ValueError(f'Staged gzip mismatch: {relative}')
-            if gzip.decompress((folder / compressed['path']).read_bytes()) != (folder / relative).read_bytes():
-                raise ValueError(f'Staged gzip content mismatch: {relative}')
-    identity = {'schemaVersion': 1, 'pins': manifest['pins'], 'assets': assets}
+    verify_bundle_layout(folder, manifest)
+    identity = {key: manifest[key] for key in ['schemaVersion', 'pins', 'assets', 'bundles']}
     if hashlib.sha256(encoded(identity)).hexdigest() != manifest['id'] or folder.name != manifest['id']:
         raise ValueError('Staged content identity mismatch')
-    print(f'PASS: {len(assets)} immutable toolchain assets verified')
+    print(f"PASS: {len(manifest['assets'])} immutable assets in {len(manifest['bundles'])} bundles verified")
 
 
 def main():
@@ -200,16 +270,12 @@ def main():
                 copy(path, Path('notices') / path.relative_to(args.notices))
         for path in worker_paths:
             copy(path, Path('workers') / path.name)
-        assets = {}
-        for path in sorted(stage.rglob('*')):
-            if not path.is_file():
-                continue
-            relative = path.relative_to(stage).as_posix()
-            entry = fingerprint(path)
-            assets[relative] = entry
-        identity = {'schemaVersion': 1, 'pins': pins, 'assets': assets}
+        subprocess.run(['node', str(ROOT / 'eng/bundle-toolchain-modules.mjs'), str(stage)], check=True)
+        assets, bundles = pack_staged_assets(stage)
+        identity = {'schemaVersion': 2, 'pins': pins, 'assets': assets, 'bundles': bundles}
         digest = hashlib.sha256(encoded(identity)).hexdigest()
-        manifest = {**identity, 'id': digest, 'rawBytes': sum(a['bytes'] for a in assets.values())}
+        manifest = {**identity, 'id': digest, 'rawBytes': sum(a['bytes'] for a in assets.values()),
+                    'bundleBytes': sum(bundle['bytes'] for bundle in bundles.values())}
         (stage / 'asset-manifest.json').write_bytes(encoded(manifest))
         destination = args.output / digest
         if destination.exists():

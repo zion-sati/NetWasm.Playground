@@ -3,7 +3,6 @@
 import argparse
 import gzip
 import hashlib
-import io
 import json
 from pathlib import Path, PurePosixPath
 import shutil
@@ -40,31 +39,79 @@ def sha256(path):
     return digest.hexdigest()
 
 
-def verify_staged(folder, metadata):
+def encoded(value):
+    return (json.dumps(value, sort_keys=True, indent=2) + '\n').encode()
+
+
+def staged_path(root, relative):
+    if not isinstance(relative, str) or '\\' in relative or '\x00' in relative:
+        raise ValueError(f'Unsafe toolchain path: {relative}')
+    path = PurePosixPath(relative)
+    if path.is_absolute() or not path.parts or any(part in {'', '.', '..'} for part in path.parts):
+        raise ValueError(f'Unsafe toolchain path: {relative}')
+    return root.joinpath(*path.parts)
+
+
+def verify_staged(folder):
     index_path = folder / 'index.json'
     index = json.loads(index_path.read_text())
-    if index != metadata['index']:
-        raise ValueError('Toolchain index does not match release metadata')
+    if set(index) != {'id', 'manifestSha256'} or not all(
+            isinstance(index[key], str) and len(index[key]) == 64 and
+            all(character in '0123456789abcdef' for character in index[key])
+            for key in ('id', 'manifestSha256')):
+        raise ValueError('Toolchain index is invalid')
     manifest_path = folder / index['id'] / 'asset-manifest.json'
     if sha256(manifest_path) != index['manifestSha256']:
         raise ValueError('Toolchain manifest hash mismatch')
     manifest = json.loads(manifest_path.read_text())
     if manifest['id'] != index['id']:
         raise ValueError('Toolchain content identity mismatch')
-    for relative, expected in manifest['assets'].items():
-        asset = manifest_path.parent / relative
-        if asset.stat().st_size != expected['bytes'] or sha256(asset) != expected['sha256']:
-            raise ValueError(f'Toolchain asset mismatch: {relative}')
-        if 'gzip' in expected:
-            compressed = manifest_path.parent / expected['gzip']['path']
-            if compressed.stat().st_size != expected['gzip']['bytes'] or sha256(compressed) != expected['gzip']['sha256']:
-                raise ValueError(f'Toolchain compressed asset mismatch: {relative}')
-    print(f"PASS: verified {len(manifest['assets'])} immutable toolchain assets")
+    assets, bundle_receipts = manifest.get('assets'), manifest.get('bundles')
+    if manifest.get('schemaVersion') != 2 or not isinstance(assets, dict) or not isinstance(bundle_receipts, dict) or set(bundle_receipts) != {
+            'bundles/compiler.bin', 'bundles/linker.bin', 'bundles/tools.bin', 'bundles/guest.bin'}:
+        raise ValueError('Toolchain bundle manifest mismatch')
+    identity = {key: manifest[key] for key in ('schemaVersion', 'pins', 'assets', 'bundles')}
+    if hashlib.sha256(encoded(identity)).hexdigest() != index['id']:
+        raise ValueError('Toolchain content identity mismatch')
+    bundles = {}
+    counts = {name: 0 for name in bundle_receipts}
+    raw_bytes = {name: 0 for name in bundle_receipts}
+    for relative, expected in bundle_receipts.items():
+        if not isinstance(expected, dict) or not isinstance(expected.get('bytes'), int) or expected['bytes'] < 1 or \
+                not isinstance(expected.get('sha256'), str) or len(expected['sha256']) != 64:
+            raise ValueError(f'Invalid toolchain bundle receipt: {relative}')
+        path = staged_path(manifest_path.parent, relative)
+        if path.stat().st_size != expected['bytes'] or sha256(path) != expected['sha256']:
+            raise ValueError(f'Toolchain bundle mismatch: {relative}')
+        bundles[relative] = path.read_bytes()
+    for relative, expected in assets.items():
+        if not isinstance(expected, dict) or not isinstance(expected.get('bytes'), int) or expected['bytes'] < 0 or \
+                not isinstance(expected.get('sha256'), str) or len(expected['sha256']) != 64:
+            raise ValueError(f'Invalid toolchain asset receipt: {relative}')
+        staged_path(manifest_path.parent, relative)
+        bundle = expected.get('bundle')
+        if bundle is None:
+            asset = staged_path(manifest_path.parent, relative)
+            if asset.stat().st_size != expected['bytes'] or sha256(asset) != expected['sha256']:
+                raise ValueError(f'Toolchain asset mismatch: {relative}')
+        else:
+            offset, length = expected.get('offset'), expected.get('bytes')
+            if bundle not in bundles or not isinstance(offset, int) or offset < 0 or not isinstance(length, int) or length < 0:
+                raise ValueError(f'Toolchain asset range mismatch: {relative}')
+            payload = bundles[bundle][offset:offset + length]
+            if len(payload) != length or hashlib.sha256(payload).hexdigest() != expected['sha256']:
+                raise ValueError(f'Toolchain bundled asset mismatch: {relative}')
+            counts[bundle] += 1
+            raw_bytes[bundle] += length
+    for relative, expected in bundle_receipts.items():
+        if counts[relative] != expected.get('assets') or raw_bytes[relative] != expected.get('rawBytes'):
+            raise ValueError(f'Toolchain bundle inventory mismatch: {relative}')
+    print(f"PASS: verified {len(assets)} immutable assets in {len(bundles)} bundles")
 
 
 def pack(source, output):
-    metadata = release_metadata()
-    verify_staged(source, metadata)
+    release_metadata()
+    verify_staged(source)
     output.parent.mkdir(parents=True, exist_ok=True)
     with output.open('wb') as raw:
         with gzip.GzipFile(filename='', mode='wb', fileobj=raw, compresslevel=9, mtime=0) as compressed:
@@ -91,19 +138,17 @@ def install(output, archive=None):
         if archive is None:
             with urllib.request.urlopen(metadata['asset']['url']) as response, bundle.open('wb') as destination:
                 shutil.copyfileobj(response, destination)
-        if bundle.stat().st_size != metadata['asset']['bytes'] or sha256(bundle) != metadata['asset']['sha256']:
-            raise ValueError('Toolchain release archive mismatch')
         stage = temporary / 'extracted'
         stage.mkdir()
         with tarfile.open(bundle, 'r:gz') as package:
             members = package.getmembers()
             for member in members:
                 path = PurePosixPath(member.name)
-                if member.issym() or member.islnk() or path.is_absolute() or '..' in path.parts or path.parts[:1] != ('toolchain',):
+                if not (member.isfile() or member.isdir()) or path.is_absolute() or '..' in path.parts or path.parts[:1] != ('toolchain',):
                     raise ValueError(f'Unsafe toolchain archive member: {member.name}')
             package.extractall(stage, filter='data')
         extracted = stage / 'toolchain'
-        verify_staged(extracted, metadata)
+        verify_staged(extracted)
         if output.exists():
             shutil.rmtree(output)
         extracted.rename(output)

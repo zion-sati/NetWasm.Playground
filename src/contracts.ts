@@ -20,8 +20,8 @@ export interface Diagnostic {
 export interface StageTiming { stage: string; milliseconds: number }
 export interface AssetMeasurement { rawBytes: number; transferBytes: number }
 export interface ToolchainPreloadProgress extends AssetMeasurement {
-  completedAssets: number;
-  totalAssets: number;
+  completedBundles: number;
+  totalBundles: number;
 }
 
 export type PipelineEvent = { requestId: number; revision: number } & (

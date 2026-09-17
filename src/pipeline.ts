@@ -2,17 +2,20 @@ import type { CompilationResult, PipelineEvent, RunResult, SourceSnapshot, Stage
 import { WorkerChannel } from './worker-channel';
 import { optimizationArguments, optimizationModes } from './optimization';
 const basename = (path: string) => path.slice(path.lastIndexOf('/') + 1);
+type AssetReceipt = { sha256: string; bytes: number; bundle?: string; offset?: number };
+type BundleReceipt = { sha256: string; bytes: number; rawBytes: number; assets: number };
+type ToolchainManifest = { schemaVersion: number; assets: Record<string, AssetReceipt>; bundles: Record<string, BundleReceipt> };
 export class PlaygroundPipeline {
   private channels = new Map<string, WorkerChannel>();
   private context?: SourceSnapshot;
   private root?: URL;
   private rootInitialization?: Promise<void>;
-  private manifest?: { assets: Record<string, { sha256: string; bytes: number }> };
+  private manifest?: ToolchainManifest;
   private channelInitializations = new Map<string, Promise<void>>();
   private abort?: AbortController;
   private epoch = 0;
   private assets = { rawBytes: 0, transferBytes: 0 };
-  private measuredAssets = new Set<string>();
+  private measuredResources = new Set<string>();
   private onPreloadProgress?: (progress: ToolchainPreloadProgress) => void;
   private foregroundOperations = 0;
   private backgroundWaiters: Array<() => void> = [];
@@ -30,12 +33,20 @@ export class PlaygroundPipeline {
   }
   private reportPreloadProgress() {
     if (!this.onPreloadProgress) return;
-    const names = this.manifest ? Object.keys(this.manifest.assets).filter(name => !name.startsWith('notices/')) : [];
+    const names = this.manifest ? Object.keys(this.manifest.bundles) : [];
     this.onPreloadProgress({
-      completedAssets: names.filter(name => this.measuredAssets.has(name)).length,
-      totalAssets: names.length,
+      completedBundles: names.filter(name => this.measuredResources.has(name)).length,
+      totalBundles: names.length,
       ...this.assets,
     });
+  }
+  private recordResource(name: string, rawBytes: number, transferBytes: number) {
+    if (this.measuredResources.has(name)) return;
+    this.measuredResources.add(name);
+    this.assets.rawBytes += rawBytes;
+    this.assets.transferBytes += transferBytes;
+    this.emit({ type: 'assets', ...this.assets });
+    this.reportPreloadProgress();
   }
   private async initialize() {
     if (!this.abort || this.abort.signal.aborted) this.abort = new AbortController();
@@ -52,7 +63,11 @@ export class PlaygroundPipeline {
       if (!manifestResponse.ok) throw new Error('Toolchain manifest unavailable');
       const bytes = new Uint8Array(await manifestResponse.arrayBuffer());
       await this.verify(bytes, index.manifestSha256);
-      this.manifest = JSON.parse(new TextDecoder().decode(bytes));
+      const manifest = JSON.parse(new TextDecoder().decode(bytes)) as ToolchainManifest;
+      if (manifest.schemaVersion !== 2 || !manifest.assets || Array.isArray(manifest.assets) ||
+          !manifest.bundles || Array.isArray(manifest.bundles) || Object.keys(manifest.bundles).length === 0)
+        throw new Error('Invalid toolchain manifest');
+      this.manifest = manifest;
       this.root = root;
     })().catch(error => { this.rootInitialization = undefined; throw error; }));
   }
@@ -61,33 +76,53 @@ export class PlaygroundPipeline {
     const actual = Array.from(digest, byte => byte.toString(16).padStart(2, '0')).join('');
     if (actual !== expected) throw new Error('Toolchain asset integrity check failed');
   }
-  private async preloadRemainingAssets() {
-    const entries = Object.entries(this.manifest!.assets)
-      .filter(([name]) => !name.startsWith('notices/') && !this.measuredAssets.has(name));
+  private async fetchBundle(name: string, entry: BundleReceipt) {
+    if (!entry || !/^bundles\/[a-z]+\.bin$/.test(name) || !Number.isSafeInteger(entry.bytes) || entry.bytes < 1 || entry.bytes > 134217728 ||
+        entry.rawBytes !== entry.bytes || !Number.isSafeInteger(entry.assets) || entry.assets < 1 || !/^[a-f0-9]{64}$/.test(entry.sha256))
+      throw new Error(`Invalid toolchain bundle receipt: ${name}`);
+    const url = new URL(name, this.root!);
+    const response = await fetch(url, { signal: this.abort!.signal, cache: 'force-cache' });
+    if (!response.ok) throw new Error(`Toolchain bundle unavailable: ${name}`);
+    const bytes = new Uint8Array(await response.arrayBuffer());
+    if (bytes.byteLength !== entry.bytes) throw new Error(`Toolchain bundle length failed: ${name}`);
+    await this.verify(bytes, entry.sha256);
+    const timing = performance.getEntriesByName(response.url).at(-1) as PerformanceResourceTiming | undefined;
+    this.recordResource(name, entry.rawBytes, timing?.encodedBodySize || entry.bytes);
+    return bytes;
+  }
+  private async loadAsset(name: string) {
+    const entry = this.manifest!.assets[name];
+    if (!entry || !Number.isSafeInteger(entry.bytes) || entry.bytes < 0 || !/^[a-f0-9]{64}$/.test(entry.sha256))
+      throw new Error(`Invalid toolchain asset receipt: ${name}`);
+    let bytes: Uint8Array;
+    if (entry.bundle) {
+      if (!Number.isSafeInteger(entry.offset) || entry.offset! < 0) throw new Error(`Invalid toolchain asset range: ${name}`);
+      const bundle = await this.fetchBundle(entry.bundle, this.manifest!.bundles[entry.bundle]);
+      bytes = bundle.slice(entry.offset, entry.offset! + entry.bytes);
+    } else {
+      const response = await fetch(new URL(name, this.root!), { signal: this.abort!.signal, cache: 'force-cache' });
+      if (!response.ok) throw new Error(`Toolchain asset unavailable: ${name}`);
+      bytes = new Uint8Array(await response.arrayBuffer());
+      const timing = performance.getEntriesByName(response.url).at(-1) as PerformanceResourceTiming | undefined;
+      this.recordResource(name, entry.bytes, timing?.encodedBodySize || entry.bytes);
+    }
+    if (bytes.byteLength !== entry.bytes) throw new Error(`Toolchain asset length failed: ${name}`);
+    await this.verify(bytes, entry.sha256);
+    return bytes;
+  }
+  private async preloadRemainingBundles() {
+    const entries = Object.entries(this.manifest!.bundles)
+      .filter(([name]) => !this.measuredResources.has(name));
     let cursor = 0;
     const load = async () => {
       while (cursor < entries.length) {
         await this.waitForBackgroundTurn();
         if (cursor >= entries.length) return;
         const [name, entry] = entries[cursor++];
-        if (!/^[A-Za-z0-9_.@/-]+$/.test(name) || name.startsWith('/') || name.split('/').some(part => !part || part === '.' || part === '..')) throw new Error('Invalid toolchain asset path');
-        const url = new URL(name, this.root!);
-        const response = await fetch(url, { signal: this.abort!.signal, cache: 'force-cache' });
-        if (!response.ok) throw new Error(`Toolchain asset unavailable: ${name}`);
-        const bytes = new Uint8Array(await response.arrayBuffer());
-        if (bytes.byteLength !== entry.bytes) throw new Error(`Toolchain asset length failed: ${name}`);
-        await this.verify(bytes, entry.sha256);
-        if (!this.measuredAssets.has(name)) {
-          const timing = performance.getEntriesByName(response.url).at(-1) as PerformanceResourceTiming | undefined;
-          this.measuredAssets.add(name);
-          this.assets.rawBytes += entry.bytes;
-          this.assets.transferBytes += timing?.encodedBodySize || entry.bytes;
-          this.emit({ type: 'assets', ...this.assets });
-          this.reportPreloadProgress();
-        }
+        await this.fetchBundle(name, entry);
       }
     };
-    await Promise.all(Array.from({ length: Math.min(8, entries.length) }, load));
+    await Promise.all(Array.from({ length: entries.length }, load));
   }
   private channel(name: string) {
     let channel = this.channels.get(name);
@@ -98,7 +133,7 @@ export class PlaygroundPipeline {
           if (this.runOutput && (data.console === 'stdout' || data.console === 'stderr')) this.runOutput[data.console as 'stdout' | 'stderr'] += data.text ?? '';
           this.emit({ type: 'console', stream: data.console, text: data.text ?? '' });
         }
-        if (data.assets && !this.measuredAssets.has(data.assets.name)) { this.measuredAssets.add(data.assets.name); this.assets.rawBytes += data.assets.rawBytes; this.assets.transferBytes += data.assets.transferBytes; this.emit({ type: 'assets', ...this.assets }); this.reportPreloadProgress(); }
+        if (data.assets) this.recordResource(data.assets.name, data.assets.rawBytes, data.assets.transferBytes);
       });
       this.channels.set(name, channel);
     }
@@ -129,7 +164,7 @@ export class PlaygroundPipeline {
         this.initializeChannel('tools'),
       ]);
       await this.waitForBackgroundTurn();
-      await this.preloadRemainingAssets();
+      await this.preloadRemainingBundles();
       this.reportPreloadProgress();
       return { ...this.assets };
     } finally {
@@ -190,10 +225,7 @@ export class PlaygroundPipeline {
       await this.stage('validate', timings, () => this.tool('wasm-tools', ['validate', 'linked.wasm'], { 'linked.wasm': linked }, []));
       const witName = snapshot.recipeId === 'tunit' ? 'async-command.wit.wasm' : 'command.wit.wasm';
       const witWorld = snapshot.recipeId === 'tunit' ? 'netwasm:component/async-command@1.0.0' : 'wasi:cli/command@0.2.11';
-      const witResponse = await fetch(new URL(witName, this.root!), { signal: this.abort?.signal, cache: 'force-cache' });
-      if (!witResponse.ok) throw new Error('Command WIT unavailable');
-      const wit = new Uint8Array(await witResponse.arrayBuffer());
-      await this.verify(wit, this.manifest!.assets[witName].sha256);
+      const wit = await this.loadAsset(witName);
       const component = await this.stage('componentization', timings, async () => {
         const embedded = await this.tool('wasm-tools', ['component', 'embed', witName, 'linked.wasm', '--encoding', 'utf8', '--output', 'embedded.wasm', '--world', witWorld], { [witName]: wit, 'linked.wasm': linked }, ['embedded.wasm']);
         const packaged = await this.tool('wasm-tools', ['component', 'new', 'embedded.wasm', '--output', 'component.wasm'], embedded, ['component.wasm']);

@@ -33,12 +33,15 @@ The asset preparation command checks the existing verification receipts and
 stages assets under an ignored, content-addressed `public/toolchain/` directory.
 It consumes the public NuGet.org packages and verified inputs produced by the
 runners under `eng/` and `spikes/`; it does not read NetWasm source checkouts.
-It does not rebuild LLVM. Pages builds install the immutable browser bundle
-recorded in `eng/toolchain-release.json`; its archive hash, content identity and
-every staged asset are verified before use. A ready manifest identifies the
-exact archive the owner publishes as a GitHub release asset before deploying
-Pages. Public releases use semantic tags such as `v0.2.0`; the independent
-content-addressed toolchain ID continues to identify the exact browser bundle.
+It does not rebuild LLVM. Release builds run on a clean GitHub Actions runner:
+they compile the browser compiler host from pinned public NuGet packages,
+rebuild the four phase bundles from the receipt-verified public base, and reject
+personal identity or workstation-path strings anywhere in the payload. Pages
+then installs the browser bundle published under the semantic version in
+`eng/toolchain-release.json`. Its self-contained content identity, manifest,
+bundles and every asset slice are verified before use. Public releases use tags
+such as `v0.2.3`; the independently computed toolchain ID identifies the exact
+browser bundle built by that release.
 
 ```sh
 python3 eng/toolchain-release.py install
@@ -57,19 +60,19 @@ Open `http://127.0.0.1:5174/playground/`. Rebuilding with the default base
 while this preview is running will break its asset URLs.
 
 Pull requests and pushes to `main` run type checking and build the application
-shell without downloading an unpublished toolchain. Publishing the versioned
-GitHub Release recorded in `eng/toolchain-release.json` triggers the Pages
-workflow. It verifies the release tag, builds with GitHub Pages' configured base
-path, runs an actual Chromium compile/run/download smoke test, executes that
-download with pinned Wasmtime, and deploys the verified `dist/` artifact. It
-then repeats that check against the public Pages URL and retains both evidence
-sets for 14 days. A manual dispatch remains available for recovery. Configure
-Pages with **GitHub Actions** as its source; publishing directly from the
-repository root does not build this Vite project.
+shell without downloading an unpublished toolchain. Pushing the signed semantic
+tag recorded in `eng/toolchain-release.json` runs the release workflow. That
+workflow builds and scans the toolchain on GitHub Actions, publishes the release
+asset, and calls the Pages workflow for the same tag. Pages builds with its
+configured base path, runs an actual Chromium compile/run/download smoke test,
+executes that download with pinned Wasmtime, and deploys the verified `dist/`
+artifact. It repeats that check against the public URL and retains both evidence
+sets for 14 days. A manual Pages dispatch remains available for recovery.
+Configure Pages with **GitHub Actions** as its source; publishing directly from
+the repository root does not build this Vite project.
 
 The `github-pages` environment must allow deployments from the `main` branch
-and `v*` tags. GitHub evaluates a release-triggered workflow against its tag,
-even when that signed tag points at `main`.
+and `v*` tags. The release workflow calls Pages from the signed release tag.
 
 ```sh
 npm run typecheck
@@ -82,14 +85,14 @@ Compile + Run, seven for Compile, or one for an unchanged component rerun.
 `eng/browser-smoke/progress.mjs` checks these states and Stop recovery.
 
 After the editor mounts, the Playground starts the compiler, linker and tools
-in background workers and fills the browser cache with every executable
-toolchain asset. Each payload is checked against the immutable manifest before
-the preload is marked complete. Compile and Run remain available while this is
-happening; an early click joins the same worker initialization instead of
-starting duplicate downloads. The progress bar reports completed assets and
-encoded transfer bytes while the preload runs. Toolchain files are requested in
-their original form so the hosting edge can negotiate Brotli or Gzip through
-standard HTTP content encoding.
+in background workers and fetches four phase-specific binary bundles for the
+compiler, linker, WebAssembly tools and guest runtime. The browser-addressable
+module graph is collapsed to 12 entry files. Each whole bundle and every asset
+slice are checked against the immutable manifest before use. Compile and Run
+remain available while this is happening; an early click joins the same worker
+initialization instead of starting duplicate downloads. The progress bar reports
+completed bundles and encoded transfer bytes. The hosting edge can negotiate
+Brotli or Gzip for the `.bin` responses through standard HTTP content encoding.
 
 The smoke expects a running development server with the same base path and
 Playwright's Chromium installed. It exercises the actual compiler and guest.

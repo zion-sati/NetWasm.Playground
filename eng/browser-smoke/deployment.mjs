@@ -9,20 +9,37 @@ if (!url || !output) throw Error('PLAYGROUND_URL and PLAYGROUND_EVIDENCE are req
 mkdirSync(output, { recursive: true });
 const browser = await chromium.launch({ headless: true });
 const errors = [];
+const requests = [];
+const consoleErrors = [];
 try {
   const page = await browser.newPage({ acceptDownloads: true });
   page.on('pageerror', error => errors.push(String(error)));
+  page.on('console', message => { if (message.type() === 'error') consoleErrors.push(message.text()); });
+  page.on('request', request => requests.push(request.url()));
   await page.goto(url);
+  const pageContract = await page.evaluate(async () => {
+    const csp = document.querySelector('meta[http-equiv="Content-Security-Policy"]')?.content ?? '';
+    const icons = [...document.querySelectorAll('link[rel="icon"]')].map(link => link.href);
+    const statuses = await Promise.all(icons.map(async href => (await fetch(href)).status));
+    const brandLink = document.querySelector('.brand > a');
+    return { csp, icons, statuses, brandLink: brandLink ? { href: brandLink.href, text: brandLink.textContent } : null,
+      brandText: document.querySelector('.brand')?.textContent };
+  });
+  if (!pageContract.csp.includes('https://static.cloudflareinsights.com') ||
+      !pageContract.csp.includes('https://cloudflareinsights.com') || pageContract.icons.length !== 2 ||
+      pageContract.statuses.some(status => status !== 200) || pageContract.brandLink?.href !== 'https://www.netwasm.com/' ||
+      pageContract.brandLink?.text !== 'NetWasm' || pageContract.brandText !== 'NetWasm Playground')
+    throw Error(`Page resource contract failed: ${JSON.stringify(pageContract)}`);
   await page.locator('.monaco-editor').waitFor();
   await page.waitForFunction(() => performance.getEntriesByType('resource').some(entry => entry.name.includes('/toolchain/')));
-  await page.waitForFunction(() => Number(document.querySelector('#toolchain-progress')?.dataset.totalAssets) > 0);
+  await page.waitForFunction(() => Number(document.querySelector('#toolchain-progress')?.dataset.totalBundles) > 0);
   const preload = await page.evaluate(() => ({
     hidden: document.querySelector('#toolchain-progress').hidden,
-    completed: Number(document.querySelector('#toolchain-progress').dataset.completedAssets),
-    total: Number(document.querySelector('#toolchain-progress').dataset.totalAssets),
+    completed: Number(document.querySelector('#toolchain-progress').dataset.completedBundles),
+    total: Number(document.querySelector('#toolchain-progress').dataset.totalBundles),
     detail: document.querySelector('#toolchain-progress-detail').textContent,
   }));
-  if (preload.hidden || preload.completed >= preload.total || !preload.detail.includes(`of ${preload.total} assets`)) throw Error(`Preload progress missing: ${JSON.stringify(preload)}`);
+  if (preload.hidden || preload.completed >= preload.total || !preload.detail.includes(`of ${preload.total} bundles`)) throw Error(`Preload progress missing: ${JSON.stringify(preload)}`);
   if (!await page.locator('#compile').isEnabled() || !await page.locator('#run').isEnabled()) throw Error('Background preload disabled actions');
   await page.getByLabel('Optimization', { exact: true }).selectOption('none');
   await page.locator('#run').click();
@@ -40,11 +57,21 @@ try {
   await download.saveAs(componentPath);
   const nativeStdout = execFileSync('wasmtime', [componentPath], { encoding: 'utf8' });
   if (nativeStdout !== stdout) throw Error('Wasmtime output differs from browser output');
-  if (errors.length) throw Error(`Page errors: ${JSON.stringify(errors)}`);
+  if (errors.length || consoleErrors.some(error => error.includes('Content Security Policy') || error.includes('favicon.ico')))
+    throw Error(`Page errors: ${JSON.stringify({ errors, consoleErrors })}`);
+  const toolchainRequests = [...new Set(requests.filter(request => request.includes('/toolchain/')).map(request => new URL(request).pathname))];
+  const bundleRequests = toolchainRequests.filter(request => request.endsWith('.bin'));
+  const expectedBundles = ['compiler.bin', 'guest.bin', 'linker.bin', 'tools.bin'];
+  if (bundleRequests.map(request => request.slice(request.lastIndexOf('/') + 1)).sort().join(',') !== expectedBundles.join(','))
+    throw Error(`Unexpected bundle requests: ${JSON.stringify(bundleRequests)}`);
+  const directPayloads = toolchainRequests.filter(request => /\.(?:wasm|dll|a|dat|json)$/.test(request) &&
+    !request.endsWith('/index.json') && !request.endsWith('/asset-manifest.json'));
+  if (directPayloads.length || toolchainRequests.length > 20)
+    throw Error(`Toolchain request graph was not bundled: ${JSON.stringify({ count: toolchainRequests.length, directPayloads })}`);
   const bytes = readFileSync(componentPath);
   const result = { passed: true, browser: browser.version(), stdout, status,
     component: { bytes: bytes.length, sha256: createHash('sha256').update(bytes).digest('hex') },
-    errors };
+    toolchainRequests: { unique: toolchainRequests.length, bundles: bundleRequests }, pageContract, errors, consoleErrors };
   writeFileSync(`${output}/results.json`, JSON.stringify(result, null, 2));
   console.log('PASS: deployed browser compile/run/download and Wasmtime execution');
 } finally {

@@ -34,6 +34,7 @@ async function initialize() {
   return initialized ??= (async () => {
     report({ stage: 'compiler-initialize' });
     await loader.verifyGraph('compiler/_framework/');
+    loader.installFetchAdapter();
     // .NET 10's dotnet.js distinguishes sidecars from runtime threads using
     // onmessage at import time. Our lazy protocol already installed onmessage.
     globalThis.dotnetSidecar = true;

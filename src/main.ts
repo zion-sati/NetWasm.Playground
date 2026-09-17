@@ -15,7 +15,7 @@ import { optimizationLabels, optimizationModes, type OptimizationMode } from './
 
 (globalThis as typeof globalThis & { MonacoEnvironment: unknown }).MonacoEnvironment = { getWorker: () => new EditorWorker() };
 document.querySelector<HTMLDivElement>('#app')!.innerHTML = `
-<header><a class="brand" href="./">NetWasm <span>Playground</span></a><span class="badge">C# → WebAssembly</span></header>
+<header><div class="brand"><a href="https://www.netwasm.com/">NetWasm</a> <span>Playground</span></div><span class="badge">C# → WebAssembly</span></header>
 <main><section class="intro"><h1>Small code. Real WebAssembly.</h1><p>Compiled locally in your browser. Your source code never leaves this page.</p></section>
 <section class="workbench" aria-label="C# playground"><aside class="compile-notice"><span aria-hidden="true">⏱</span><p><strong>Compilation is still slow.</strong> Even simple samples can take tens of seconds in the browser. Choose <b>Optimization: None</b> to skip the final optimizer for the fastest current build.</p></aside><div class="toolbar"><div class="options"><label class="recipe">Example <select id="example" aria-label="Example"></select></label><label class="recipe">Optimization <select id="optimization" aria-label="Optimization"></select></label></div><div class="actions"><button id="compile"><span class="compile-spinner" aria-hidden="true"></span>Compile</button><button id="run" class="primary">Run <span aria-hidden="true">▶</span></button><button id="stop" disabled>Stop</button><button id="download" disabled>Download</button></div></div>
 <div class="panes"><section class="source-pane"><div class="pane-heading"><h2 id="source-name">Program.cs</h2><span>C# · Release</span></div><div id="editor" aria-label="C# source editor"></div></section><section class="results-pane"><div class="pane-heading"><h2>Console</h2><span id="exit"></span></div><pre id="output" tabindex="0" aria-label="Program output"></pre><div class="diagnostic-heading"><h2>Diagnostics</h2><span id="diagnostic-count">0</span></div><div id="diagnostics" aria-label="Compiler diagnostics"><p class="empty">Compile to check your source.</p></div></section></div>
@@ -30,7 +30,7 @@ const optimizationSelect = el<HTMLSelectElement>('optimization');
 for (const example of examples) { const option = document.createElement('option'); option.value = example.id; option.textContent = example.name; exampleSelect.append(option); }
 for (const mode of optimizationModes) { const option = document.createElement('option'); option.value = mode; option.textContent = optimizationLabels[mode]; optimizationSelect.append(option); }
 const colorScheme = window.matchMedia('(prefers-color-scheme: dark)');
-const editor = monaco.editor.create(el('editor'), { value: examples[0].source, language: 'csharp', theme: colorScheme.matches ? 'vs-dark' : 'vs', automaticLayout: true, minimap: { enabled: false }, fontSize: 14, lineHeight: 23, scrollBeyondLastLine: false, padding: { top: 18 }, tabSize: 4, fixedOverflowWidgets: true, accessibilitySupport: 'auto' });
+const editor = monaco.editor.create(el('editor'), { value: examples[0].source, language: 'csharp', theme: colorScheme.matches ? 'vs-dark' : 'vs', automaticLayout: true, minimap: { enabled: false }, fontSize: 14, lineHeight: 23, scrollBeyondLastLine: false, scrollbar: { alwaysConsumeMouseWheel: false }, padding: { top: 18 }, tabSize: 4, fixedOverflowWidgets: true, accessibilitySupport: 'auto' });
 colorScheme.addEventListener('change', event => monaco.editor.setTheme(event.matches ? 'vs-dark' : 'vs'));
 let revision = 0;
 let nextRequest = 0;
@@ -87,17 +87,17 @@ function showPreloadProgress(progress: ToolchainPreloadProgress) {
   const container = el('toolchain-progress');
   const bar = el<HTMLProgressElement>('toolchain-progress-bar');
   container.hidden = false;
-  container.dataset.completedAssets = String(progress.completedAssets);
-  container.dataset.totalAssets = String(progress.totalAssets);
-  if (!progress.totalAssets) {
+  container.dataset.completedBundles = String(progress.completedBundles);
+  container.dataset.totalBundles = String(progress.totalBundles);
+  if (!progress.totalBundles) {
     bar.removeAttribute('value');
     el('toolchain-progress-detail').textContent = 'Reading manifest…';
     return;
   }
-  bar.max = progress.totalAssets;
-  bar.value = progress.completedAssets;
-  const percentage = Math.round(progress.completedAssets / progress.totalAssets * 100);
-  el('toolchain-progress-detail').textContent = `${percentage}% · ${progress.completedAssets} of ${progress.totalAssets} assets · ${formatMegabytes(progress.transferBytes)} transferred`;
+  bar.max = progress.totalBundles;
+  bar.value = progress.completedBundles;
+  const percentage = Math.round(progress.completedBundles / progress.totalBundles * 100);
+  el('toolchain-progress-detail').textContent = `${percentage}% · ${progress.completedBundles} of ${progress.totalBundles} bundles · ${formatMegabytes(progress.transferBytes)} transferred`;
   if (!active && el('status').textContent.startsWith('Preparing toolchain')) el('status').textContent = `Preparing toolchain · ${percentage}%`;
 }
 editor.onDidChangeModelContent(() => { revision++; comparisons.clear(); showComparisons(); invalidateDownload(); setDiagnostics([]); el('status').textContent = unsupported ?? (active ? 'Source changed · result pending for earlier revision' : 'Source changed'); });

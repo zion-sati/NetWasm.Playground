@@ -56,10 +56,8 @@ serveWorker(async (data, report) => {
     const verified = await Promise.allSettled(jcoAssets.map(name => loader.load(name, { javascript: true })));
     const failed = verified.find(result => result.status === 'rejected');
     if (failed) throw failed.reason;
-    const [jco, cliModule, io, clockModule] = await Promise.all([
-      import(loader.url('jco/browser.js')), import(loader.url('jco/preview2/cli.js')),
-      import(loader.url('jco/preview2/io.js')), import(loader.url('jco/preview2/clocks.js')),
-    ]);
+    loader.installFetchAdapter();
+    const { jco, cliModule, io, clockModule, executeComponent } = await import(loader.url('jco/guest-runtime.mjs'));
     const generated = await jco.generate(component, { name: 'guest', instantiation: { tag: 'async' },
       noTypescript: true, noNodejsCompat: true, base64Cutoff: 0, bindgenEnableWasmExnref: true });
     generatedImports = generated.imports;
@@ -113,11 +111,6 @@ serveWorker(async (data, report) => {
         throw Error('Generated core graph was not fully resolved');
     };
     if (managedProcess) {
-      await loader.verifyGraph('hosting/');
-      const [{ executeComponent }, clocks] = await Promise.all([
-        import(loader.url('hosting/component-executor.mjs')),
-        import(loader.url('jco/preview2/clocks.js')),
-      ]);
       // The public executor owns reactor watch/cancel, wake delivery, process
       // observation and cleanup. Guest imports cannot inject its reactor host.
       const contractKey = 'netwasm:runtime/process@1.0.0';
@@ -129,7 +122,7 @@ serveWorker(async (data, report) => {
       } });
       const outcome = await executeComponent({ contractKey, adapter, loadCoreModule, instantiateCore,
         imports: { ...imports, 'wasi:io/poll': io.poll,
-          'wasi:clocks/monotonic-clock': clocks.monotonicClock } });
+          'wasi:clocks/monotonic-clock': clockModule.monotonicClock } });
       complete(); finishOutput();
       return { success: outcome.completionKind === 'normal', exitCode: outcome.exitCode,
         error: outcome.primaryFailure?.message, stage: outcome.primaryFailure?.phase,

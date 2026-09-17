@@ -1,0 +1,81 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+
+jobs:
+  build-release:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check out tagged source
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - name: Set up .NET
+        uses: actions/setup-dotnet@26b0ec14cb23fa6904739307f278c14f94c95bf1 # v5
+        with:
+          dotnet-version: 10.0.302
+      - name: Set up Node.js
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: 26.7.0
+          cache: npm
+      - run: npm ci
+      - name: Verify semantic release coordinates
+        run: |
+          package_tag="v$(node -p "require('./package.json').version")"
+          metadata_tag=$(python3 -c 'import json; print(json.load(open("eng/toolchain-release.json"))["tag"])')
+          test "$package_tag" = "$metadata_tag"
+          if [[ "$GITHUB_REF" == refs/tags/* ]]; then
+            test "$GITHUB_REF_NAME" = "$metadata_tag"
+          fi
+      - name: Build compiler framework from public packages
+        run: python3 eng/build-release-compiler.py --output .cache/release/compiler-framework
+      - name: Build browser toolchain
+        run: python3 eng/rebuild-public-toolchain.py --compiler-framework .cache/release/compiler-framework --output public/toolchain
+      - name: Package reproducible release asset
+        run: |
+          asset=$(python3 -c 'import json; print(json.load(open("eng/toolchain-release.json"))["asset"]["name"])')
+          mkdir -p .cache/release/output
+          python3 eng/toolchain-release.py pack --source public/toolchain --output ".cache/release/output/$asset"
+          python3 eng/toolchain-release.py install --archive ".cache/release/output/$asset" --output .cache/release/install-check
+          python3 - "$asset" <<'PY'
+          import hashlib, json, pathlib, sys
+          path = pathlib.Path('.cache/release/output') / sys.argv[1]
+          receipt = {'name': path.name, 'bytes': path.stat().st_size,
+                     'sha256': hashlib.sha256(path.read_bytes()).hexdigest()}
+          pathlib.Path('.cache/release/archive-receipt.json').write_text(json.dumps(receipt, indent=2) + '\n')
+          PY
+      - name: Publish GitHub Release
+        if: github.event_name == 'push'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          asset=$(python3 -c 'import json; print(json.load(open("eng/toolchain-release.json"))["asset"]["name"])')
+          gh release create "$GITHUB_REF_NAME" ".cache/release/output/$asset#Browser toolchain" \
+            --repo "$GITHUB_REPOSITORY" --verify-tag --title "NetWasm Playground $GITHUB_REF_NAME" \
+            --notes "Browser-built NetWasm Playground release. The toolchain was assembled on a clean GitHub Actions runner from pinned public inputs."
+      - name: Retain release receipts
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: release-receipts-${{ github.run_id }}
+          path: |
+            .cache/release/archive-receipt.json
+            .cache/release/compiler-framework-receipt.json
+            public/toolchain/index.json
+            public/toolchain/*/asset-manifest.json
+          retention-days: 14
+
+  pages:
+    if: github.event_name == 'push'
+    needs: build-release
+    uses: ./.github/workflows/pages.yml
+    permissions:
+      contents: read
+      pages: write
+      id-token: write

@@ -467,7 +467,10 @@ def main():
             "projectsChecked": len(checked), "sources": ["https://api.nuget.org/v3/index.json"],
             "fallbackFolders": [], "packageCache": str(package_cache.relative_to(package_cache_owner)),
             "reusedVerifiedHostReceipt": fingerprint(reused_host / "receipt.json") if reused_host else None}, indent=2))
-    execute(["dotnet", "publish", runtime_option, *package_options, "-c", "Debug", "--no-restore", "-o", str(run / "publish")], "publish")
+    execute(["dotnet", "publish", runtime_option, *package_options, "-c", "Debug", "--no-restore",
+             "-p:ContinuousIntegrationBuild=true", "-p:Deterministic=true", "-p:DebugType=None",
+             "-p:DebugSymbols=false", "-p:PathMap=" + str(run) + "=/_/",
+             "-o", str(run / "publish")], "publish")
     shutil.copyfile(app / "bin/Debug/net10.0/NetWasm.Playground.CompilerProbe.runtimeconfig.json",
                     run / "host-runtimeconfig.json")
     web = run / "publish/wwwroot"

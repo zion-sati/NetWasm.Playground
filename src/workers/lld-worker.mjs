@@ -4,9 +4,8 @@ const loader = createAssetLoader(assets => report({ assets }));
 async function initialize() {
   return initialized ??= (async () => {
     await loader.verifyGraph('lld/');
-    const [{ default: factory }, { createBrowserLld }] = await Promise.all([
-      import(loader.url('lld/netwasm-browser-lld.mjs')), import(loader.url('lld/netwasm-lld.mjs')),
-    ]);
+    loader.installFetchAdapter();
+    const { factory, createBrowserLld } = await import(loader.url('lld/lld-runtime.mjs'));
     const wasm = await loader.load('lld/netwasm-browser-lld.wasm');
     return createBrowserLld(options => factory({ ...options, wasmBinary: wasm.slice() }));
   })().catch(error => { initialized = undefined; throw error; });

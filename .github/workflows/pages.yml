@@ -2,8 +2,7 @@ name: Pages
 
 on:
   workflow_dispatch:
-  release:
-    types: [published]
+  workflow_call:
 
 concurrency:
   group: pages
@@ -15,16 +14,17 @@ permissions:
 jobs:
   build-and-test:
     runs-on: ubuntu-24.04
+    outputs:
+      toolchain_id: ${{ steps.toolchain.outputs.id }}
     steps:
       - name: Check out source
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
       - name: Verify release tag
-        if: github.event_name == 'release'
-        env:
-          RELEASE_TAG: ${{ github.event.release.tag_name }}
         run: |
           expected_tag=$(python3 -c 'import json; print(json.load(open("eng/toolchain-release.json"))["tag"])')
-          test "$RELEASE_TAG" = "$expected_tag"
+          if [[ "$GITHUB_REF" == refs/tags/* ]]; then
+            test "$GITHUB_REF_NAME" = "$expected_tag"
+          fi
       - name: Set up Node.js
         uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
@@ -35,7 +35,10 @@ jobs:
         uses: actions/configure-pages@983d7736d9b0ae728b81ab479565c72886d7745b # v5
       - run: npm ci
       - name: Install verified browser toolchain
-        run: python3 eng/toolchain-release.py install
+        id: toolchain
+        run: |
+          python3 eng/toolchain-release.py install
+          echo "id=$(python3 -c 'import json; print(json.load(open("public/toolchain/index.json"))["id"])')" >> "$GITHUB_OUTPUT"
       - name: Build production site
         env:
           PLAYGROUND_BASE: ${{ steps.pages.outputs.base_path }}/
@@ -94,7 +97,7 @@ jobs:
         uses: actions/deploy-pages@d6db90164ac5ed86f2b6aed7e0febac5b3c0c03e # v4
 
   verify-live:
-    needs: deploy
+    needs: [build-and-test, deploy]
     runs-on: ubuntu-24.04
     steps:
       - name: Check out source
@@ -119,20 +122,20 @@ jobs:
       - name: Wait for the deployed toolchain
         env:
           PLAYGROUND_URL: ${{ needs.deploy.outputs.page_url }}
+          EXPECTED_TOOLCHAIN_ID: ${{ needs.build-and-test.outputs.toolchain_id }}
         run: |
-          expected_id=$(python3 -c 'import json; print(json.load(open("eng/toolchain-release.json"))["index"]["id"])')
           index_url="${PLAYGROUND_URL%/}/toolchain/index.json"
           for attempt in {1..60}; do
             if curl --fail --silent --show-error --output /tmp/live-toolchain-index.json "$index_url"; then
               actual_id=$(python3 -c 'import json; print(json.load(open("/tmp/live-toolchain-index.json"))["id"])' 2>/dev/null || true)
-              if [ "$actual_id" = "$expected_id" ]; then
+              if [ "$actual_id" = "$EXPECTED_TOOLCHAIN_ID" ]; then
                 exit 0
               fi
             fi
             echo "Waiting for deployed toolchain (attempt $attempt of 60)"
             sleep 5
           done
-          echo "Expected deployed toolchain $expected_id was not available at $index_url" >&2
+          echo "Expected deployed toolchain $EXPECTED_TOOLCHAIN_ID was not available at $index_url" >&2
           exit 1
       - name: Smoke-test the public deployment
         env:
