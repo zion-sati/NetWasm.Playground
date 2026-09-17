@@ -1,0 +1,8 @@
+<!doctype html>
+<html lang="en"><head><meta charset="UTF-8"><title>NetWasm browser benchmark host</title></head><body>
+<script type="module">
+import { PlaygroundPipeline } from '/src/pipeline.ts';
+import { examples } from '/src/examples.ts';
+globalThis.__netwasmBenchmark = { PlaygroundPipeline, examples };
+</script>
+</body></html>
