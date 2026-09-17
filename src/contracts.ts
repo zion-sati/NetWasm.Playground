@@ -22,6 +22,8 @@ export interface AssetMeasurement { rawBytes: number; transferBytes: number }
 export interface ToolchainPreloadProgress extends AssetMeasurement {
   completedBundles: number;
   totalBundles: number;
+  loadedBundleBytes: number;
+  totalBundleBytes: number;
 }
 
 export type PipelineEvent = { requestId: number; revision: number } & (

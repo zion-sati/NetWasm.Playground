@@ -16,6 +16,17 @@ SPEC.loader.exec_module(PREPARE_WEB)
 
 
 class PublicPackageBoundaryTests(unittest.TestCase):
+    def test_release_rebuilder_uses_pinned_public_release_archive(self):
+        base = json.loads((ROOT / 'eng/toolchain-base.json').read_text())
+        script = (ROOT / 'eng/rebuild-public-toolchain.py').read_text()
+
+        self.assertEqual(2, base['schemaVersion'])
+        self.assertRegex(base['archive']['url'],
+                         r'^https://github\.com/zion-sati/NetWasm\.Playground/releases/download/v[0-9]')
+        self.assertEqual(64, len(base['archive']['sha256']))
+        self.assertIn('RELEASE.verify_staged(base_toolchain)', script)
+        self.assertNotIn('playground.netwasm.com/toolchain/', json.dumps(base))
+
     def test_stager_packs_payloads_into_four_verified_phase_bundles(self):
         with tempfile.TemporaryDirectory() as temporary:
             stage = Path(temporary)

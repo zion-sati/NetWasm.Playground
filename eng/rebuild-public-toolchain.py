@@ -1,21 +1,23 @@
 #!/usr/bin/env python3
 """Rebuild the release toolchain from a pinned public base and clean compiler host."""
 import argparse
-from concurrent.futures import ThreadPoolExecutor
 import hashlib
+import io
 import importlib.util
 import json
 from pathlib import Path, PurePosixPath
 import shutil
-import subprocess
+import tarfile
 import tempfile
-import urllib.parse
 import urllib.request
 
 ROOT = Path(__file__).resolve().parents[1]
 SPEC = importlib.util.spec_from_file_location('prepare_web', ROOT / 'eng/prepare-web.py')
 PREPARE = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(PREPARE)
+RELEASE_SPEC = importlib.util.spec_from_file_location('toolchain_release', ROOT / 'eng/toolchain-release.py')
+RELEASE = importlib.util.module_from_spec(RELEASE_SPEC)
+RELEASE_SPEC.loader.exec_module(RELEASE)
 
 
 def encoded(value):
@@ -49,35 +51,51 @@ def main():
     parser.add_argument('--output', type=Path, default=ROOT / 'public/toolchain')
     args = parser.parse_args()
     base = json.loads((ROOT / 'eng/toolchain-base.json').read_text())
-    if base.get('schemaVersion') != 1 or not base['url'].endswith(base['id'] + '/'):
+    archive = base.get('archive', {})
+    if base.get('schemaVersion') != 2 or not isinstance(archive.get('bytes'), int) or archive['bytes'] < 1 or \
+            not isinstance(archive.get('sha256'), str) or not archive.get('url', '').startswith('https://github.com/'):
         raise ValueError('Pinned public base coordinates are invalid')
-    manifest_bytes = download(urllib.parse.urljoin(base['url'], 'asset-manifest.json'), 2 * 1024 * 1024)
-    if sha256(manifest_bytes) != base['manifestSha256']:
-        raise ValueError('Pinned public base manifest changed')
-    manifest = json.loads(manifest_bytes)
-    if manifest.get('schemaVersion') != 1 or manifest.get('id') != base['id'] or not isinstance(manifest.get('assets'), dict):
-        raise ValueError('Pinned public base manifest is invalid')
+    archive_bytes = download(archive['url'], archive['bytes'])
+    if len(archive_bytes) != archive['bytes'] or sha256(archive_bytes) != archive['sha256']:
+        raise ValueError('Pinned public base archive changed')
+    if args.output.exists():
+        shutil.rmtree(args.output)
     args.output.mkdir(parents=True, exist_ok=True)
-    with tempfile.TemporaryDirectory(prefix='.release-staging-', dir=args.output) as temporary:
-        stage = Path(temporary)
+    with tempfile.TemporaryDirectory(prefix='.release-build-', dir=args.output) as temporary:
+        temporary = Path(temporary)
+        extracted = temporary / 'extracted'
+        extracted.mkdir()
+        with tarfile.open(fileobj=io.BytesIO(archive_bytes), mode='r:gz') as package:
+            members = package.getmembers()
+            for member in members:
+                path = PurePosixPath(member.name)
+                if not (member.isfile() or member.isdir()) or path.is_absolute() or '..' in path.parts or path.parts[:1] != ('toolchain',):
+                    raise ValueError(f'Unsafe public base archive member: {member.name}')
+            package.extractall(extracted, filter='data')
+        base_toolchain = extracted / 'toolchain'
+        RELEASE.verify_staged(base_toolchain)
+        if json.loads((base_toolchain / 'index.json').read_text()) != base.get('index'):
+            raise ValueError('Pinned public base index changed')
+        manifest_root = base_toolchain / base['index']['id']
+        manifest = json.loads((manifest_root / 'asset-manifest.json').read_text())
+        stage = temporary / 'stage'
+        stage.mkdir()
         entries = [(name, receipt) for name, receipt in manifest['assets'].items()
                    if not name.startswith('compiler/_framework/') and not name.startswith('workers/')]
-
-        def fetch(entry):
-            name, receipt = entry
+        bundle_payloads = {name: (manifest_root / name).read_bytes() for name in manifest['bundles']}
+        for name, receipt in entries:
             path = safe_path(name)
             if not isinstance(receipt.get('bytes'), int) or receipt['bytes'] < 0 or not isinstance(receipt.get('sha256'), str):
                 raise ValueError(f'Invalid public base receipt: {name}')
-            quoted = '/'.join(urllib.parse.quote(part, safe='@._-') for part in path.parts)
-            payload = download(urllib.parse.urljoin(base['url'], quoted), receipt['bytes'])
+            if receipt.get('bundle'):
+                payload = bundle_payloads[receipt['bundle']][receipt['offset']:receipt['offset'] + receipt['bytes']]
+            else:
+                payload = manifest_root.joinpath(*path.parts).read_bytes()
             if len(payload) != receipt['bytes'] or sha256(payload) != receipt['sha256']:
                 raise ValueError(f'Pinned public base asset changed: {name}')
             destination = stage.joinpath(*path.parts)
             destination.parent.mkdir(parents=True, exist_ok=True)
             destination.write_bytes(payload)
-
-        with ThreadPoolExecutor(max_workers=16) as pool:
-            list(pool.map(fetch, entries))
         framework = stage / 'compiler/_framework'
         shutil.copytree(args.compiler_framework, framework)
         workers = sorted(args.workers.glob('*.mjs'))
@@ -87,7 +105,6 @@ def main():
         (stage / 'workers').mkdir()
         for path in workers:
             shutil.copyfile(path, stage / 'workers' / path.name)
-        subprocess.run(['node', str(ROOT / 'eng/bundle-toolchain-modules.mjs'), str(stage)], check=True)
         assets, bundles = PREPARE.pack_staged_assets(stage)
         identity = {'schemaVersion': 2, 'pins': manifest['pins'], 'assets': assets, 'bundles': bundles}
         digest = sha256(encoded(identity))

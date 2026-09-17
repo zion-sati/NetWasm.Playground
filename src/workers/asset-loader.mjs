@@ -8,7 +8,7 @@ function pathName(name) {
       name.split('/').some(part => !part || part === '.' || part === '..')) throw Error('Invalid tool asset path');
   return name;
 }
-async function boundedBytes(response, maximum) {
+async function boundedBytes(response, maximum, onProgress = () => {}) {
   if (!response.ok) throw Error(`Tool asset HTTP ${response.status}`);
   const reader = response.body.getReader(), chunks = [];
   let length = 0;
@@ -19,6 +19,7 @@ async function boundedBytes(response, maximum) {
       length += value.byteLength;
       if (length > maximum) throw Error('Tool asset byte limit exceeded');
       chunks.push(value);
+      onProgress(length);
     }
   } finally { await reader.cancel().catch(() => {}); reader.releaseLock(); }
   const result = new Uint8Array(length); let offset = 0;
@@ -46,7 +47,12 @@ export function createAssetLoader(report = () => {}) {
           !Number.isSafeInteger(receipt.assets) || receipt.assets < 1 || !/^[a-f0-9]{64}$/.test(receipt.sha256))
         throw Error(`Invalid tool bundle receipt: ${name}`);
       const response = await originalFetch(new URL(name, assetRoot), { cache: 'force-cache' });
-      const bytes = await boundedBytes(response, receipt.bytes);
+      let reported = 0;
+      const bytes = await boundedBytes(response, receipt.bytes, loadedBytes => {
+        if (loadedBytes !== receipt.bytes && loadedBytes - reported < 524288) return;
+        reported = loadedBytes;
+        report({ name, loadedBytes, totalBytes: receipt.bytes });
+      });
       if (bytes.byteLength !== receipt.bytes || await digest(bytes) !== receipt.sha256) throw Error(`Tool bundle integrity failed: ${name}`);
       if (!reportedBundles.has(name)) {
         reportedBundles.add(name);

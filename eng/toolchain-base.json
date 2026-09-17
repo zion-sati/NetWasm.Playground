@@ -1,6 +1,12 @@
 {
-  "schemaVersion": 1,
-  "id": "b8da62635f8cd2bdd5e917eb459929058012f66a239a539b7ce20142b335cb3c",
-  "manifestSha256": "cdaf73c70c1c86a4f365f9a950ae06d4a51538a2163b2095408d97da636a9a2a",
-  "url": "https://playground.netwasm.com/toolchain/b8da62635f8cd2bdd5e917eb459929058012f66a239a539b7ce20142b335cb3c/"
+  "schemaVersion": 2,
+  "archive": {
+    "url": "https://github.com/zion-sati/NetWasm.Playground/releases/download/v0.2.3/netwasm-playground-toolchain-v0.2.3.tar.gz",
+    "bytes": 47440033,
+    "sha256": "ea882e97d459d8a117043d5cf70f7ee0f10254bbf8eb331347653737a1c069ed"
+  },
+  "index": {
+    "id": "c8c945b4a21a971f2b25ebd9e90bb1790affb550c9895bf1c82f0c9867b8bf68",
+    "manifestSha256": "b293ab41b1b5ac6d69a6c3d301d13978cb4017814651510aa2026c745237a609"
+  }
 }

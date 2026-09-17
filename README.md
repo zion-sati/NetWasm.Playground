@@ -35,12 +35,12 @@ It consumes the public NuGet.org packages and verified inputs produced by the
 runners under `eng/` and `spikes/`; it does not read NetWasm source checkouts.
 It does not rebuild LLVM. Release builds run on a clean GitHub Actions runner:
 they compile the browser compiler host from pinned public NuGet packages,
-rebuild the four phase bundles from the receipt-verified public base, and reject
-personal identity or workstation-path strings anywhere in the payload. Pages
-then installs the browser bundle published under the semantic version in
-`eng/toolchain-release.json`. Its self-contained content identity, manifest,
-bundles and every asset slice are verified before use. Public releases use tags
-such as `v0.2.3`; the independently computed toolchain ID identifies the exact
+rebuild the four phase bundles from the receipt-verified public base, and
+verify every content receipt. Pages then installs the browser bundle published
+under the semantic version in `eng/toolchain-release.json`. Its self-contained
+content identity, manifest, bundles and every asset slice are verified before
+use. Public releases use tags
+such as `v0.2.4`; the independently computed toolchain ID identifies the exact
 browser bundle built by that release.
 
 ```sh

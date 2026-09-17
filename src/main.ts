@@ -89,15 +89,17 @@ function showPreloadProgress(progress: ToolchainPreloadProgress) {
   container.hidden = false;
   container.dataset.completedBundles = String(progress.completedBundles);
   container.dataset.totalBundles = String(progress.totalBundles);
+  container.dataset.loadedBundleBytes = String(progress.loadedBundleBytes);
+  container.dataset.totalBundleBytes = String(progress.totalBundleBytes);
   if (!progress.totalBundles) {
     bar.removeAttribute('value');
     el('toolchain-progress-detail').textContent = 'Reading manifest…';
     return;
   }
-  bar.max = progress.totalBundles;
-  bar.value = progress.completedBundles;
-  const percentage = Math.round(progress.completedBundles / progress.totalBundles * 100);
-  el('toolchain-progress-detail').textContent = `${percentage}% · ${progress.completedBundles} of ${progress.totalBundles} bundles · ${formatMegabytes(progress.transferBytes)} transferred`;
+  bar.max = progress.totalBundleBytes;
+  bar.value = progress.loadedBundleBytes;
+  const percentage = Math.round(progress.loadedBundleBytes / progress.totalBundleBytes * 100);
+  el('toolchain-progress-detail').textContent = `${percentage}% · ${progress.completedBundles} of ${progress.totalBundles} bundles · ${formatMegabytes(progress.loadedBundleBytes)} of ${formatMegabytes(progress.totalBundleBytes)} loaded`;
   if (!active && el('status').textContent.startsWith('Preparing toolchain')) el('status').textContent = `Preparing toolchain · ${percentage}%`;
 }
 editor.onDidChangeModelContent(() => { revision++; comparisons.clear(); showComparisons(); invalidateDownload(); setDiagnostics([]); el('status').textContent = unsupported ?? (active ? 'Source changed · result pending for earlier revision' : 'Source changed'); });

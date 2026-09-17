@@ -32,14 +32,22 @@ try {
     throw Error(`Page resource contract failed: ${JSON.stringify(pageContract)}`);
   await page.locator('.monaco-editor').waitFor();
   await page.waitForFunction(() => performance.getEntriesByType('resource').some(entry => entry.name.includes('/toolchain/')));
-  await page.waitForFunction(() => Number(document.querySelector('#toolchain-progress')?.dataset.totalBundles) > 0);
+  await page.waitForFunction(() => Number(document.querySelector('#toolchain-progress')?.dataset.totalBundles) > 0 &&
+    Number(document.querySelector('#toolchain-progress')?.dataset.loadedBundleBytes) > 0);
   const preload = await page.evaluate(() => ({
     hidden: document.querySelector('#toolchain-progress').hidden,
     completed: Number(document.querySelector('#toolchain-progress').dataset.completedBundles),
     total: Number(document.querySelector('#toolchain-progress').dataset.totalBundles),
+    loadedBytes: Number(document.querySelector('#toolchain-progress').dataset.loadedBundleBytes),
+    totalBytes: Number(document.querySelector('#toolchain-progress').dataset.totalBundleBytes),
+    barValue: Number(document.querySelector('#toolchain-progress-bar').value),
+    barMax: Number(document.querySelector('#toolchain-progress-bar').max),
     detail: document.querySelector('#toolchain-progress-detail').textContent,
   }));
-  if (preload.hidden || preload.completed >= preload.total || !preload.detail.includes(`of ${preload.total} bundles`)) throw Error(`Preload progress missing: ${JSON.stringify(preload)}`);
+  if (preload.hidden || preload.completed >= preload.total || preload.loadedBytes <= 0 || preload.loadedBytes >= preload.totalBytes ||
+      preload.barValue !== preload.loadedBytes || preload.barMax !== preload.totalBytes ||
+      !preload.detail.includes(`of ${preload.total} bundles`) || !preload.detail.includes(' loaded'))
+    throw Error(`Preload progress missing: ${JSON.stringify(preload)}`);
   if (!await page.locator('#compile').isEnabled() || !await page.locator('#run').isEnabled()) throw Error('Background preload disabled actions');
   await page.getByLabel('Optimization', { exact: true }).selectOption('none');
   await page.locator('#run').click();

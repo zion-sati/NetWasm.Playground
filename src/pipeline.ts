@@ -16,6 +16,7 @@ export class PlaygroundPipeline {
   private epoch = 0;
   private assets = { rawBytes: 0, transferBytes: 0 };
   private measuredResources = new Set<string>();
+  private bundleProgress = new Map<string, number>();
   private onPreloadProgress?: (progress: ToolchainPreloadProgress) => void;
   private foregroundOperations = 0;
   private backgroundWaiters: Array<() => void> = [];
@@ -34,15 +35,28 @@ export class PlaygroundPipeline {
   private reportPreloadProgress() {
     if (!this.onPreloadProgress) return;
     const names = this.manifest ? Object.keys(this.manifest.bundles) : [];
+    const totalBundleBytes = names.reduce((total, name) => total + this.manifest!.bundles[name].bytes, 0);
+    const loadedBundleBytes = names.reduce((total, name) => total + (this.bundleProgress.get(name) ?? 0), 0);
     this.onPreloadProgress({
       completedBundles: names.filter(name => this.measuredResources.has(name)).length,
       totalBundles: names.length,
+      loadedBundleBytes,
+      totalBundleBytes,
       ...this.assets,
     });
+  }
+  private recordBundleProgress(name: string, loadedBytes: number, totalBytes: number) {
+    const receipt = this.manifest?.bundles[name];
+    if (!receipt || receipt.bytes !== totalBytes || !Number.isSafeInteger(loadedBytes) || loadedBytes < 0 || loadedBytes > totalBytes) return;
+    if (loadedBytes <= (this.bundleProgress.get(name) ?? 0)) return;
+    this.bundleProgress.set(name, loadedBytes);
+    this.reportPreloadProgress();
   }
   private recordResource(name: string, rawBytes: number, transferBytes: number) {
     if (this.measuredResources.has(name)) return;
     this.measuredResources.add(name);
+    const bundle = this.manifest?.bundles[name];
+    if (bundle) this.bundleProgress.set(name, bundle.bytes);
     this.assets.rawBytes += rawBytes;
     this.assets.transferBytes += transferBytes;
     this.emit({ type: 'assets', ...this.assets });
@@ -83,7 +97,26 @@ export class PlaygroundPipeline {
     const url = new URL(name, this.root!);
     const response = await fetch(url, { signal: this.abort!.signal, cache: 'force-cache' });
     if (!response.ok) throw new Error(`Toolchain bundle unavailable: ${name}`);
-    const bytes = new Uint8Array(await response.arrayBuffer());
+    const reader = response.body?.getReader();
+    if (!reader) throw new Error(`Toolchain bundle body unavailable: ${name}`);
+    const chunks: Uint8Array[] = [];
+    let length = 0, reported = 0;
+    try {
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        length += value.byteLength;
+        if (length > entry.bytes) throw new Error(`Toolchain bundle length failed: ${name}`);
+        chunks.push(value);
+        if (length === entry.bytes || length - reported >= 524288) {
+          reported = length;
+          this.recordBundleProgress(name, length, entry.bytes);
+        }
+      }
+    } finally { await reader.cancel().catch(() => {}); reader.releaseLock(); }
+    const bytes = new Uint8Array(length);
+    let offset = 0;
+    for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.byteLength; }
     if (bytes.byteLength !== entry.bytes) throw new Error(`Toolchain bundle length failed: ${name}`);
     await this.verify(bytes, entry.sha256);
     const timing = performance.getEntriesByName(response.url).at(-1) as PerformanceResourceTiming | undefined;
@@ -133,7 +166,10 @@ export class PlaygroundPipeline {
           if (this.runOutput && (data.console === 'stdout' || data.console === 'stderr')) this.runOutput[data.console as 'stdout' | 'stderr'] += data.text ?? '';
           this.emit({ type: 'console', stream: data.console, text: data.text ?? '' });
         }
-        if (data.assets) this.recordResource(data.assets.name, data.assets.rawBytes, data.assets.transferBytes);
+        if (data.assets?.loadedBytes !== undefined)
+          this.recordBundleProgress(data.assets.name, data.assets.loadedBytes, data.assets.totalBytes);
+        else if (data.assets)
+          this.recordResource(data.assets.name, data.assets.rawBytes, data.assets.transferBytes);
       });
       this.channels.set(name, channel);
     }
