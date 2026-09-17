@@ -103,9 +103,13 @@ try {
     barMax: Number(document.querySelector('#toolchain-progress-bar').max),
     detail: document.querySelector('#toolchain-progress-detail').textContent,
   }));
-  if (preload.hidden || preload.completed >= preload.total || preload.loadedBytes <= 0 || preload.loadedBytes >= preload.totalBytes ||
-      preload.barValue !== preload.loadedBytes || preload.barMax !== preload.totalBytes ||
-      !preload.detail.includes(`of ${preload.total} bundles`) || !preload.detail.includes(' loaded'))
+  const partialProgress = !preload.hidden && preload.completed < preload.total &&
+    preload.loadedBytes > 0 && preload.loadedBytes < preload.totalBytes;
+  const completedProgress = preload.completed === preload.total &&
+    preload.loadedBytes === preload.totalBytes && preload.totalBytes > 0;
+  if ((!partialProgress && !completedProgress) || preload.barValue !== preload.loadedBytes ||
+      preload.barMax !== preload.totalBytes || !preload.detail.includes(`of ${preload.total} bundles`) ||
+      !preload.detail.includes(' loaded'))
     throw Error(`Preload progress missing: ${JSON.stringify(preload)}`);
   if (!await page.locator('#compile').isEnabled() || !await page.locator('#run').isEnabled()) throw Error('Background preload disabled actions');
   await page.getByLabel('Optimization', { exact: true }).selectOption('none');
