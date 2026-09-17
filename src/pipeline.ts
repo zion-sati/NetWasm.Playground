@@ -231,7 +231,8 @@ export class PlaygroundPipeline {
       const compilation = await this.stage('compile', timings, () => this.channel('compiler').request({ operation: 'compile', recipe: snapshot.recipeId, source: snapshot.source }));
       recycleCompiler = compilation.hostLinearMemoryBytes >= 512 * 1048576;
       for (const timing of compilation.timings ?? []) this.emit({ type: 'stage', stage: timing.stage, state: 'complete', milliseconds: timing.milliseconds });
-      if (!compilation.success) return { ...result, success: false, diagnostics: compilation.diagnostics ?? [], stage: compilation.stage, assets: { ...this.assets } };
+      if (!compilation.success) return { ...result, success: false, diagnostics: compilation.diagnostics ?? [],
+        stage: compilation.stage, error: compilation.error, assets: { ...this.assets } };
       if (compilation.timings) timings.push(...compilation.timings);
       await this.stage('linker-initialize', timings, () => this.initializeChannel('lld'));
       await this.stage('tools-initialize', timings, () => this.initializeChannel('tools'));

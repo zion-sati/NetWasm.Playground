@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { cp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { dirname, relative, resolve } from 'node:path';
 import { cpus, totalmem } from 'node:os';
 import process from 'node:process';
@@ -13,26 +13,42 @@ const value = name => {
   if (index < 0 || index + 1 === args.length) throw new Error(`Missing ${name}`);
   return args[index + 1];
 };
+const optionalValue = name => args.includes(name) ? value(name) : undefined;
 const output = resolve(value('--output'));
 const port = Number(args.includes('--port') ? value('--port') : '5187');
 if (!Number.isInteger(port) || port < 1024 || port > 65535) throw new Error('Invalid --port');
+const candidateToolchain = optionalValue('--toolchain');
+const selectedRecipes = optionalValue('--recipes')?.split(',').filter(Boolean);
+const runOverride = optionalValue('--runs');
+if (runOverride !== undefined && (!Number.isInteger(Number(runOverride)) || Number(runOverride) < 1))
+  throw new Error('Invalid --runs');
 
 const benchmarkDist = resolve(root, 'artifacts/.compiler-iteration-browser-site');
 await build({ root, publicDir: 'public', logLevel: 'silent', build: {
   target: 'es2022', outDir: benchmarkDist, emptyOutDir: true,
   rollupOptions: { input: resolve(root, 'eng/benchmark-host.html') },
 } });
+if (candidateToolchain) {
+  await rm(resolve(benchmarkDist, 'toolchain'), { recursive: true, force: true });
+  await cp(resolve(candidateToolchain), resolve(benchmarkDist, 'toolchain'), { recursive: true });
+}
 const server = await preview({ root, logLevel: 'silent', build: { outDir: benchmarkDist },
   preview: { host: '127.0.0.1', port, strictPort: true } });
 const browser = await chromium.launch({ headless: true });
 const toolchainRelease = JSON.parse(await readFile(resolve(root, 'eng/toolchain-release.json'), 'utf8'));
 let toolchainIndex;
-const cases = [
+let cases = [
   { recipe: 'hello', runs: 5, from: 'Console.WriteLine(42);', to: 'Console.WriteLine(43);' },
   { recipe: 'json-generated', runs: 5, from: 'Score = 42', to: 'Score = 43' },
   { recipe: 'regex', runs: 1, from: 'Ada:42, Grace:99', to: 'Ada:43, Grace:99' },
   { recipe: 'di', runs: 1, from: 'SayHello("Ada")', to: 'SayHello("Grace")' },
 ];
+if (selectedRecipes) {
+  const requested = new Set(selectedRecipes);
+  cases = cases.filter(fixture => requested.delete(fixture.recipe));
+  if (requested.size > 0 || cases.length === 0) throw new Error(`Unknown --recipes: ${[...requested].join(',')}`);
+}
+if (runOverride !== undefined) cases = cases.map(fixture => ({ ...fixture, runs: Number(runOverride) }));
 const summarize = values => {
   const sorted = [...values].sort((left, right) => left - right);
   const middle = Math.floor(sorted.length / 2);
@@ -61,7 +77,8 @@ const summarizeRuns = runs => Object.fromEntries(['cold', 'identical', 'body-edi
 const receipt = {
   schemaVersion: 1,
   capturedAt: new Date().toISOString(),
-  command: `node eng/benchmark-compiler-iteration.mjs --output ${relative(root, output)}`,
+  command: 'node eng/benchmark-compiler-iteration.mjs',
+  arguments: args,
   environment: {
     browserVersion: await browser.version(),
     platform: process.platform,

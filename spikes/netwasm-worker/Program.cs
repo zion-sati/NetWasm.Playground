@@ -1,7 +1,10 @@
+extern alias jsonsourcegen;
+
 using System;
 using System.IO;
 using System.Linq;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using System.Runtime.InteropServices.JavaScript;
 using System.Runtime.Versioning;
 using System.Text;
@@ -12,6 +15,7 @@ using Microsoft.CodeAnalysis.CSharp;
 using NetWasm.Compiler;
 using NetWasm.Compiler.Browser;
 using NetWasm.Compiler.Core;
+using NetWasm.Compiler.Wasm;
 using System.Collections.Generic;
 using NetWasm.Runtime.Pack.Planning;
 using NetWasm.Compiler.ComponentModel;
@@ -20,7 +24,7 @@ using Microsoft.CodeAnalysis.Diagnostics;
 using System.Collections.Immutable;
 using System.Security.Cryptography;
 using TUnit.Core.SourceGenerator.Generators;
-using System.Text.Json.SourceGeneration;
+using JsonSourceGenerator = jsonsourcegen::System.Text.Json.SourceGeneration.JsonSourceGenerator;
 
 [assembly: SupportedOSPlatform("browser")]
 
@@ -31,6 +35,65 @@ public static partial class Program
     public sealed record SupportSource(string path, string text);
     private sealed record StageTiming(string stage, double milliseconds);
     private sealed record GeneratedSource(string producer, string hintName, string? text, int bytes, string sha256);
+    private sealed record DiagnosticInfo(string code, string message, string severity, string? path = null,
+        int? line = null, int? column = null, string? method = null, int? ilOffset = null);
+    private sealed record GeneratorFailure(string? producer, string? errorType, string? message);
+    private sealed record FunctionTypeInfo(int[] Parameters, int Result);
+    private sealed record FunctionImportInfo(string Module, string Name, FunctionTypeInfo Type);
+    private sealed record StatusAbiInfo(int SuccessStatus, int HostFailureStatus, int ScalarResultOffset);
+    private sealed record TargetLayoutInfo(int ManagedReferenceSize, int StringLengthOffset, int StringDataOffset,
+        int ArrayLengthOffset, int ArrayDataPointerOffset);
+    private sealed record InteropImportInfo(string Module, string Name, string[] Parameters, string Result,
+        string? AsyncReturn, string? ResolveExport, string? RejectExport, string? CancelExport);
+    private sealed record InteropExportInfo(string Name, string[] Parameters, string Result,
+        string? AsyncReturn, string? StatusExport, string? ResultExport, string? CompleteExport);
+    private sealed record InteropCallbackInfo(string Module, string ImportName, int ParameterIndex, string ExportName,
+        string[] Parameters, string Result);
+    private sealed record WitImportInfo(string Interface, string Function);
+    private sealed record InteropManifestInfo(int Version, string Target, StatusAbiInfo StatusAbi,
+        TargetLayoutInfo TargetLayout, InteropImportInfo[] Imports, InteropExportInfo[] Exports,
+        InteropCallbackInfo[] Callbacks, WitImportInfo[] WitImports);
+    private sealed record EntryPointAbiInfo(int ParameterShape, int ReturnShape, int CompletionShape);
+    private sealed record EntryPointInfo(string AssemblyPath, string TypeName, string MethodName, int? Token,
+        int Kind, EntryPointAbiInfo? Abi);
+    private sealed record RuntimeLinkAssetInfo(string Path, string Sha256);
+    private sealed record RuntimeLinkPlanInfo(string[] Arguments, RuntimeLinkAssetInfo[] Inputs, string RuntimeAbi,
+        string ToolchainFingerprint, long RuntimeGlobalBase, long HeapBase, long InitialMemorySizeBytes,
+        long MaximumMemorySizeBytes);
+    private sealed record TextModuleInfo(string OutputPath, string Text);
+    private sealed record ToolInvocationInfo(string ToolId, string[] Arguments);
+    private sealed record ExportPruningInfo(string InputPath, string OutputPath, string Prefix);
+    private sealed record CoreLinkPlanInfo(TextModuleInfo[] TextModules, ToolInvocationInfo Merge,
+        ExportPruningInfo ExportPruning, ToolInvocationInfo Optimization, string[] CleanupPaths);
+    private sealed record CompilerHostResponse(
+        int schemaVersion,
+        bool success,
+        string? stage = null,
+        string? code = null,
+        bool? recoverable = null,
+        DiagnosticInfo[]? diagnostics = null,
+        StageTiming[]? timings = null,
+        GeneratedSource[]? generatedSources = null,
+        DiagnosticInfo[]? generatorDiagnostics = null,
+        GeneratorFailure[]? generatorFailures = null,
+        string? error = null,
+        string? application = null,
+        int? staticDataEnd = null,
+        string[]? runtimeFeatures = null,
+        FunctionImportInfo[]? imports = null,
+        InteropManifestInfo? interopManifest = null,
+        EntryPointInfo? entryPoint = null,
+        RuntimeLinkPlanInfo? runtimeLinkPlan = null,
+        CoreLinkPlanInfo? coreLinkPlan = null,
+        string? trustedRecipe = null,
+        int? catalogCaseCount = null,
+        string? pe = null);
+
+    [JsonSourceGenerationOptions(DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull)]
+    [JsonSerializable(typeof(SupportSource[]))]
+    [JsonSerializable(typeof(Dictionary<string, string>))]
+    [JsonSerializable(typeof(CompilerHostResponse))]
+    private sealed partial class CompilerHostJsonContext : JsonSerializerContext;
     private const int MaximumGeneratedSources = 128;
     private const int MaximumGeneratedBytes = 512 * 1024;
     private static bool progressEnabled;
@@ -55,6 +118,41 @@ public static partial class Program
     public static void Main() { }
 
     private static string Bound(string text) => text.Length <= 4096 ? text : text[..4096];
+
+    private static string Serialize(CompilerHostResponse response) =>
+        JsonSerializer.Serialize(response, CompilerHostJsonContext.Default.CompilerHostResponse);
+
+    private static FunctionImportInfo Describe(WasmFunctionImport import) => new(import.Module, import.Name,
+        new(import.Type.Parameters.Select(value => (int)value).ToArray(), (int)import.Type.Result));
+
+    private static InteropManifestInfo Describe(HostInteropManifest manifest) => new(manifest.Version, manifest.Target,
+        new(manifest.StatusAbi.SuccessStatus, manifest.StatusAbi.HostFailureStatus, manifest.StatusAbi.ScalarResultOffset),
+        new(manifest.TargetLayout.ManagedReferenceSize, manifest.TargetLayout.StringLengthOffset,
+            manifest.TargetLayout.StringDataOffset, manifest.TargetLayout.ArrayLengthOffset,
+            manifest.TargetLayout.ArrayDataPointerOffset),
+        manifest.Imports.Select(value => new InteropImportInfo(value.Module, value.Name, value.Parameters.ToArray(), value.Result,
+            value.AsyncReturn, value.ResolveExport, value.RejectExport, value.CancelExport)).ToArray(),
+        manifest.Exports.Select(value => new InteropExportInfo(value.Name, value.Parameters.ToArray(), value.Result,
+            value.AsyncReturn, value.StatusExport, value.ResultExport, value.CompleteExport)).ToArray(),
+        manifest.Callbacks.Select(value => new InteropCallbackInfo(value.Module, value.ImportName, value.ParameterIndex,
+            value.ExportName, value.Parameters.ToArray(), value.Result)).ToArray(),
+        manifest.WitImports.Select(value => new WitImportInfo(value.Interface, value.Function)).ToArray());
+
+    private static EntryPointInfo Describe(BrowserCompilationEntryPoint entryPoint) => new(entryPoint.AssemblyPath,
+        entryPoint.TypeName, entryPoint.MethodName, entryPoint.Token, (int)entryPoint.Kind,
+        entryPoint.Abi is null ? null : new((int)entryPoint.Abi.ParameterShape, (int)entryPoint.Abi.ReturnShape,
+            (int)entryPoint.Abi.CompletionShape));
+
+    private static RuntimeLinkPlanInfo Describe(RuntimeLinkPlan plan) => new(plan.Arguments.ToArray(),
+        plan.Inputs.Select(value => new RuntimeLinkAssetInfo(value.Path, value.Sha256)).ToArray(), plan.RuntimeAbi,
+        plan.ToolchainFingerprint, plan.RuntimeGlobalBase, plan.HeapBase, plan.InitialMemorySizeBytes,
+        plan.MaximumMemorySizeBytes);
+
+    private static CoreLinkPlanInfo Describe(BrowserComponentCoreModuleLinkPlan plan) => new(
+        plan.TextModules.Select(value => new TextModuleInfo(value.OutputPath, value.Text)).ToArray(),
+        new(plan.Merge.ToolId, plan.Merge.Arguments.ToArray()),
+        new(plan.ExportPruning.InputPath, plan.ExportPruning.OutputPath, plan.ExportPruning.Prefix),
+        new(plan.Optimization.ToolId, plan.Optimization.Arguments.ToArray()), plan.CleanupPaths.ToArray());
 
     [JSExport]
     public static string Compile(string source, string reference, string supportJson, string implementation, string witJson, string witBytes, string runtimeManifest)
@@ -83,18 +181,18 @@ public static partial class Program
         {
             if (trustedRecipe is not (null or "json" or "tunit" or "di") ||
                 (trustedRecipe == "di" && !TrustedGeneratorAssets.DependencyInjectionAvailable))
-                return JsonSerializer.Serialize(new { schemaVersion = 1, success = false, stage = "request", code = "unsupported-generator-recipe", recoverable = true, diagnostics = Array.Empty<object>() });
+                return Serialize(new(1, false, "request", "unsupported-generator-recipe", true, []));
             var tunit = trustedRecipe == "tunit";
             Stage("roslyn");
             var started = Stopwatch.GetTimestamp();
             var parse = new CSharpParseOptions(LanguageVersion.Latest,
                 preprocessorSymbols: ["TRACE", "NETWASM", "NETWASM0_1", "RELEASE"]);
             var trees = new[] { CSharpSyntaxTree.ParseText(SourceText.From(source, Encoding.UTF8), parse, tunit ? "Tests.cs" : "Program.cs") }
-                .Concat(JsonSerializer.Deserialize<SupportSource[]>(supportJson)!
+                .Concat(JsonSerializer.Deserialize(supportJson, CompilerHostJsonContext.Default.SupportSourceArray)!
                     .Select(file => CSharpSyntaxTree.ParseText(SourceText.From(file.text, Encoding.UTF8), parse, file.path)));
             if (tunit) trees = trees.Append(CSharpSyntaxTree.ParseText(SourceText.From(TrustedGeneratorAssets.TUnitProgram, Encoding.UTF8), parse, "NetWasm.TUnit.Program.cs"));
             var compilation = CSharpCompilation.Create(tunit ? "NetWasmTUnitTests" : "NetWasmApp", trees,
-                new[] { reference }.Concat(JsonSerializer.Deserialize<Dictionary<string, string>>(additionalReferencesJson)!.Values)
+                new[] { reference }.Concat(JsonSerializer.Deserialize(additionalReferencesJson, CompilerHostJsonContext.Default.DictionaryStringString)!.Values)
                     .Select(bytes => MetadataReference.CreateFromImage(Convert.FromBase64String(bytes))),
                 new CSharpCompilationOptions(OutputKind.ConsoleApplication,
                     optimizationLevel: OptimizationLevel.Release,
@@ -121,7 +219,7 @@ public static partial class Program
                 generatorMilliseconds = Stopwatch.GetElapsedTime(generatorStarted).TotalMilliseconds;
                 timings.Add(new("generator", generatorMilliseconds));
                 if (count > MaximumGeneratedSources || totalBytes > MaximumGeneratedBytes)
-                    return JsonSerializer.Serialize(new { schemaVersion = 1, success = false, stage = "generator", code = "generated-output-limit", recoverable = true, diagnostics = Array.Empty<object>(), timings });
+                    return Serialize(new(1, false, "generator", "generated-output-limit", true, [], timings.ToArray()));
                 generatedSources = run.Results.SelectMany((result, index) => result.GeneratedSources.Select(item =>
                 {
                     var text = item.SourceText.ToString();
@@ -130,20 +228,23 @@ public static partial class Program
                         includeGeneratedSourceText ? text : null, bytes.Length, Convert.ToHexStringLower(SHA256.HashData(bytes)));
                 })).OrderBy(item => item.producer, StringComparer.Ordinal).ThenBy(item => item.hintName, StringComparer.Ordinal).ToArray();
                 if (generatorDiagnostics.Any(d => d.Severity == DiagnosticSeverity.Error) || run.Results.Any(result => result.Exception is not null))
-                    return JsonSerializer.Serialize(new { schemaVersion = 1, success = false, stage = "generator", code = "generator-diagnostics", recoverable = true,
-                        diagnostics = generatorDiagnostics.Take(128).Select(Describe), generatedSources, timings,
-                        generatorFailures = run.Results.Select((result, index) => new { producer = generators[index].GetType().FullName, errorType = result.Exception?.GetType().Name, message = result.Exception is null ? null : Bound(result.Exception.Message) }).Where(item => item.errorType is not null) });
+                    return Serialize(new(1, false, "generator", "generator-diagnostics", true,
+                        generatorDiagnostics.Take(128).Select(Describe).ToArray(), timings.ToArray(), generatedSources,
+                        generatorFailures: run.Results.Select((result, index) => new GeneratorFailure(generators[index].GetType().FullName,
+                            result.Exception?.GetType().Name, result.Exception is null ? null : Bound(result.Exception.Message)))
+                            .Where(item => item.errorType is not null).ToArray()));
                 Stage("roslyn");
             }
             using var pe = new MemoryStream();
             var emitted = generatedCompilation.Emit(pe);
             timings.Add(new("roslyn", Math.Max(0, Stopwatch.GetElapsedTime(started).TotalMilliseconds - generatorMilliseconds)));
-            if (!emitted.Success) return JsonSerializer.Serialize(new { schemaVersion = 1, success = false, stage = "roslyn", code = "source-diagnostics", recoverable = true,
-                diagnostics = emitted.Diagnostics.Take(128).Select(Describe), generatedSources, generatorDiagnostics = generatorDiagnostics.Take(128).Select(Describe), pe=(string?)null, timings });
+            if (!emitted.Success) return Serialize(new(1, false, "roslyn", "source-diagnostics", true,
+                emitted.Diagnostics.Take(128).Select(Describe).ToArray(), timings.ToArray(), generatedSources,
+                generatorDiagnostics.Take(128).Select(Describe).ToArray()));
             Stage("netwasm");
             started = Stopwatch.GetTimestamp();
             var images = new Dictionary<string,byte[]> { ["NetWasmApp.dll"] = pe.ToArray(), ["NetWasm.CoreLib.dll"] = Convert.FromBase64String(implementation) };
-            var additionalImplementations = JsonSerializer.Deserialize<Dictionary<string, string>>(additionalImplementationsJson)!;
+            var additionalImplementations = JsonSerializer.Deserialize(additionalImplementationsJson, CompilerHostJsonContext.Default.DictionaryStringString)!;
             foreach (var image in additionalImplementations) images.Add(image.Key, Convert.FromBase64String(image.Value));
             images["compiler.wit.wasm"] = Convert.FromBase64String(witBytes);
             var options = new CompilerOptions(
@@ -161,35 +262,27 @@ public static partial class Program
                     ComponentTarget.Wasm32Wasi02, compiled.EntryPoint.Abi),
                 new("/netwasm-link/environment.wasm", "/netwasm-link/host.wasm", "/netwasm-link/command.wasm",
                     "/netwasm-link/merged.wasm", "/netwasm-link/sanitized.wasm"));
-            return JsonSerializer.Serialize(new {
-                schemaVersion = 1, success = emitted.Success,
-                application = Convert.ToBase64String(compiled.ApplicationModule),
-                staticDataEnd = compiled.StaticDataEnd,
-                runtimeFeatures = compiled.RuntimeFeatures,
-                imports = compiled.FunctionImports,
-                interopManifest = compiled.InteropManifest,
-                entryPoint = compiled.EntryPoint,
-                runtimeLinkPlan,
-                coreLinkPlan,
-                timings,
-                trustedRecipe,
-                generatedSources,
-                catalogCaseCount = tunit ? CountCatalogCases(generatedCompilation) : 0,
-                generatorDiagnostics = generatorDiagnostics.Take(128).Select(Describe),
-                diagnostics = emitted.Diagnostics.Take(128).Select(Describe),
-                pe = emitted.Success ? Convert.ToBase64String(pe.ToArray()) : null
-            });
+            return Serialize(new(1, emitted.Success,
+                diagnostics: emitted.Diagnostics.Take(128).Select(Describe).ToArray(),
+                timings: timings.ToArray(), generatedSources: generatedSources,
+                generatorDiagnostics: generatorDiagnostics.Take(128).Select(Describe).ToArray(),
+                application: Convert.ToBase64String(compiled.ApplicationModule), staticDataEnd: compiled.StaticDataEnd,
+                runtimeFeatures: compiled.RuntimeFeatures.ToArray(), imports: compiled.FunctionImports.Select(Describe).ToArray(),
+                interopManifest: Describe(compiled.InteropManifest), entryPoint: Describe(compiled.EntryPoint),
+                runtimeLinkPlan: Describe(runtimeLinkPlan), coreLinkPlan: Describe(coreLinkPlan), trustedRecipe: trustedRecipe,
+                catalogCaseCount: tunit ? CountCatalogCases(generatedCompilation) : 0,
+                pe: emitted.Success ? Convert.ToBase64String(pe.ToArray()) : null));
         }
         catch (CompilerException error)
         {
-            return JsonSerializer.Serialize(new { schemaVersion = 1, success = false, stage = "netwasm",
-                code = error.Diagnostic.Id, recoverable = true,
-                diagnostics = new[] { new { code = error.Diagnostic.Id, message = Bound(error.Diagnostic.Message),
-                    severity = "Error", method = error.Diagnostic.Method, ilOffset = error.Diagnostic.IlOffset } }, generatedSources, generatorDiagnostics = generatorDiagnostics.Take(128).Select(Describe), timings });
+            return Serialize(new(1, false, "netwasm", error.Diagnostic.Id, true,
+                [new(error.Diagnostic.Id, Bound(error.Diagnostic.Message), "Error", method: error.Diagnostic.Method,
+                    ilOffset: error.Diagnostic.IlOffset)], timings.ToArray(), generatedSources,
+                generatorDiagnostics.Take(128).Select(Describe).ToArray()));
         }
         catch (Exception error)
         {
-            return JsonSerializer.Serialize(new { schemaVersion = 1, success = false, stage = "compiler-host", code = "host-error", recoverable = true, error = Bound(error.ToString()) });
+            return Serialize(new(1, false, "compiler-host", "host-error", true, error: Bound(error.ToString())));
         }
     }
 
@@ -197,11 +290,11 @@ public static partial class Program
         tree.FilePath.EndsWith("__TestSource.g.cs", StringComparison.Ordinal)
             ? tree.ToString().Split("cases.Add(new global::TUnit.Core.GeneratedTestCase<", StringSplitOptions.None).Length - 1 : 0);
 
-    private static object Describe(Diagnostic diagnostic)
+    private static DiagnosticInfo Describe(Diagnostic diagnostic)
     {
         var location = diagnostic.Location.GetLineSpan();
-        return new { code = diagnostic.Id, message = Bound(diagnostic.GetMessage()), severity = diagnostic.Severity.ToString(),
-            path = location.Path, line = location.StartLinePosition.Line, column = location.StartLinePosition.Character };
+        return new(diagnostic.Id, Bound(diagnostic.GetMessage()), diagnostic.Severity.ToString(),
+            location.Path, location.StartLinePosition.Line, location.StartLinePosition.Character);
     }
 
     private sealed class TrustedOptionsProvider(bool tunit) : AnalyzerConfigOptionsProvider

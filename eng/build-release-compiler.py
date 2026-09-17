@@ -72,6 +72,8 @@ def main():
                           ('NetWasm.Microsoft.Extensions.DependencyInjection.Generator', 'di')]:
             reference = ET.SubElement(group, 'Reference', Include=name)
             ET.SubElement(reference, 'HintPath').text = str(extracted[key])
+            if key == 'json':
+                ET.SubElement(reference, 'Aliases').text = 'jsonsourcegen'
         project.write(app / 'CompilerProbe.csproj', encoding='unicode')
         program = extracted['tunit-program'].read_text()
         (app / 'TrustedGeneratorAssets.cs').write_text(
@@ -90,7 +92,7 @@ def main():
                         '-p:DisableImplicitLibraryPacksFolder=true', '-p:DisableImplicitNuGetFallbackFolder=true',
                         '-p:RestoreFallbackFolders=', '-p:RestoreAdditionalProjectSources=',
                         '-p:RestoreAdditionalProjectFallbackFolders=', '-p:NuGetAudit=false'], cwd=app, env=env, check=True)
-        subprocess.run(['dotnet', 'publish', *common, '-c', 'Debug', '--no-restore',
+        subprocess.run(['dotnet', 'publish', *common, '-c', 'Release', '--no-restore',
                         '-p:ContinuousIntegrationBuild=true', '-p:Deterministic=true', '-p:DebugType=None',
                         '-p:DebugSymbols=false', f'-p:PathMap={work}=/_/',
                         '-o', str(work / 'publish')], cwd=app, env=env, check=True)

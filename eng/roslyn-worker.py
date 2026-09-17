@@ -387,6 +387,8 @@ def main():
         for name, path in trusted["generators"].items():
             reference_item = ET.SubElement(group, "Reference", Include=name)
             ET.SubElement(reference_item, "HintPath").text = str(path)
+            if name == "System.Text.Json.SourceGeneration":
+                ET.SubElement(reference_item, "Aliases").text = "jsonsourcegen"
         project.write(app / "CompilerProbe.csproj", encoding="unicode")
         di_available = "di" in trusted["recipes"]
         di_factory = "new global::NetWasm.Microsoft.Extensions.DependencyInjection.Generator.NetWasmDependencyInjectionGenerator()" if di_available else \
