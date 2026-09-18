@@ -51,13 +51,26 @@ async function initialize() {
     program.EnableProgress();
     if (typeof program.ConfigureGuestMemoryMaximum !== 'function') throw Error('Rebuild the compiler host for guest memory limits');
     program.ConfigureGuestMemoryMaximum(256 * 1048576);
+    const runtimeManifestPromise = loader.load('compiler/runtime-pack.json').then(bytes => new TextDecoder().decode(bytes));
     const loaded = await Promise.allSettled([
       loader.load('compiler/target-reference.dll').then(toBase64),
       loader.load('compiler/support.json').then(bytes => new TextDecoder().decode(bytes)),
       loader.load('compiler/target-implementation.dll').then(toBase64),
       loader.load('compiler/compiler-wit.json').then(bytes => new TextDecoder().decode(bytes)),
       loader.load('compiler/compiler.wit.wasm').then(toBase64),
-      loader.load('compiler/runtime-pack.json').then(bytes => new TextDecoder().decode(bytes)),
+      runtimeManifestPromise,
+      (async () => {
+        const runtimeManifest = JSON.parse(await runtimeManifestPromise);
+        const target = runtimeManifest.targets?.find(candidate => candidate.target === 'wasm32');
+        if (!Array.isArray(target?.systemLibraries?.names)) throw Error('Invalid runtime system-library manifest');
+        const assets = await loader.manifest();
+        return JSON.stringify(target.systemLibraries.names.map(name => {
+          if (!/^[A-Za-z0-9_.-]+\.a$/.test(name)) throw Error('Invalid runtime system-library name');
+          const asset = `runtime/wasm32/system/${name}`, receipt = assets[asset];
+          if (!receipt || !/^[a-f0-9]{64}$/.test(receipt.sha256)) throw Error(`Missing runtime system-library receipt: ${name}`);
+          return { Path: `/netwasm-link/${asset}`, Sha256: receipt.sha256 };
+        }));
+      })(),
     ]);
     const failed = loaded.find(result => result.status === 'rejected');
     if (failed) throw failed.reason;

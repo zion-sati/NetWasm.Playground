@@ -15,16 +15,16 @@ import zipfile
 ROOT = Path(__file__).resolve().parents[1]
 FEED = 'https://api.nuget.org/v3/index.json'
 PACKAGES = {
-    'json': ('netwasm.system.text.json', '0.2.0',
+    'json': ('netwasm.system.text.json', '0.2.2',
              'analyzers/dotnet/cs/System.Text.Json.SourceGeneration.dll',
              '595434b3c5d64e527c22104ba20f8796d8a9a18a076b36ca99d38c09f311893f'),
-    'tunit-generator': ('netwasm.tunit.core', '0.2.1',
+    'tunit-generator': ('netwasm.tunit.core', '0.2.2',
                         'analyzers/dotnet/roslyn4.14/cs/TUnit.Core.SourceGenerator.dll',
-                        '6353daf19574e86708c23df2b2cbebe522200e467c7744754f9d976df2b0693c'),
-    'di': ('netwasm.microsoft.extensions.dependencyinjection', '0.2.0',
+                        'c0baab88e64106bf7e18f3420d1ac5771316c17210de16e8fc292a51d5e72ac1'),
+    'di': ('netwasm.microsoft.extensions.dependencyinjection', '0.2.2',
            'analyzers/dotnet/cs/NetWasm.Microsoft.Extensions.DependencyInjection.Generator.dll',
-           '24b2552c8392d8ad7bade39edbfe73ceec0d3efc640fb69246e43544148b3be8'),
-    'tunit-program': ('netwasm.tunit', '0.2.1',
+           '5f2f18b3302e7b53d8a6d415bb97a210281add14f6fc1ed87d74bfe33df8a2a0'),
+    'tunit-program': ('netwasm.tunit', '0.2.2',
                       'build/NetWasm,Version=v0.1/NetWasm.TUnit.Program.cs',
                       '7a9860417e8486dabfd02875784f8d71f19c7c36882c2b9dfc6d70d130a8fde5'),
 }
@@ -87,7 +87,9 @@ def main():
         nuget.write_text('<configuration><packageSources><clear/><add key="nuget.org" value="' + FEED +
                          '"/></packageSources><fallbackPackageFolders><clear/></fallbackPackageFolders></configuration>\n')
         env = dict(os.environ, NUGET_PACKAGES=str(work / 'packages'), NUGET_HTTP_CACHE_PATH=str(work / 'http-cache'))
-        common = [f'-p:RuntimeFrameworkVersion={runtime}', f'-p:NetWasmCompilerPackageVersion={version}']
+        common = [f'-p:RuntimeFrameworkVersion={runtime}', f'-p:NetWasmCompilerPackageVersion={version}',
+                  '-p:WasmBuildNative=true', '-p:RunAOTCompilation=true', '-p:PublishTrimmed=true',
+                  '-p:ILLinkTreatWarningsAsErrors=false']
         subprocess.run(['dotnet', 'restore', *common, '--configfile', str(nuget),
                         '-p:DisableImplicitLibraryPacksFolder=true', '-p:DisableImplicitNuGetFallbackFolder=true',
                         '-p:RestoreFallbackFolders=', '-p:RestoreAdditionalProjectSources=',

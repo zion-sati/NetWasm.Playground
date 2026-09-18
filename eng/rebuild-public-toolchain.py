@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Rebuild the release toolchain from a pinned public base and clean compiler host."""
 import argparse
+import base64
 import hashlib
 import io
 import importlib.util
@@ -10,11 +11,15 @@ import shutil
 import tarfile
 import tempfile
 import urllib.request
+import zipfile
 
 ROOT = Path(__file__).resolve().parents[1]
 SPEC = importlib.util.spec_from_file_location('prepare_web', ROOT / 'eng/prepare-web.py')
 PREPARE = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(PREPARE)
+NOTICE_SPEC = importlib.util.spec_from_file_location('browser_notices', ROOT / 'eng/browser-notices.py')
+NOTICES = importlib.util.module_from_spec(NOTICE_SPEC)
+NOTICE_SPEC.loader.exec_module(NOTICES)
 RELEASE_SPEC = importlib.util.spec_from_file_location('toolchain_release', ROOT / 'eng/toolchain-release.py')
 RELEASE = importlib.util.module_from_spec(RELEASE_SPEC)
 RELEASE_SPEC.loader.exec_module(RELEASE)
@@ -42,6 +47,61 @@ def download(url, maximum):
     if len(payload) > maximum:
         raise ValueError(f'Public toolchain response exceeded its receipt: {url}')
     return payload
+
+
+def package_members(package, version, members):
+    url = f'https://api.nuget.org/v3-flatcontainer/{package}/{version}/{package}.{version}.nupkg'
+    payload = download(url, 32 * 1024 * 1024)
+    with zipfile.ZipFile(io.BytesIO(payload)) as archive:
+        extracted = {name: archive.read(name) for name in members}
+    for name, expected in members.items():
+        if sha256(extracted[name]) != expected:
+            raise ValueError(f'Public package member changed: {package}/{name}')
+    return extracted
+
+
+def rebind_notice_origins(stage, pins):
+    origins_path = stage / 'notices/origins.json'
+    origins = json.loads(origins_path.read_text())
+    versions = {
+        'netwasm.toolchain': pins['netwasm']['packageVersion'],
+        'netwasm.tunit': pins['tunit']['packageVersion'],
+        'netwasm.tunit.assertions': pins['tunit']['packageVersion'],
+        'netwasm.tunit.core': pins['tunit']['packageVersion'],
+    }
+    packages = {}
+    for package, version in versions.items():
+        archive_name = f'{package}.{version}.nupkg'
+        url = f'https://api.nuget.org/v3-flatcontainer/{package}/{version}/{archive_name}'
+        registration = json.loads(download(
+            f'https://api.nuget.org/v3/registration5-semver1/{package}/{version}.json', 1024 * 1024))
+        catalog_url = registration.get('catalogEntry')
+        if not isinstance(catalog_url, str) or not catalog_url.startswith('https://api.nuget.org/'):
+            raise ValueError(f'Invalid NuGet catalog entry: {package}/{version}')
+        catalog = json.loads(download(catalog_url, 4 * 1024 * 1024))
+        package_size = catalog.get('packageSize')
+        if (catalog.get('packageHashAlgorithm') != 'SHA512' or not isinstance(catalog.get('packageHash'), str) or
+                not isinstance(package_size, int) or package_size < 1 or package_size > 256 * 1024 * 1024):
+            raise ValueError(f'Invalid NuGet package hash: {package}/{version}')
+        archive = download(url, package_size)
+        if len(archive) != package_size:
+            raise ValueError(f'NuGet package size changed: {package}/{version}')
+        packages[package] = (version, url, archive, catalog['packageHash'])
+    for target, entry in origins['files'].items():
+        source = entry['source']
+        package = source.get('package')
+        if package not in packages:
+            continue
+        version, url, archive, restore_hash = packages[package]
+        with zipfile.ZipFile(io.BytesIO(archive)) as package_zip:
+            notice = package_zip.read(source['path'])
+        if notice != (stage / 'notices' / target).read_bytes():
+            raise ValueError(f'Notice changed in public package: {package}/{source["path"]}')
+        source.update(version=version, url=url, archiveSha256=sha256(archive),
+                      archiveSha512=base64.b64encode(hashlib.sha512(archive).digest()).decode(),
+                      restoreContentHash=restore_hash)
+    origins_path.write_bytes(encoded(origins))
+    NOTICES.verify(stage / 'notices')
 
 
 def main():
@@ -97,6 +157,19 @@ def main():
             destination = stage.joinpath(*path.parts)
             destination.parent.mkdir(parents=True, exist_ok=True)
             destination.write_bytes(payload)
+        pins = json.loads((ROOT / 'eng/upstream-sources.json').read_text())['sources']
+        version = pins['netwasm']['packageVersion']
+        runtime_members = package_members('netwasm.runtime.pack', version, {
+            'runtime/wasm32/libnetwasm-runtime.a':
+                '0d03137a766f820950d3eb765c6d729ce937e745afb65f1be382ad11716c3adb',
+            'runtime/runtime-pack.json':
+                'fc9a2b7d19bea3e072758ecf986a70c03edec57116bafced11d1f2168a18250f',
+        })
+        (stage / 'runtime/wasm32/libnetwasm-runtime.a').write_bytes(
+            runtime_members['runtime/wasm32/libnetwasm-runtime.a'])
+        (stage / 'compiler/runtime-pack.json').write_bytes(
+            runtime_members['runtime/runtime-pack.json'])
+        rebind_notice_origins(stage, pins)
         framework = stage / 'compiler/_framework'
         shutil.copytree(args.compiler_framework, framework)
         workers = sorted(args.workers.glob('*.mjs'))
@@ -107,7 +180,7 @@ def main():
         for path in workers:
             shutil.copyfile(path, stage / 'workers' / path.name)
         assets, bundles = PREPARE.pack_staged_assets(stage)
-        identity = {'schemaVersion': 3, 'pins': manifest['pins'], 'assets': assets, 'bundles': bundles}
+        identity = {'schemaVersion': 3, 'pins': pins, 'assets': assets, 'bundles': bundles}
         digest = sha256(encoded(identity))
         document = {**identity, 'id': digest, 'rawBytes': sum(asset['bytes'] for asset in assets.values()),
                     'bundleBytes': sum(bundle['bytes'] for bundle in bundles.values())}

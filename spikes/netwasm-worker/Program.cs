@@ -57,6 +57,7 @@ public static partial class Program
     private sealed record EntryPointInfo(string AssemblyPath, string TypeName, string MethodName, int? Token,
         int Kind, EntryPointAbiInfo? Abi);
     private sealed record RuntimeLinkAssetInfo(string Path, string Sha256);
+    private sealed record RuntimeSystemLibrary(string Path, string Sha256);
     private sealed record RuntimeLinkPlanInfo(string[] Arguments, RuntimeLinkAssetInfo[] Inputs, string RuntimeAbi,
         string ToolchainFingerprint, long RuntimeGlobalBase, long HeapBase, long InitialMemorySizeBytes,
         long MaximumMemorySizeBytes);
@@ -64,7 +65,7 @@ public static partial class Program
     private sealed record ToolInvocationInfo(string ToolId, string[] Arguments);
     private sealed record ExportPruningInfo(string InputPath, string OutputPath, string Prefix);
     private sealed record CoreLinkPlanInfo(TextModuleInfo[] TextModules, ToolInvocationInfo Merge,
-        ExportPruningInfo ExportPruning, ToolInvocationInfo Optimization, string[] CleanupPaths);
+        ExportPruningInfo ExportPruning, ToolInvocationInfo? Optimization, string[] CleanupPaths);
     private sealed record CompilerHostResponse(
         int schemaVersion,
         bool success,
@@ -91,6 +92,7 @@ public static partial class Program
 
     [JsonSourceGenerationOptions(DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull)]
     [JsonSerializable(typeof(SupportSource[]))]
+    [JsonSerializable(typeof(RuntimeSystemLibrary[]))]
     [JsonSerializable(typeof(Dictionary<string, string>))]
     [JsonSerializable(typeof(CompilerHostResponse))]
     private sealed partial class CompilerHostJsonContext : JsonSerializerContext;
@@ -152,26 +154,29 @@ public static partial class Program
         plan.TextModules.Select(value => new TextModuleInfo(value.OutputPath, value.Text)).ToArray(),
         new(plan.Merge.ToolId, plan.Merge.Arguments.ToArray()),
         new(plan.ExportPruning.InputPath, plan.ExportPruning.OutputPath, plan.ExportPruning.Prefix),
-        new(plan.Optimization.ToolId, plan.Optimization.Arguments.ToArray()), plan.CleanupPaths.ToArray());
+        plan.Optimization is null ? null : new(plan.Optimization.ToolId, plan.Optimization.Arguments.ToArray()),
+        plan.CleanupPaths.ToArray());
 
     [JSExport]
-    public static string Compile(string source, string reference, string supportJson, string implementation, string witJson, string witBytes, string runtimeManifest)
-        => CompileRecipe(source, reference, supportJson, implementation, witJson, witBytes, runtimeManifest, "{}", "{}");
+    public static string Compile(string source, string reference, string supportJson, string implementation, string witJson, string witBytes, string runtimeManifest,
+        string runtimeSystemLibrariesJson)
+        => CompileRecipe(source, reference, supportJson, implementation, witJson, witBytes, runtimeManifest,
+            runtimeSystemLibrariesJson, "{}", "{}");
 
     [JSExport]
     public static string CompileRecipe(string source, string reference, string supportJson, string implementation, string witJson, string witBytes, string runtimeManifest,
-        string additionalReferencesJson, string additionalImplementationsJson)
+        string runtimeSystemLibrariesJson, string additionalReferencesJson, string additionalImplementationsJson)
         => CompileCore(source, reference, supportJson, implementation, witJson, witBytes, runtimeManifest,
-            additionalReferencesJson, additionalImplementationsJson, null, false);
+            runtimeSystemLibrariesJson, additionalReferencesJson, additionalImplementationsJson, null, false);
 
     [JSExport]
     public static string CompileGeneratedRecipe(string source, string reference, string supportJson, string implementation, string witJson, string witBytes, string runtimeManifest,
-        string additionalReferencesJson, string additionalImplementationsJson, string trustedRecipe, bool includeGeneratedSourceText)
+        string runtimeSystemLibrariesJson, string additionalReferencesJson, string additionalImplementationsJson, string trustedRecipe, bool includeGeneratedSourceText)
         => CompileCore(source, reference, supportJson, implementation, witJson, witBytes, runtimeManifest,
-            additionalReferencesJson, additionalImplementationsJson, trustedRecipe, includeGeneratedSourceText);
+            runtimeSystemLibrariesJson, additionalReferencesJson, additionalImplementationsJson, trustedRecipe, includeGeneratedSourceText);
 
     private static string CompileCore(string source, string reference, string supportJson, string implementation, string witJson, string witBytes, string runtimeManifest,
-        string additionalReferencesJson, string additionalImplementationsJson, string? trustedRecipe, bool includeGeneratedSourceText)
+        string runtimeSystemLibrariesJson, string additionalReferencesJson, string additionalImplementationsJson, string? trustedRecipe, bool includeGeneratedSourceText)
     {
         var generatedSources = Array.Empty<GeneratedSource>();
         var generatorDiagnostics = ImmutableArray<Diagnostic>.Empty;
@@ -254,9 +259,12 @@ public static partial class Program
             var compiled = BrowserCompiler.Compile(new BrowserCompilationRequest(options, images,
                 new Dictionary<string,string> { ["compiler.wit.wasm"] = witJson }, selectManagedExecutableEntryPoint: true));
             timings.Add(new("netwasm", Stopwatch.GetElapsedTime(started).TotalMilliseconds));
+            var systemLibraries = JsonSerializer.Deserialize(runtimeSystemLibrariesJson,
+                CompilerHostJsonContext.Default.RuntimeSystemLibraryArray)!
+                .Select(asset => new RuntimeLinkPlanAsset(asset.Path, asset.Sha256)).ToImmutableArray();
             var runtimeLinkPlan = RuntimeLinkPlanner.Plan(new(runtimeManifest, "wasm32", compiled.StaticDataEnd,
                 AssetRoot: "/netwasm-link/runtime", OutputPath: "/netwasm-link/runtime.wasm",
-                MaximumMemorySizeBytes: guestMemoryMaximum));
+                MaximumMemorySizeBytes: guestMemoryMaximum, SystemLibraries: systemLibraries));
             var coreLinkPlan = BrowserComponentCoreModules.CreateLinkPlan(
                 new("/netwasm-link/application.wasm", "/netwasm-link/runtime.wasm", "/netwasm-link/linked.wasm",
                     ComponentTarget.Wasm32Wasi02, compiled.EntryPoint.Abi),

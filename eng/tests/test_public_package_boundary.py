@@ -25,6 +25,12 @@ class PublicPackageBoundaryTests(unittest.TestCase):
                          r'^https://github\.com/zion-sati/NetWasm\.Playground/releases/download/v[0-9]')
         self.assertEqual(64, len(base['archive']['sha256']))
         self.assertIn('RELEASE.verify_staged(base_toolchain)', script)
+        self.assertIn("package_members('netwasm.runtime.pack', version", script)
+        self.assertIn("Public package member changed", script)
+        self.assertIn("identity = {'schemaVersion': 3, 'pins': pins", script)
+        self.assertIn('rebind_notice_origins(stage, pins)', script)
+        self.assertIn("registration5-semver1", script)
+        self.assertIn("NOTICES.verify(stage / 'notices')", script)
         self.assertNotIn('playground.netwasm.com/toolchain/', json.dumps(base))
 
     def test_stager_packs_payloads_into_four_verified_phase_bundles(self):
@@ -75,6 +81,12 @@ class PublicPackageBoundaryTests(unittest.TestCase):
             "NetWasm.Compiler.Browser": "[$(NetWasmCompilerPackageVersion)]",
             "NetWasm.Runtime.Pack": "[$(NetWasmCompilerPackageVersion)]",
         }, references)
+
+        release_builder = (ROOT / 'eng/build-release-compiler.py').read_text()
+        self.assertIn("'-p:WasmBuildNative=true'", release_builder)
+        self.assertIn("'-p:RunAOTCompilation=true'", release_builder)
+        self.assertIn("'-p:PublishTrimmed=true'", release_builder)
+        self.assertIn("'-p:ILLinkTreatWarningsAsErrors=false'", release_builder)
 
     def test_asset_stager_has_no_source_checkout_option(self):
         help_text = subprocess.check_output(
