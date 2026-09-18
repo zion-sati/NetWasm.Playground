@@ -81,6 +81,8 @@ class PublicPackageBoundaryTests(unittest.TestCase):
             "NetWasm.Compiler.Browser": "[$(NetWasmCompilerPackageVersion)]",
             "NetWasm.Runtime.Pack": "[$(NetWasmCompilerPackageVersion)]",
         }, references)
+        define_constants = project.findtext(".//DefineConstants", default="")
+        self.assertIn("FRONTEND_CACHE_TRANSPORT", define_constants.split(";"))
 
         release_builder = (ROOT / 'eng/build-release-compiler.py').read_text()
         self.assertIn("'-p:WasmBuildNative=true'", release_builder)
