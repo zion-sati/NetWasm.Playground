@@ -1,5 +1,7 @@
 import { createAssetLoader, serveWorker, toBase64, fromBase64 } from './asset-loader.mjs';
+import { createFrontendCache } from './frontend-cache.mjs';
 let report = () => {}, initialized;
+let frontendCache, compilerToolchainId;
 const loader = createAssetLoader(assets => report({ assets }));
 const recipes = new Map();
 async function recipeInputs(id) {
@@ -85,6 +87,14 @@ serveWorker(async (data, emit) => {
     if (!(data.module instanceof Uint8Array) || data.module.length > 4 * 1048576 || typeof data.prefix !== 'string' || data.prefix.length > 255) throw Error('Invalid export pruning request');
     return data.module.slice();
   })() : undefined;
+  if (data.operation === 'initialize') {
+    if (typeof data.toolchainId !== 'string' || !/^[a-f0-9]{64}$/.test(data.toolchainId))
+      throw Error('Invalid compiler toolchain identity');
+    if (compilerToolchainId && compilerToolchainId !== data.toolchainId)
+      throw Error('Compiler toolchain identity changed');
+    compilerToolchainId = data.toolchainId;
+    frontendCache ??= createFrontendCache(compilerToolchainId);
+  }
   const { runtime, program, inputs } = await initialize();
   if (data.operation === 'initialize') return { success: true };
   if (module) return { module: fromBase64(program.RetainComponentExports(toBase64(module), data.prefix)),
@@ -94,8 +104,60 @@ serveWorker(async (data, emit) => {
   if (supportJson !== undefined) recipeCompilerInputs[1] = supportJson;
   if (typeof program.CompileRecipe !== 'function' && data.recipe !== 'hello') throw Error('Rebuild the compiler host for library recipes');
   if (['json-generated', 'tunit', 'di'].includes(data.recipe) && typeof program.CompileGeneratedRecipe !== 'function') throw Error('Rebuild the compiler host for source generation');
-  const result = JSON.parse(['json-generated', 'tunit', 'di'].includes(data.recipe)
-    ? program.CompileGeneratedRecipe(data.source, ...recipeCompilerInputs, ...additional, data.recipe === 'tunit' ? 'tunit' : data.recipe === 'di' ? 'di' : 'json', false)
+  const generated = ['json-generated', 'tunit', 'di'].includes(data.recipe);
+  const trustedRecipe = data.recipe === 'tunit' ? 'tunit' : data.recipe === 'di' ? 'di' : 'json';
+  const supportsFrontendCache = data.frontendCache !== false && frontendCache && typeof program.PrepareRecipe === 'function' &&
+    typeof program.PrepareGeneratedRecipe === 'function' && typeof program.ImportFrontendArtifact === 'function' &&
+    typeof program.CompilePreparedRecipe === 'function';
+  let result;
+  if (supportsFrontendCache) {
+    const prepared = JSON.parse(generated
+      ? program.PrepareGeneratedRecipe(data.source, ...recipeCompilerInputs, ...additional, trustedRecipe)
+      : program.PrepareRecipe(data.source, ...recipeCompilerInputs, ...additional));
+    if (!prepared.frontendCache) result = prepared;
+    else {
+      report({ stage: 'cache-read' });
+      const cacheReadStarted = performance.now();
+      const loaded = await frontendCache.load(prepared.frontendCache);
+      for (const entry of loaded.entries)
+        program.ImportFrontendArtifact(prepared.frontendCache.handle, entry.key, entry.payload, entry.checksum);
+      const cacheReadMilliseconds = performance.now() - cacheReadStarted;
+      result = JSON.parse(program.CompilePreparedRecipe(prepared.frontendCache.handle));
+      let cacheWriteMilliseconds = 0;
+      if (result.frontendPublication) {
+        report({ stage: 'cache-write' });
+        const cacheWriteStarted = performance.now();
+        const publication = result.frontendPublication;
+        try {
+          for (;;) {
+            const batch = JSON.parse(program.ReadFrontendArtifactBatch(publication.token));
+            const entries = batch.entries.map((entry, index) => ({
+              key: entry.key,
+              checksum: Uint8Array.from(entry.checksum.match(/../g).map(value => Number.parseInt(value, 16))),
+              payload: program.ReadFrontendArtifactPayload(batch.token, index),
+            }));
+            if (!await frontendCache.write(prepared.frontendCache, entries)) {
+              program.AbandonFrontendArtifactPublication(publication.token);
+              break;
+            }
+            program.AcknowledgeFrontendArtifactBatch(publication.token, batch.token);
+            if (batch.isFinal) break;
+          }
+        } catch {
+          try { program.AbandonFrontendArtifactPublication(publication.token); } catch {}
+        }
+        cacheWriteMilliseconds = performance.now() - cacheWriteStarted;
+      }
+      result.frontendCacheMetrics = {
+        ...result.frontendCacheMetrics,
+        loadedEntries: loaded.entries.length,
+        readBytes: loaded.totalBytes,
+        cacheReadMilliseconds,
+        cacheWriteMilliseconds,
+      };
+    }
+  } else result = JSON.parse(generated
+    ? program.CompileGeneratedRecipe(data.source, ...recipeCompilerInputs, ...additional, trustedRecipe, false)
     : typeof program.CompileRecipe === 'function' ? program.CompileRecipe(data.source, ...recipeCompilerInputs, ...additional) : program.Compile(data.source, ...recipeCompilerInputs));
   if (typeof result.application === 'string') result.application = fromBase64(result.application);
   if (typeof result.pe === 'string') result.pe = fromBase64(result.pe);

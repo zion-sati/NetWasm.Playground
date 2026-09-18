@@ -66,6 +66,14 @@ public static partial class Program
     private sealed record ExportPruningInfo(string InputPath, string OutputPath, string Prefix);
     private sealed record CoreLinkPlanInfo(TextModuleInfo[] TextModules, ToolInvocationInfo Merge,
         ExportPruningInfo ExportPruning, ToolInvocationInfo? Optimization, string[] CleanupPaths);
+#if FRONTEND_CACHE_TRANSPORT
+    private sealed record FrontendCacheInfo(string schema, string @namespace, string handle);
+    private sealed record FrontendPublicationInfo(string token, int entryCount, long totalBytes);
+    private sealed record FrontendBatchEntryInfo(string key, string checksum, int bytes);
+    private sealed record FrontendBatchInfo(string token, bool isFinal, FrontendBatchEntryInfo[] entries);
+    private sealed record FrontendCacheMetricsInfo(long lookups, long hits, long misses,
+        long memoryHits, long diskHits, long stagedArtifacts, long stagedBytes);
+#endif
     private sealed record CompilerHostResponse(
         int schemaVersion,
         bool success,
@@ -88,18 +96,45 @@ public static partial class Program
         CoreLinkPlanInfo? coreLinkPlan = null,
         string? trustedRecipe = null,
         int? catalogCaseCount = null,
-        string? pe = null);
+        string? pe = null
+#if FRONTEND_CACHE_TRANSPORT
+        , FrontendCacheInfo? frontendCache = null,
+        FrontendPublicationInfo? frontendPublication = null,
+        FrontendCacheMetricsInfo? frontendCacheMetrics = null
+#endif
+        );
 
     [JsonSourceGenerationOptions(DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull)]
     [JsonSerializable(typeof(SupportSource[]))]
     [JsonSerializable(typeof(RuntimeSystemLibrary[]))]
     [JsonSerializable(typeof(Dictionary<string, string>))]
     [JsonSerializable(typeof(CompilerHostResponse))]
+#if FRONTEND_CACHE_TRANSPORT
+    [JsonSerializable(typeof(FrontendBatchInfo))]
+#endif
     private sealed partial class CompilerHostJsonContext : JsonSerializerContext;
     private const int MaximumGeneratedSources = 128;
     private const int MaximumGeneratedBytes = 512 * 1024;
     private static bool progressEnabled;
     private static long guestMemoryMaximum = 2147483648;
+#if FRONTEND_CACHE_TRANSPORT
+    private sealed record PendingFrontendCompilation(
+        BrowserCompilerSession Session,
+        BrowserCompilationPreparation Preparation,
+        List<FrontendArtifactCacheEntry> Entries,
+        byte[] Pe,
+        StageTiming[] Timings,
+        GeneratedSource[] GeneratedSources,
+        DiagnosticInfo[] GeneratorDiagnostics,
+        string? TrustedRecipe,
+        int CatalogCaseCount,
+        string RuntimeManifest,
+        string RuntimeSystemLibrariesJson);
+    private static PendingFrontendCompilation? pendingFrontendCompilation;
+    private static FrontendArtifactCachePublication? pendingFrontendPublication;
+    private static FrontendArtifactCacheBatch? pendingFrontendBatch;
+    private static BrowserCompilerSession? frontendPublicationSession;
+#endif
 
     [JSExport]
     public static void ConfigureGuestMemoryMaximum(int bytes)
@@ -175,8 +210,26 @@ public static partial class Program
         => CompileCore(source, reference, supportJson, implementation, witJson, witBytes, runtimeManifest,
             runtimeSystemLibrariesJson, additionalReferencesJson, additionalImplementationsJson, trustedRecipe, includeGeneratedSourceText);
 
+#if FRONTEND_CACHE_TRANSPORT
+    [JSExport]
+    public static string PrepareRecipe(string source, string reference, string supportJson, string implementation, string witJson, string witBytes, string runtimeManifest,
+        string runtimeSystemLibrariesJson, string additionalReferencesJson, string additionalImplementationsJson)
+        => CompileCore(source, reference, supportJson, implementation, witJson, witBytes, runtimeManifest,
+            runtimeSystemLibrariesJson, additionalReferencesJson, additionalImplementationsJson, null, false, true);
+
+    [JSExport]
+    public static string PrepareGeneratedRecipe(string source, string reference, string supportJson, string implementation, string witJson, string witBytes, string runtimeManifest,
+        string runtimeSystemLibrariesJson, string additionalReferencesJson, string additionalImplementationsJson, string trustedRecipe)
+        => CompileCore(source, reference, supportJson, implementation, witJson, witBytes, runtimeManifest,
+            runtimeSystemLibrariesJson, additionalReferencesJson, additionalImplementationsJson, trustedRecipe, false, true);
+#endif
+
     private static string CompileCore(string source, string reference, string supportJson, string implementation, string witJson, string witBytes, string runtimeManifest,
-        string runtimeSystemLibrariesJson, string additionalReferencesJson, string additionalImplementationsJson, string? trustedRecipe, bool includeGeneratedSourceText)
+        string runtimeSystemLibrariesJson, string additionalReferencesJson, string additionalImplementationsJson, string? trustedRecipe, bool includeGeneratedSourceText
+#if FRONTEND_CACHE_TRANSPORT
+        , bool prepareFrontendCache = false
+#endif
+        )
     {
         var generatedSources = Array.Empty<GeneratedSource>();
         var generatorDiagnostics = ImmutableArray<Diagnostic>.Empty;
@@ -256,8 +309,38 @@ public static partial class Program
                 "NetWasmApp.dll", ["NetWasm.CoreLib.dll", .. additionalImplementations.Keys], "Program", "<Main>$", [],
                 WitPath: "compiler.wit.wasm", WitWorld: tunit ? "netwasm:platform@1.0.0/async-platform" : "netwasm:platform@1.0.0/platform",
                 EntryPointKind: CompilerEntryPointKind.ManagedExecutable);
-            var compiled = BrowserCompiler.Compile(new BrowserCompilationRequest(options, images,
-                new Dictionary<string,string> { ["compiler.wit.wasm"] = witJson }, selectManagedExecutableEntryPoint: true));
+            var request = new BrowserCompilationRequest(options, images,
+                new Dictionary<string,string> { ["compiler.wit.wasm"] = witJson }, selectManagedExecutableEntryPoint: true);
+#if FRONTEND_CACHE_TRANSPORT
+            if (prepareFrontendCache)
+            {
+                request = request with { CollectCompilerMetrics = true };
+                if (pendingFrontendCompilation is not null || pendingFrontendPublication is not null)
+                    throw new InvalidOperationException("A frontend cache compilation is already active.");
+                var session = new BrowserCompilerSession();
+                try
+                {
+                    var preparation = session.Prepare(request);
+                    if (preparation.FrontendCache is null)
+                        throw new InvalidOperationException("Frontend cache preparation is unavailable.");
+                    pendingFrontendCompilation = new(session, preparation, [], pe.ToArray(), timings.ToArray(),
+                        generatedSources, generatorDiagnostics.Take(128).Select(Describe).ToArray(), trustedRecipe,
+                        tunit ? CountCatalogCases(generatedCompilation) : 0, runtimeManifest,
+                        runtimeSystemLibrariesJson);
+                    return Serialize(new(1, true, timings: timings.ToArray(), generatedSources: generatedSources,
+                        generatorDiagnostics: generatorDiagnostics.Take(128).Select(Describe).ToArray(),
+                        trustedRecipe: trustedRecipe, catalogCaseCount: tunit ? CountCatalogCases(generatedCompilation) : 0,
+                        frontendCache: new(preparation.FrontendCache.Schema,
+                            preparation.FrontendCache.Namespace, preparation.Handle)));
+                }
+                catch
+                {
+                    session.Dispose();
+                    throw;
+                }
+            }
+#endif
+            var compiled = BrowserCompiler.Compile(request);
             timings.Add(new("netwasm", Stopwatch.GetElapsedTime(started).TotalMilliseconds));
             var systemLibraries = JsonSerializer.Deserialize(runtimeSystemLibrariesJson,
                 CompilerHostJsonContext.Default.RuntimeSystemLibraryArray)!
@@ -293,6 +376,132 @@ public static partial class Program
             return Serialize(new(1, false, "compiler-host", "host-error", true, error: Bound(error.ToString())));
         }
     }
+
+#if FRONTEND_CACHE_TRANSPORT
+    [JSExport]
+    public static void ImportFrontendArtifact(string handle, string key, byte[] payload, byte[] checksum)
+    {
+        var pending = RequirePending(handle);
+        if (pending.Entries.Count >= 100_000)
+            throw new InvalidOperationException("Frontend cache entry limit exceeded.");
+        pending.Entries.Add(new(key, payload, checksum));
+    }
+
+    [JSExport]
+    public static string CompilePreparedRecipe(string handle)
+    {
+        var pending = RequirePending(handle);
+        pendingFrontendCompilation = null;
+        try
+        {
+            var compileStarted = Stopwatch.GetTimestamp();
+            var prepared = pending.Session.CompilePrepared(handle, pending.Entries);
+            var compiled = prepared.Compilation;
+            var timings = pending.Timings.Append(new StageTiming(
+                "netwasm", Stopwatch.GetElapsedTime(compileStarted).TotalMilliseconds)).ToArray();
+            var systemLibraries = JsonSerializer.Deserialize(pending.RuntimeSystemLibrariesJson,
+                CompilerHostJsonContext.Default.RuntimeSystemLibraryArray)!
+                .Select(asset => new RuntimeLinkPlanAsset(asset.Path, asset.Sha256)).ToImmutableArray();
+            var runtimeLinkPlan = RuntimeLinkPlanner.Plan(new(pending.RuntimeManifest, "wasm32", compiled.StaticDataEnd,
+                AssetRoot: "/netwasm-link/runtime", OutputPath: "/netwasm-link/runtime.wasm",
+                MaximumMemorySizeBytes: guestMemoryMaximum, SystemLibraries: systemLibraries));
+            var coreLinkPlan = BrowserComponentCoreModules.CreateLinkPlan(
+                new("/netwasm-link/application.wasm", "/netwasm-link/runtime.wasm", "/netwasm-link/linked.wasm",
+                    ComponentTarget.Wasm32Wasi02, compiled.EntryPoint.Abi),
+                new("/netwasm-link/environment.wasm", "/netwasm-link/host.wasm", "/netwasm-link/command.wasm",
+                    "/netwasm-link/merged.wasm", "/netwasm-link/sanitized.wasm"));
+            pendingFrontendPublication = prepared.FrontendPublication;
+            if (prepared.FrontendPublication is not null)
+                frontendPublicationSession = pending.Session;
+            return Serialize(new(1, true,
+                diagnostics: [], timings: timings, generatedSources: pending.GeneratedSources,
+                generatorDiagnostics: pending.GeneratorDiagnostics,
+                application: Convert.ToBase64String(compiled.ApplicationModule), staticDataEnd: compiled.StaticDataEnd,
+                runtimeFeatures: compiled.RuntimeFeatures.ToArray(), imports: compiled.FunctionImports.Select(Describe).ToArray(),
+                interopManifest: Describe(compiled.InteropManifest), entryPoint: Describe(compiled.EntryPoint),
+                runtimeLinkPlan: Describe(runtimeLinkPlan), coreLinkPlan: Describe(coreLinkPlan),
+                trustedRecipe: pending.TrustedRecipe, catalogCaseCount: pending.CatalogCaseCount,
+                pe: Convert.ToBase64String(pending.Pe),
+                frontendPublication: prepared.FrontendPublication is null ? null : new(
+                    prepared.FrontendPublication.Token, prepared.FrontendPublication.EntryCount,
+                    prepared.FrontendPublication.TotalBytes),
+                frontendCacheMetrics: compiled.CompilerMetrics?.FrontendCache is not { } metrics ? null : new(
+                    metrics.Lookups, metrics.Hits, metrics.Misses, metrics.MemoryHits, metrics.DiskHits,
+                    metrics.StagedArtifacts, metrics.StagedBytes)));
+        }
+        catch
+        {
+            pending.Session.Dispose();
+            throw;
+        }
+        finally
+        {
+            if (pendingFrontendPublication is null) pending.Session.Dispose();
+        }
+    }
+
+    [JSExport]
+    public static string ReadFrontendArtifactBatch(string publicationToken)
+    {
+        var publication = pendingFrontendPublication;
+        var session = frontendPublicationSession;
+        if (publication is null || session is null || publication.Token != publicationToken)
+            throw new InvalidOperationException("The frontend cache publication is stale or invalid.");
+        var batch = session.ReadFrontendArtifactBatch(publication);
+        pendingFrontendBatch = batch;
+        return JsonSerializer.Serialize(new FrontendBatchInfo(batch.BatchToken, batch.IsFinal,
+            batch.Entries.Select(entry => new FrontendBatchEntryInfo(entry.Key,
+                Convert.ToHexStringLower(entry.Checksum), entry.Payload.Length)).ToArray()),
+            CompilerHostJsonContext.Default.FrontendBatchInfo);
+    }
+
+    [JSExport]
+    public static byte[] ReadFrontendArtifactPayload(string batchToken, int index)
+    {
+        var batch = pendingFrontendBatch;
+        if (batch is null || batch.BatchToken != batchToken || index < 0 || index >= batch.Entries.Count)
+            throw new InvalidOperationException("The frontend cache batch is stale or invalid.");
+        return (byte[])batch.Entries[index].Payload.Clone();
+    }
+
+    [JSExport]
+    public static void AcknowledgeFrontendArtifactBatch(string publicationToken, string batchToken)
+    {
+        var publication = pendingFrontendPublication;
+        var batch = pendingFrontendBatch;
+        var session = frontendPublicationSession;
+        if (publication is null || batch is null || session is null ||
+            publication.Token != publicationToken || batch.BatchToken != batchToken)
+            throw new InvalidOperationException("The frontend cache batch is stale or invalid.");
+        session.AcknowledgeFrontendArtifactBatch(publication, batch);
+        pendingFrontendBatch = null;
+        if (!batch.IsFinal) return;
+        pendingFrontendPublication = null;
+        frontendPublicationSession = null;
+        session.Dispose();
+    }
+
+    [JSExport]
+    public static void AbandonFrontendArtifactPublication(string publicationToken)
+    {
+        var publication = pendingFrontendPublication;
+        var session = frontendPublicationSession;
+        if (publication is null || session is null || publication.Token != publicationToken)
+            throw new InvalidOperationException("The frontend cache publication is stale or invalid.");
+        try { session.AbandonFrontendArtifactPublication(publication); }
+        finally
+        {
+            pendingFrontendBatch = null;
+            pendingFrontendPublication = null;
+            frontendPublicationSession = null;
+            session.Dispose();
+        }
+    }
+
+    private static PendingFrontendCompilation RequirePending(string handle) =>
+        pendingFrontendCompilation is { } pending && pending.Preparation.Handle == handle
+            ? pending : throw new InvalidOperationException("The frontend cache preparation is stale or invalid.");
+#endif
 
     private static int CountCatalogCases(Compilation compilation) => compilation.SyntaxTrees.Sum(tree =>
         tree.FilePath.EndsWith("__TestSource.g.cs", StringComparison.Ordinal)

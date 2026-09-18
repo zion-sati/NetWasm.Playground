@@ -12,6 +12,7 @@ export class PlaygroundPipeline {
   private root?: URL;
   private rootInitialization?: Promise<void>;
   private manifest?: ToolchainManifest;
+  private toolchainId?: string;
   private channelInitializations = new Map<string, Promise<void>>();
   private abort?: AbortController;
   private epoch = 0;
@@ -64,6 +65,7 @@ export class PlaygroundPipeline {
       if (!response.ok) throw new Error('Toolchain assets unavailable. Run the asset preparation command.');
       const index = await response.json();
       if (!/^[a-f0-9]{64}$/.test(index.id)) throw new Error('Invalid toolchain version');
+      this.toolchainId = index.id;
       const root = new URL(`${index.id}/`, base);
       const manifestResponse = await fetch(new URL('asset-manifest.json', root), { signal, cache: 'force-cache' });
       if (!manifestResponse.ok) throw new Error('Toolchain manifest unavailable');
@@ -175,7 +177,8 @@ export class PlaygroundPipeline {
     if (!initialization) {
       const bundleName: BundleRole = name === 'lld' ? 'linker' : name;
       initialization = this.preloadBundle(bundleName, this.manifest!.bundles[bundleName])
-        .then(() => this.channel(name).request({ operation: 'initialize' }))
+        .then(() => this.channel(name).request({ operation: 'initialize',
+          ...(name === 'compiler' ? { toolchainId: this.toolchainId } : {}) }))
         .then(() => undefined);
       this.channelInitializations.set(name, initialization);
       void initialization.catch(() => {
