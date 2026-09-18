@@ -14,6 +14,7 @@ try {
   await page.locator('.monaco-editor').waitFor();
   const modes = await page.getByLabel('Optimization', { exact: true }).locator('option').evaluateAll(options => options.map(option => option.value));
   if (modes.includes('O4') || !['none', 'O0', 'O1', 'O2', 'O3', 'Os', 'Oz'].every(mode => modes.includes(mode))) throw Error(`Unexpected optimization modes: ${modes}`);
+  if (await page.getByLabel('Optimization', { exact: true }).inputValue() !== 'Oz') throw Error('Expected -Oz to be selected by default');
   await page.getByLabel('Example', { exact: true }).selectOption('json-generated');
   for (const mode of ['none', 'Oz']) {
     await page.getByLabel('Optimization', { exact: true }).selectOption(mode);
