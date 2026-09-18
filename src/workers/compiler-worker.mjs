@@ -121,6 +121,11 @@ serveWorker(async (data, emit) => {
       const loaded = await frontendCache.load(prepared.frontendCache);
       for (const entry of loaded.entries)
         program.ImportFrontendArtifact(prepared.frontendCache.handle, entry.key, entry.payload, entry.checksum);
+      const loadedEntries = loaded.entries.length;
+      const readBytes = loaded.totalBytes;
+      // ImportFrontendArtifact copies validated payloads into managed memory.
+      // Release the JavaScript copies before entering the synchronous compiler.
+      loaded.entries.length = 0;
       const cacheReadMilliseconds = performance.now() - cacheReadStarted;
       result = JSON.parse(program.CompilePreparedRecipe(prepared.frontendCache.handle));
       let cacheWriteMilliseconds = 0;
@@ -150,8 +155,8 @@ serveWorker(async (data, emit) => {
       }
       result.frontendCacheMetrics = {
         ...result.frontendCacheMetrics,
-        loadedEntries: loaded.entries.length,
-        readBytes: loaded.totalBytes,
+        loadedEntries,
+        readBytes,
         cacheReadMilliseconds,
         cacheWriteMilliseconds,
       };
