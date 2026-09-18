@@ -53,7 +53,7 @@ def main():
     with tempfile.TemporaryDirectory(prefix='netwasm-release-compiler-') as temporary:
         work = Path(temporary)
         app = work / 'app'
-        shutil.copytree(ROOT / 'spikes/netwasm-worker', app)
+        shutil.copytree(ROOT / 'eng/compiler-host', app)
         generators = work / 'generators'
         generators.mkdir()
         extracted = {}

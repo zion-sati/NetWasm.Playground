@@ -32,7 +32,7 @@ npm run dev
 The asset preparation command checks the existing verification receipts and
 stages assets under an ignored, content-addressed `public/toolchain/` directory.
 It consumes the public NuGet.org packages and verified inputs produced by the
-runners under `eng/` and `spikes/`; it does not read NetWasm source checkouts.
+runners under `eng/`; it does not read NetWasm source checkouts.
 It does not rebuild LLVM. Release builds run on a clean GitHub Actions runner:
 they compile the browser compiler host from pinned public NuGet packages,
 rebuild the four phase bundles from the receipt-verified public base, generate

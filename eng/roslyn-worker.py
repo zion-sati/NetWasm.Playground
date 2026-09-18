@@ -365,7 +365,7 @@ def main():
         raise RuntimeError("At least 100 GiB free space is required")
     app = run / "app"
     package_mode = args.compiler_package_version is not None
-    fixture = ROOT / "spikes" / ("netwasm-worker" if package_mode else "roslyn-worker")
+    fixture = ROOT / "eng" / ("compiler-host" if package_mode else "roslyn-host")
     package_options = []
     compiler_package_version = None
     if package_mode:

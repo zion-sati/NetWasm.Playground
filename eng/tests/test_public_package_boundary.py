@@ -70,7 +70,7 @@ class PublicPackageBoundaryTests(unittest.TestCase):
 
     def test_compiler_host_uses_exact_public_packages_without_project_references(self):
         project = ET.parse(
-            ROOT / "spikes/netwasm-worker/CompilerProbe.csproj").getroot()
+            ROOT / "eng/compiler-host/CompilerProbe.csproj").getroot()
 
         self.assertEqual([], project.findall(".//ProjectReference"))
         references = {
