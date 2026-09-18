@@ -221,7 +221,6 @@ export class PlaygroundPipeline {
     const optimization = snapshot.optimization ?? 'Oz';
     const epoch = this.epoch; this.context = snapshot; const timings: StageTiming[] = [];
     const result = { requestId: snapshot.requestId, revision: snapshot.revision, optimization, diagnostics: [], timings };
-    let recycleCompiler = false;
     try {
       if (!['hello', 'allocation', 'linq', 'json-dom', 'json-generated', 'tunit', 'regex', 'di', 'hashing'].includes(snapshot.recipeId)) throw new Error('Unknown compilation recipe');
       if (!optimizationModes.includes(optimization)) throw new Error('Unknown optimization mode');
@@ -229,7 +228,6 @@ export class PlaygroundPipeline {
       await this.stage('download', timings, () => this.initialize());
       await this.stage('compiler-initialize', timings, () => this.initializeChannel('compiler'));
       const compilation = await this.stage('compile', timings, () => this.channel('compiler').request({ operation: 'compile', recipe: snapshot.recipeId, source: snapshot.source }));
-      recycleCompiler = compilation.hostLinearMemoryBytes >= 512 * 1048576;
       for (const timing of compilation.timings ?? []) this.emit({ type: 'stage', stage: timing.stage, state: 'complete', milliseconds: timing.milliseconds });
       if (!compilation.success) return { ...result, success: false, diagnostics: compilation.diagnostics ?? [],
         stage: compilation.stage, error: compilation.error, assets: { ...this.assets } };
@@ -249,7 +247,6 @@ export class PlaygroundPipeline {
       const merged = await this.stage('merge', timings, () => this.tool('wasm-merge', args(plan.Merge), files, [mergedName]));
       const module = merged[mergedName];
       const pruned = await this.stage('prune', timings, () => this.channel('compiler').request({ operation: 'prune', module, prefix: plan.ExportPruning.Prefix }, [module.buffer]));
-      recycleCompiler ||= pruned.hostLinearMemoryBytes >= 512 * 1048576;
       const linked = optimization === 'none' ? pruned.module : (await this.stage('optimize', timings, () =>
         this.tool('wasm-opt', optimizationArguments(args(plan.Optimization), optimization),
           { [basename(plan.ExportPruning.OutputPath)]: pruned.module }, ['linked.wasm'])))['linked.wasm'];
@@ -267,7 +264,12 @@ export class PlaygroundPipeline {
       return { ...result, success: true, component, assets: { ...this.assets } };
     } catch (error) { return { ...result, success: false, cancelled: epoch !== this.epoch, stage: this.currentStage, error: String(error) }; }
     finally {
-      if (recycleCompiler) { this.channels.get('compiler')?.reset(); this.channels.delete('compiler'); this.channelInitializations.delete('compiler'); }
+      // A managed compiler's WebAssembly memory can grow but cannot shrink.
+      // End every compilation with a fresh compiler-worker boundary so one
+      // request's high-water mark cannot become the next request's baseline.
+      this.channels.get('compiler')?.reset();
+      this.channels.delete('compiler');
+      this.channelInitializations.delete('compiler');
       this.context = undefined;
     }
   }
