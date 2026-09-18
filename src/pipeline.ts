@@ -264,7 +264,8 @@ export class PlaygroundPipeline {
         return packaged['component.wasm'];
       });
       if (epoch !== this.epoch) throw new Error('Stopped');
-      return { ...result, success: true, component, assets: { ...this.assets } };
+      return { ...result, success: true, component,
+        frontendCacheMetrics: compilation.frontendCacheMetrics, assets: { ...this.assets } };
     } catch (error) { return { ...result, success: false, cancelled: epoch !== this.epoch, stage: this.currentStage, error: String(error) }; }
     finally {
       // A managed compiler's WebAssembly memory can grow but cannot shrink.

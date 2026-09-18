@@ -26,6 +26,20 @@ export interface ToolchainPreloadProgress extends AssetMeasurement {
   totalBundleBytes: number;
 }
 
+export interface FrontendCacheMetrics {
+  lookups: number;
+  hits: number;
+  misses: number;
+  memoryHits: number;
+  diskHits: number;
+  stagedArtifacts: number;
+  stagedBytes: number;
+  loadedEntries: number;
+  readBytes: number;
+  cacheReadMilliseconds: number;
+  cacheWriteMilliseconds: number;
+}
+
 export type PipelineEvent = { requestId: number; revision: number } & (
   | { type: 'stage'; stage: string; state: 'running' | 'complete'; milliseconds?: number }
   | { type: 'console'; stream: 'stdout' | 'stderr'; text: string }
@@ -41,6 +55,7 @@ export interface CompilationResult {
   component?: Uint8Array;
   diagnostics: Diagnostic[];
   timings: StageTiming[];
+  frontendCacheMetrics?: FrontendCacheMetrics;
   assets?: AssetMeasurement;
   error?: string;
   stage?: string;
