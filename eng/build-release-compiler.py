@@ -87,8 +87,12 @@ def main():
         nuget.write_text('<configuration><packageSources><clear/><add key="nuget.org" value="' + FEED +
                          '"/></packageSources><fallbackPackageFolders><clear/></fallbackPackageFolders></configuration>\n')
         env = dict(os.environ, NUGET_PACKAGES=str(work / 'packages'), NUGET_HTTP_CACHE_PATH=str(work / 'http-cache'))
+        # Keep the Mono runtime native, but execute the compiler's managed IL in
+        # interpreter mode. Full browser AOT has produced method-layout-sensitive
+        # miscompilations in the compiler host; trimming would also remove IL that
+        # the interpreter needs.
         common = [f'-p:RuntimeFrameworkVersion={runtime}', f'-p:NetWasmCompilerPackageVersion={version}',
-                  '-p:WasmBuildNative=true', '-p:RunAOTCompilation=true', '-p:PublishTrimmed=true',
+                  '-p:WasmBuildNative=true', '-p:RunAOTCompilation=false', '-p:PublishTrimmed=false',
                   '-p:ILLinkTreatWarningsAsErrors=false']
         subprocess.run(['dotnet', 'restore', *common, '--configfile', str(nuget),
                         '-p:DisableImplicitLibraryPacksFolder=true', '-p:DisableImplicitNuGetFallbackFolder=true',

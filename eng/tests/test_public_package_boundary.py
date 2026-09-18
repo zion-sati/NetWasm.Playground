@@ -84,8 +84,8 @@ class PublicPackageBoundaryTests(unittest.TestCase):
 
         release_builder = (ROOT / 'eng/build-release-compiler.py').read_text()
         self.assertIn("'-p:WasmBuildNative=true'", release_builder)
-        self.assertIn("'-p:RunAOTCompilation=true'", release_builder)
-        self.assertIn("'-p:PublishTrimmed=true'", release_builder)
+        self.assertIn("'-p:RunAOTCompilation=false'", release_builder)
+        self.assertIn("'-p:PublishTrimmed=false'", release_builder)
         self.assertIn("'-p:ILLinkTreatWarningsAsErrors=false'", release_builder)
 
     def test_asset_stager_has_no_source_checkout_option(self):
