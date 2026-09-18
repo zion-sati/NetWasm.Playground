@@ -116,7 +116,7 @@ serveWorker(async (data, emit) => {
       : program.PrepareRecipe(data.source, ...recipeCompilerInputs, ...additional));
     if (!prepared.frontendCache) result = prepared;
     else {
-      report({ stage: 'cache-read' });
+      report({ stage: 'cache-read', state: 'running' });
       const cacheReadStarted = performance.now();
       const loaded = await frontendCache.load(prepared.frontendCache);
       for (const entry of loaded.entries)
@@ -127,10 +127,11 @@ serveWorker(async (data, emit) => {
       // Release the JavaScript copies before entering the synchronous compiler.
       loaded.entries.length = 0;
       const cacheReadMilliseconds = performance.now() - cacheReadStarted;
+      report({ stage: 'cache-read', state: 'complete', milliseconds: cacheReadMilliseconds });
       result = JSON.parse(program.CompilePreparedRecipe(prepared.frontendCache.handle));
       let cacheWriteMilliseconds = 0;
       if (result.frontendPublication) {
-        report({ stage: 'cache-write' });
+        report({ stage: 'cache-write', state: 'running' });
         const cacheWriteStarted = performance.now();
         const publication = result.frontendPublication;
         try {
@@ -152,6 +153,7 @@ serveWorker(async (data, emit) => {
           try { program.AbandonFrontendArtifactPublication(publication.token); } catch {}
         }
         cacheWriteMilliseconds = performance.now() - cacheWriteStarted;
+        report({ stage: 'cache-write', state: 'complete', milliseconds: cacheWriteMilliseconds });
       }
       result.frontendCacheMetrics = {
         ...result.frontendCacheMetrics,

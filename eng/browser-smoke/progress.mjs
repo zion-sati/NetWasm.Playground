@@ -30,8 +30,20 @@ try {
   await page.screenshot({ path: `${output}/busy.png`, fullPage: true });
   await idle();
   if (await page.locator('#output').textContent() !== '42\n') throw Error('Run failed');
+  const readCacheStages = () => page.locator('#stages li').evaluateAll(items => Object.fromEntries(items
+    .filter(item => ['cache-read', 'cache-write'].includes(item.dataset.stage))
+    .map(item => [item.dataset.stage, item.dataset.state])));
+  const cacheStages = await readCacheStages();
+  if (cacheStages['cache-read'] !== 'complete' || cacheStages['cache-write'] !== 'complete')
+    throw Error(`Cache stages did not complete: ${JSON.stringify(cacheStages)}`);
   const statuses = await page.evaluate(() => window.progressStatuses);
   if (!statuses.some(text => text.startsWith('Step 3 of 8')) || !statuses.some(text => text.startsWith('Step 6 of 8')) || !statuses.some(text => text.startsWith('Step 8 of 8'))) throw Error(JSON.stringify(statuses));
+  await page.locator('#compile').click();
+  await busy();
+  await idle();
+  const warmCacheStages = await readCacheStages();
+  if (warmCacheStages['cache-read'] !== 'complete')
+    throw Error(`Warm cache read did not complete: ${JSON.stringify(warmCacheStages)}`);
   await page.evaluate(() => { window.progressStatuses = []; });
   await page.locator('#run').click();
   await busy();
@@ -44,6 +56,6 @@ try {
   await page.locator('#stop').click();
   await idle();
   if (await page.locator('#status').textContent() !== 'Stopped' || errors.length) throw Error(JSON.stringify(errors));
-  writeFileSync(`${output}/results.json`, JSON.stringify({ passed: true, statuses, rerun, stopped: true, errors }, null, 2));
+  writeFileSync(`${output}/results.json`, JSON.stringify({ passed: true, statuses, rerun, cacheStages, warmCacheStages, stopped: true, errors }, null, 2));
   console.log('PASS: numbered progress, disabled actions, cached run and Stop recovery');
 } finally { await browser.close(); }

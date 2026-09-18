@@ -158,7 +158,12 @@ export class PlaygroundPipeline {
     let channel = this.channels.get(name);
     if (!channel) {
       channel = new WorkerChannel(new URL(`workers/${name}-worker.mjs`, this.root!), data => {
-        if (data.stage && !['wasm-tools', 'wasm-merge', 'wasm-opt'].includes(data.stage)) { this.currentStage = data.stage; this.emit({ type: 'stage', stage: data.stage, state: 'running' }); }
+        if (data.stage && !['wasm-tools', 'wasm-merge', 'wasm-opt'].includes(data.stage)) {
+          const state = data.state === 'complete' ? 'complete' : 'running';
+          if (state === 'running') this.currentStage = data.stage;
+          this.emit({ type: 'stage', stage: data.stage, state,
+            ...(state === 'complete' && Number.isFinite(data.milliseconds) ? { milliseconds: data.milliseconds } : {}) });
+        }
         if (data.console) {
           if (this.runOutput && (data.console === 'stdout' || data.console === 'stderr')) this.runOutput[data.console as 'stdout' | 'stderr'] += data.text ?? '';
           this.emit({ type: 'console', stream: data.console, text: data.text ?? '' });

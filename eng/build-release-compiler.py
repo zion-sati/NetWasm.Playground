@@ -92,6 +92,7 @@ def main():
         # miscompilations in the compiler host; trimming would also remove IL that
         # the interpreter needs.
         common = [f'-p:RuntimeFrameworkVersion={runtime}', f'-p:NetWasmCompilerPackageVersion={version}',
+                  '-p:DefineConstants=FRONTEND_CACHE_TRANSPORT',
                   '-p:WasmBuildNative=true', '-p:RunAOTCompilation=false', '-p:PublishTrimmed=false',
                   '-p:ILLinkTreatWarningsAsErrors=false']
         subprocess.run(['dotnet', 'restore', *common, '--configfile', str(nuget),

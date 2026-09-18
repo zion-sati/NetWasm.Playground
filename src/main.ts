@@ -48,13 +48,14 @@ const comparisons = new Map<OptimizationMode, { bytes: number; milliseconds: num
 const stages = new Map<string, HTMLLIElement>();
 const progressSteps: Record<string, number> = {
   download: 1, 'compiler-initialize': 2,
-  compile: 3, roslyn: 3, generator: 3, netwasm: 3,
+  compile: 3, roslyn: 3, generator: 3, netwasm: 3, 'cache-read': 3, 'cache-write': 3,
   'linker-initialize': 4, 'tools-initialize': 4, link: 4, parse: 4,
   merge: 5, prune: 5, optimize: 6, validate: 7, componentization: 7, run: 8,
 };
 const stageLabels: Record<string, string> = {
   download: 'Loading toolchain manifest', 'compiler-initialize': 'Loading C# compiler',
   compile: 'Compiling C#', roslyn: 'Checking C#', generator: 'Generating source', netwasm: 'Compiling WebAssembly',
+  'cache-read': 'Reading compiler cache', 'cache-write': 'Saving compiler cache',
   'linker-initialize': 'Loading linker', 'tools-initialize': 'Loading WebAssembly tools',
   link: 'Linking runtime', parse: 'Preparing runtime modules', merge: 'Combining modules',
   prune: 'Removing unused exports', optimize: 'Optimizing WebAssembly',
@@ -84,7 +85,7 @@ function onEvent(event: PipelineEvent) {
   if (!active || stopped || event.requestId !== active.requestId || event.revision !== revision) return;
   if (event.type === 'console') el('output').textContent += event.text;
   if (event.type === 'assets') el('assets').textContent = `Tool assets: ${formatBytes(event.transferBytes)} transfer cost · ${formatBytes(event.rawBytes)} uncompressed`;
-  if (event.type === 'stage') { const activeOptimization = active.optimization ?? 'Oz'; const optimized = activeOptimization !== 'none'; const label = event.stage === 'optimize' ? `${stageLabels.optimize} (-${activeOptimization})` : stageLabels[event.stage] ?? event.stage; let item = stages.get(event.stage); if (!item) { item = document.createElement('li'); item.textContent = label; stages.set(event.stage, item); el('stages').append(item); } item.dataset.state = event.state; let step = runOnly ? 1 : progressSteps[event.stage]; if (!optimized && step && step >= 7) step--; if (step && event.state === 'running') el('status').textContent = `Step ${step} of ${progressTotal} · ${label}`; }
+  if (event.type === 'stage') { const activeOptimization = active.optimization ?? 'Oz'; const optimized = activeOptimization !== 'none'; const label = event.stage === 'optimize' ? `${stageLabels.optimize} (-${activeOptimization})` : stageLabels[event.stage] ?? event.stage; let item = stages.get(event.stage); if (!item) { item = document.createElement('li'); item.textContent = label; item.dataset.stage = event.stage; stages.set(event.stage, item); el('stages').append(item); } item.dataset.state = event.state; let step = runOnly ? 1 : progressSteps[event.stage]; if (!optimized && step && step >= 7) step--; if (step && event.state === 'running') el('status').textContent = `Step ${step} of ${progressTotal} · ${label}`; }
 }
 function showPreloadProgress(progress: ToolchainPreloadProgress) {
   const container = el('toolchain-progress');

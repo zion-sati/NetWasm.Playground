@@ -85,6 +85,7 @@ class PublicPackageBoundaryTests(unittest.TestCase):
         self.assertIn("FRONTEND_CACHE_TRANSPORT", define_constants.split(";"))
 
         release_builder = (ROOT / 'eng/build-release-compiler.py').read_text()
+        self.assertIn("'-p:DefineConstants=FRONTEND_CACHE_TRANSPORT'", release_builder)
         self.assertIn("'-p:WasmBuildNative=true'", release_builder)
         self.assertIn("'-p:RunAOTCompilation=false'", release_builder)
         self.assertIn("'-p:PublishTrimmed=false'", release_builder)
