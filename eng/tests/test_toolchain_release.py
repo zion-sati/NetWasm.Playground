@@ -66,6 +66,7 @@ class ToolchainReleaseVersionTests(unittest.TestCase):
 
         self.assertIn("tags: ['v*']", release)
         self.assertIn("python3 eng/build-release-compiler.py", release)
+        self.assertIn("dotnet workload install wasm-tools --version 10.0.302 --skip-manifest-update", release)
         self.assertIn("Build content-addressed browser toolchain manifest", release)
         self.assertIn("python3 eng/rebuild-public-toolchain.py", release)
         self.assertIn("uses: ./.github/workflows/pages.yml", release)
