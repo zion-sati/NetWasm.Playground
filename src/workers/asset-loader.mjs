@@ -2,7 +2,21 @@
 export const assetRoot = new URL('../', import.meta.url);
 export const digest = async bytes => [...new Uint8Array(await crypto.subtle.digest('SHA-256', bytes))]
   .map(byte => byte.toString(16).padStart(2, '0')).join('');
-export const errorText = error => String(error?.stack ?? error).slice(0, 4096);
+export function errorText(error) {
+  // Firefox and WebKit may put only source locations in Error.stack.
+  // Keep the message even when the thrown value came from another realm or was serialized.
+  const name = typeof error?.name === 'string' ? error.name : '';
+  const message = typeof error?.message === 'string' ? error.message : '';
+  const heading = name && message ? `${name}: ${message}` : message || name;
+  const stack = typeof error?.stack === 'string' ? error.stack : '';
+  const details = heading && stack && stack !== heading && !stack.startsWith(`${heading}\n`)
+    ? `${heading}\n${stack}` : stack || heading || String(error);
+  const cause = error?.cause;
+  const causeHeading = cause === undefined ? '' : typeof cause?.message === 'string'
+    ? [cause?.name, cause.message].filter(Boolean).join(': ') : String(cause);
+  const causeDetails = causeHeading && !details.includes(causeHeading) ? `\nCaused by: ${causeHeading}` : '';
+  return `${details || 'Unknown worker error'}${causeDetails}`.slice(0, 4096);
+}
 function pathName(name) {
   if (typeof name !== 'string' || !/^[A-Za-z0-9_.@/-]+$/.test(name) || name.startsWith('/') ||
       name.split('/').some(part => !part || part === '.' || part === '..')) throw Error('Invalid tool asset path');

@@ -6,7 +6,8 @@ const loader = createAssetLoader(assets => report({ assets }));
 const recipes = new Map();
 async function recipeInputs(id) {
   if (!recipes.has(id)) recipes.set(id, (async () => {
-    if (id === 'hello' && !(await loader.manifest())['recipes/hello.json']) return { images: ['{}', '{}'] };
+    if ((id === 'hello' || id === 'datetime') && !(await loader.manifest())[`recipes/${id}.json`])
+      return { images: ['{}', '{}'] };
     if (!(await loader.manifest())[`recipes/${id}.json`]) throw Error('Recipe assets unavailable. Prepare the verified example bundle.');
     const recipe = JSON.parse(new TextDecoder().decode(await loader.load(`recipes/${id}.json`)));
     if (recipe.schemaVersion !== 1 || recipe.id !== id) throw Error('Invalid compilation recipe');
@@ -82,7 +83,7 @@ async function initialize() {
 serveWorker(async (data, emit) => {
   report = emit;
   if (data.operation !== 'compile' && data.operation !== 'prune' && data.operation !== 'initialize') throw Error('Unsupported compiler operation');
-  if (data.operation === 'compile' && (!['hello', 'allocation', 'linq', 'json-dom', 'json-generated', 'tunit', 'regex', 'di', 'hashing'].includes(data.recipe) || typeof data.source !== 'string' || data.source.length > 65536 || new TextEncoder().encode(data.source).length > 65536)) throw Error('Invalid compiler source or recipe');
+  if (data.operation === 'compile' && (!['hello', 'datetime', 'http', 'allocation', 'linq', 'json-dom', 'json-generated', 'tunit', 'regex', 'di', 'hashing'].includes(data.recipe) || typeof data.source !== 'string' || data.source.length > 65536 || new TextEncoder().encode(data.source).length > 65536)) throw Error('Invalid compiler source or recipe');
   const module = data.operation === 'prune' ? (() => {
     if (!(data.module instanceof Uint8Array) || data.module.length > 4 * 1048576 || typeof data.prefix !== 'string' || data.prefix.length > 255) throw Error('Invalid export pruning request');
     return data.module.slice();
@@ -103,17 +104,22 @@ serveWorker(async (data, emit) => {
   const recipeCompilerInputs = inputs.slice();
   if (supportJson !== undefined) recipeCompilerInputs[1] = supportJson;
   if (typeof program.CompileRecipe !== 'function' && data.recipe !== 'hello') throw Error('Rebuild the compiler host for library recipes');
+  if (data.recipe === 'http' && typeof program.CompileHttpRecipe !== 'function')
+    throw Error('Rebuild the compiler host for the HTTP recipe');
   if (['json-generated', 'tunit', 'di'].includes(data.recipe) && typeof program.CompileGeneratedRecipe !== 'function') throw Error('Rebuild the compiler host for source generation');
   const generated = ['json-generated', 'tunit', 'di'].includes(data.recipe);
   const trustedRecipe = data.recipe === 'tunit' ? 'tunit' : data.recipe === 'di' ? 'di' : 'json';
   const supportsFrontendCache = data.frontendCache !== false && frontendCache && typeof program.PrepareRecipe === 'function' &&
     typeof program.PrepareGeneratedRecipe === 'function' && typeof program.ImportFrontendArtifact === 'function' &&
-    typeof program.CompilePreparedRecipe === 'function';
+    typeof program.CompilePreparedRecipe === 'function' &&
+    (data.recipe !== 'http' || typeof program.PrepareHttpRecipe === 'function');
   let result;
   if (supportsFrontendCache) {
     const prepared = JSON.parse(generated
       ? program.PrepareGeneratedRecipe(data.source, ...recipeCompilerInputs, ...additional, trustedRecipe)
-      : program.PrepareRecipe(data.source, ...recipeCompilerInputs, ...additional));
+      : data.recipe === 'http'
+        ? program.PrepareHttpRecipe(data.source, ...recipeCompilerInputs, ...additional)
+        : program.PrepareRecipe(data.source, ...recipeCompilerInputs, ...additional));
     if (!prepared.frontendCache) result = prepared;
     else {
       report({ stage: 'cache-read', state: 'running' });
@@ -165,7 +171,9 @@ serveWorker(async (data, emit) => {
     }
   } else result = JSON.parse(generated
     ? program.CompileGeneratedRecipe(data.source, ...recipeCompilerInputs, ...additional, trustedRecipe, false)
-    : typeof program.CompileRecipe === 'function' ? program.CompileRecipe(data.source, ...recipeCompilerInputs, ...additional) : program.Compile(data.source, ...recipeCompilerInputs));
+    : data.recipe === 'http' ? program.CompileHttpRecipe(data.source, ...recipeCompilerInputs, ...additional)
+      : typeof program.CompileRecipe === 'function' ? program.CompileRecipe(data.source, ...recipeCompilerInputs, ...additional)
+        : program.Compile(data.source, ...recipeCompilerInputs));
   if (typeof result.application === 'string') result.application = fromBase64(result.application);
   if (typeof result.pe === 'string') result.pe = fromBase64(result.pe);
   result.hostLinearMemoryBytes = runtime.Module?.HEAPU8?.buffer?.byteLength ?? null;

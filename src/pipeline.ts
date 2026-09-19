@@ -230,7 +230,7 @@ export class PlaygroundPipeline {
     const epoch = this.epoch; this.context = snapshot; const timings: StageTiming[] = [];
     const result = { requestId: snapshot.requestId, revision: snapshot.revision, optimization, diagnostics: [], timings };
     try {
-      if (!['hello', 'allocation', 'linq', 'json-dom', 'json-generated', 'tunit', 'regex', 'di', 'hashing'].includes(snapshot.recipeId)) throw new Error('Unknown compilation recipe');
+      if (!['hello', 'datetime', 'http', 'allocation', 'linq', 'json-dom', 'json-generated', 'tunit', 'regex', 'di', 'hashing'].includes(snapshot.recipeId)) throw new Error('Unknown compilation recipe');
       if (!optimizationModes.includes(optimization)) throw new Error('Unknown optimization mode');
       if (snapshot.source.length > 65536 || new TextEncoder().encode(snapshot.source).byteLength > 65536) throw new Error('Source limit exceeded (64 KiB)');
       await this.stage('download', timings, () => this.initialize());
@@ -259,8 +259,10 @@ export class PlaygroundPipeline {
         this.tool('wasm-opt', optimizationArguments(args(plan.Optimization), optimization),
           { [basename(plan.ExportPruning.OutputPath)]: pruned.module }, ['linked.wasm'])))['linked.wasm'];
       await this.stage('validate', timings, () => this.tool('wasm-tools', ['validate', 'linked.wasm'], { 'linked.wasm': linked }, []));
-      const witName = snapshot.recipeId === 'tunit' ? 'async-command.wit.wasm' : 'command.wit.wasm';
-      const witWorld = snapshot.recipeId === 'tunit' ? 'netwasm:component/async-command@1.0.0' : 'wasi:cli/command@0.2.11';
+      const asynchronous = snapshot.recipeId === 'tunit' || snapshot.recipeId === 'http';
+      const witName = asynchronous ? 'async-command.wit.wasm' : 'command.wit.wasm';
+      const witWorld = snapshot.recipeId === 'http' ? 'netwasm:component/async-http-command@1.0.0'
+        : asynchronous ? 'netwasm:component/async-command@1.0.0' : 'wasi:cli/command@0.2.11';
       const wit = await this.loadAsset(witName);
       const component = await this.stage('componentization', timings, async () => {
         const embedded = await this.tool('wasm-tools', ['component', 'embed', witName, 'linked.wasm', '--encoding', 'utf8', '--output', 'embedded.wasm', '--world', witWorld], { [witName]: wit, 'linked.wasm': linked }, ['embedded.wasm']);
@@ -293,7 +295,10 @@ export class PlaygroundPipeline {
       const result = await this.stage('run', timings, async () => {
         const bundleName: BundleRole = 'guest';
         await this.preloadBundle(bundleName, this.manifest!.bundles[bundleName]);
-        return this.channel('guest').request({ operation: 'run', component, recipe: snapshot.recipeId }, [component.buffer], 60_000, 5_000);
+        const sampleHttpUrl = snapshot.recipeId === 'http'
+          ? new URL(`${import.meta.env.BASE_URL}example-http.json`, location.origin).href : undefined;
+        return this.channel('guest').request({ operation: 'run', component, recipe: snapshot.recipeId,
+          sampleHttpUrl }, [component.buffer], 60_000, 5_000);
       });
       for (const timing of result.timings ?? []) this.emit({ type: 'stage', stage: timing.stage, state: 'complete', milliseconds: timing.milliseconds });
       return { ...base, ...result, timings: [...timings, ...(result.timings ?? [])] };

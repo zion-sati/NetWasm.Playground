@@ -7,6 +7,7 @@ import { pathToFileURL } from 'node:url';
 
 const stage = resolve(process.argv[2] ?? '');
 if (!process.argv[2]) throw Error('Usage: bundle-toolchain-modules.mjs <staging-directory>');
+const providersOnly = process.argv[3] === '--providers-only';
 
 const temporary = await mkdtemp(join(tmpdir(), 'netwasm-toolchain-modules-'));
 const specifications = [
@@ -40,6 +41,19 @@ const specifications = [
       export { jco, cliModule, io, clockModule };
     `,
   },
+  {
+    name: 'guest-providers',
+    destination: 'jco/guest-providers.mjs',
+    source: `
+      import * as cliModule from ${JSON.stringify(pathToFileURL(join(stage, 'jco/preview2/cli.js')).href)};
+      import * as io from ${JSON.stringify(pathToFileURL(join(stage, 'jco/preview2/io.js')).href)};
+      import * as clockModule from ${JSON.stringify(pathToFileURL(join(stage, 'jco/preview2/clocks.js')).href)};
+      import * as filesystemModule from ${JSON.stringify(pathToFileURL(join(stage, 'jco/preview2/filesystem.js')).href)};
+      import * as httpModule from ${JSON.stringify(pathToFileURL(join(stage, 'jco/preview2/http.js')).href)};
+      import * as randomModule from ${JSON.stringify(pathToFileURL(join(stage, 'jco/preview2/random.js')).href)};
+      export { cliModule, io, clockModule, filesystemModule, httpModule, randomModule };
+    `,
+  },
 ];
 
 const obsolete = [
@@ -61,7 +75,7 @@ const obsolete = [
 ];
 
 try {
-  for (const specification of specifications) {
+  for (const specification of providersOnly ? specifications.filter(item => item.name === 'guest-providers') : specifications) {
     const entry = join(temporary, `${specification.name}.mjs`);
     await writeFile(entry, specification.source);
     const bundle = await rolldown({ input: entry, external: id => id === 'node:fs/promises' });
@@ -75,12 +89,14 @@ try {
     const code = chunks[0].code.replace(/^\/\/#(?:end)?region.*\n/gm, '');
     await writeFile(destination, code);
   }
-  for (const relative of obsolete) await rm(join(stage, relative));
+  if (!providersOnly) for (const relative of obsolete) await rm(join(stage, relative));
 
   // Rolldown preserves these URLs relative to the generated guest module in jco/.
-  const guest = await readFile(join(stage, 'jco/guest-runtime.mjs'), 'utf8');
-  for (const name of ['js-component-bindgen-component.core.wasm', 'js-component-bindgen-component.core2.wasm']) {
-    if (!guest.includes(`./${name}`)) throw Error(`Guest runtime lost ${name} URL`);
+  if (!providersOnly) {
+    const guest = await readFile(join(stage, 'jco/guest-runtime.mjs'), 'utf8');
+    for (const name of ['js-component-bindgen-component.core.wasm', 'js-component-bindgen-component.core2.wasm']) {
+      if (!guest.includes(`./${name}`)) throw Error(`Guest runtime lost ${name} URL`);
+    }
   }
 } finally {
   await rm(temporary, { recursive: true, force: true });

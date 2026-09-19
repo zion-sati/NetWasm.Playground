@@ -14,6 +14,42 @@ Console.WriteLine(42);
 `,
   },
   {
+    id: 'datetime',
+    name: 'Date and time',
+    source: `using System;
+
+// The Playground supplies no timezone data and sets TZ=UTC.
+// DateTime.Now therefore uses UTC in this Playground session.
+Console.WriteLine("Playground timezone: UTC (no timezone data supplied)");
+Console.WriteLine($"DateTime.Now (UTC): {DateTime.Now:O}");
+Console.WriteLine($"UtcNow: {DateTime.UtcNow:O}");
+`,
+  },
+  {
+    id: 'http',
+    name: 'HTTP request',
+    source: `using System;
+using System.Net.Http;
+using System.Threading.Tasks;
+
+// This sample URL points to a small file on the Playground's own origin.
+// Other URLs require their server to allow browser requests through CORS.
+public static class Program
+{
+    public static async Task<int> Main()
+    {
+        string address = Environment.GetEnvironmentVariable("PLAYGROUND_HTTP_SAMPLE_URL")
+            ?? throw new InvalidOperationException("HTTP sample URL is unavailable");
+        using var client = new HttpClient();
+        using var response = await client.GetAsync(new Uri(address));
+        Console.WriteLine($"HTTP {(int)response.StatusCode}");
+        Console.WriteLine(await response.Content.ReadAsStringAsync());
+        return 0;
+    }
+}
+`,
+  },
+  {
     id: 'allocation',
     name: 'Allocation and GC',
     source: `using System;

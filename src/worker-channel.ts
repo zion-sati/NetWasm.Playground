@@ -23,7 +23,7 @@ export class WorkerChannel {
         clearTimeout(call.timer); this.pending.delete(data.id);
         data.error ? call.reject(new Error(String(data.error))) : call.resolve(data.result);
       };
-      this.worker.onerror = event => this.reset(new Error(event.message));
+      this.worker.onerror = event => this.reset(new Error(event.message || 'Worker failed without an error message'));
       this.worker.onmessageerror = () => this.reset(new Error('Invalid worker response'));
     }
     const id = ++this.sequence;

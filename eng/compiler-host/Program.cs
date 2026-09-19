@@ -205,6 +205,12 @@ public static partial class Program
             runtimeSystemLibrariesJson, additionalReferencesJson, additionalImplementationsJson, null, false);
 
     [JSExport]
+    public static string CompileHttpRecipe(string source, string reference, string supportJson, string implementation, string witJson, string witBytes, string runtimeManifest,
+        string runtimeSystemLibrariesJson, string additionalReferencesJson, string additionalImplementationsJson)
+        => CompileCore(source, reference, supportJson, implementation, witJson, witBytes, runtimeManifest,
+            runtimeSystemLibrariesJson, additionalReferencesJson, additionalImplementationsJson, null, false, useAsyncPlatform: true);
+
+    [JSExport]
     public static string CompileGeneratedRecipe(string source, string reference, string supportJson, string implementation, string witJson, string witBytes, string runtimeManifest,
         string runtimeSystemLibrariesJson, string additionalReferencesJson, string additionalImplementationsJson, string trustedRecipe, bool includeGeneratedSourceText)
         => CompileCore(source, reference, supportJson, implementation, witJson, witBytes, runtimeManifest,
@@ -215,17 +221,25 @@ public static partial class Program
     public static string PrepareRecipe(string source, string reference, string supportJson, string implementation, string witJson, string witBytes, string runtimeManifest,
         string runtimeSystemLibrariesJson, string additionalReferencesJson, string additionalImplementationsJson)
         => CompileCore(source, reference, supportJson, implementation, witJson, witBytes, runtimeManifest,
-            runtimeSystemLibrariesJson, additionalReferencesJson, additionalImplementationsJson, null, false, true);
+            runtimeSystemLibrariesJson, additionalReferencesJson, additionalImplementationsJson, null, false, prepareFrontendCache: true);
+
+    [JSExport]
+    public static string PrepareHttpRecipe(string source, string reference, string supportJson, string implementation, string witJson, string witBytes, string runtimeManifest,
+        string runtimeSystemLibrariesJson, string additionalReferencesJson, string additionalImplementationsJson)
+        => CompileCore(source, reference, supportJson, implementation, witJson, witBytes, runtimeManifest,
+            runtimeSystemLibrariesJson, additionalReferencesJson, additionalImplementationsJson, null, false,
+            useAsyncPlatform: true, prepareFrontendCache: true);
 
     [JSExport]
     public static string PrepareGeneratedRecipe(string source, string reference, string supportJson, string implementation, string witJson, string witBytes, string runtimeManifest,
         string runtimeSystemLibrariesJson, string additionalReferencesJson, string additionalImplementationsJson, string trustedRecipe)
         => CompileCore(source, reference, supportJson, implementation, witJson, witBytes, runtimeManifest,
-            runtimeSystemLibrariesJson, additionalReferencesJson, additionalImplementationsJson, trustedRecipe, false, true);
+            runtimeSystemLibrariesJson, additionalReferencesJson, additionalImplementationsJson, trustedRecipe, false, prepareFrontendCache: true);
 #endif
 
     private static string CompileCore(string source, string reference, string supportJson, string implementation, string witJson, string witBytes, string runtimeManifest,
-        string runtimeSystemLibrariesJson, string additionalReferencesJson, string additionalImplementationsJson, string? trustedRecipe, bool includeGeneratedSourceText
+        string runtimeSystemLibrariesJson, string additionalReferencesJson, string additionalImplementationsJson, string? trustedRecipe, bool includeGeneratedSourceText,
+        bool useAsyncPlatform = false
 #if FRONTEND_CACHE_TRANSPORT
         , bool prepareFrontendCache = false
 #endif
@@ -307,7 +321,7 @@ public static partial class Program
             images["compiler.wit.wasm"] = Convert.FromBase64String(witBytes);
             var options = new CompilerOptions(
                 "NetWasmApp.dll", ["NetWasm.CoreLib.dll", .. additionalImplementations.Keys], "Program", "<Main>$", [],
-                WitPath: "compiler.wit.wasm", WitWorld: tunit ? "netwasm:platform@1.0.0/async-platform" : "netwasm:platform@1.0.0/platform",
+                WitPath: "compiler.wit.wasm", WitWorld: tunit || useAsyncPlatform ? "netwasm:platform@1.0.0/async-platform" : "netwasm:platform@1.0.0/platform",
                 EntryPointKind: CompilerEntryPointKind.ManagedExecutable);
             var request = new BrowserCompilationRequest(options, images,
                 new Dictionary<string,string> { ["compiler.wit.wasm"] = witJson }, selectManagedExecutableEntryPoint: true);

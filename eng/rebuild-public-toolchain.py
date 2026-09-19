@@ -8,6 +8,7 @@ import importlib.util
 import json
 from pathlib import Path, PurePosixPath
 import shutil
+import subprocess
 import tarfile
 import tempfile
 import urllib.request
@@ -86,6 +87,8 @@ def rebind_notice_origins(stage, pins):
         archive = download(url, package_size)
         if len(archive) != package_size:
             raise ValueError(f'NuGet package size changed: {package}/{version}')
+        if base64.b64encode(hashlib.sha512(archive).digest()).decode() != catalog['packageHash']:
+            raise ValueError(f'NuGet package hash changed: {package}/{version}')
         packages[package] = (version, url, archive, catalog['packageHash'])
     for target, entry in origins['files'].items():
         source = entry['source']
@@ -102,6 +105,40 @@ def rebind_notice_origins(stage, pins):
                       restoreContentHash=restore_hash)
     origins_path.write_bytes(encoded(origins))
     NOTICES.verify(stage / 'notices')
+    return packages
+
+
+def add_guest_providers(stage, toolchain_archive):
+    prefix = 'tools/jco/node_modules/@bytecodealliance/preview2-shim/dist/browser/'
+    browser = stage / 'jco/preview2'
+    browser.mkdir(parents=True)
+    with zipfile.ZipFile(io.BytesIO(toolchain_archive)) as package:
+        names = [name for name in package.namelist() if name.startswith(prefix) and
+                 name.endswith('.js') and '/' not in name[len(prefix):]]
+        required = {'cli.js', 'clocks.js', 'filesystem.js', 'http.js', 'io.js', 'random.js'}
+        if not required.issubset({name[len(prefix):] for name in names}):
+            raise ValueError('Public package lacks browser WASI providers')
+        for name in names:
+            (browser / name[len(prefix):]).write_bytes(package.read(name))
+    subprocess.run(['node', str(ROOT / 'eng/bundle-toolchain-modules.mjs'), str(stage),
+                    '--providers-only'], check=True)
+    shutil.rmtree(browser)
+
+
+def add_http_example(stage, library_version):
+    member = 'lib/NetWasm,Version=v0.1/System.Net.Http.dll'
+    assembly = package_members('netwasm.system.net.http', library_version, {
+        member: '7527ccf4d8a4c918b656c8c0d1af29a83159ee1bc02cb0b30e479a06127401e8',
+    })[member]
+    for role in ('references', 'implementations'):
+        destination = stage / role / 'System.Net.Http.dll'
+        destination.parent.mkdir(exist_ok=True)
+        destination.write_bytes(assembly)
+    recipe = {'schemaVersion': 1, 'id': 'http',
+              'references': {'System.Net.Http.dll': 'references/System.Net.Http.dll'},
+              'implementations': {'System.Net.Http.dll': 'implementations/System.Net.Http.dll'},
+              'packages': ['NetWasm.System.Net.Http'], 'version': library_version}
+    (stage / 'recipes/http.json').write_bytes(encoded(recipe))
 
 
 def main():
@@ -169,7 +206,9 @@ def main():
             runtime_members['runtime/wasm32/libnetwasm-runtime.a'])
         (stage / 'compiler/runtime-pack.json').write_bytes(
             runtime_members['runtime/runtime-pack.json'])
-        rebind_notice_origins(stage, pins)
+        packages = rebind_notice_origins(stage, pins)
+        add_guest_providers(stage, packages['netwasm.toolchain'][2])
+        add_http_example(stage, pins['libraries']['packageVersion'])
         framework = stage / 'compiler/_framework'
         shutil.copytree(args.compiler_framework, framework)
         workers = sorted(args.workers.glob('*.mjs'))

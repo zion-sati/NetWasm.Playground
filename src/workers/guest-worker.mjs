@@ -1,10 +1,6 @@
 import { checkGuestMemory } from './guest-memory.mjs';
+import { installGuestHttpBudget } from './guest-http-budget.mjs';
 import { createAssetLoader, serveWorker, digest, errorText } from './asset-loader.mjs';
-
-const allowedImports = ['wasi:cli/environment', 'wasi:cli/exit', 'wasi:cli/stderr',
-  'wasi:cli/stdout', 'wasi:io/error', 'wasi:io/streams', 'wasi:clocks/monotonic-clock'];
-const processImports = [...allowedImports,
-  'wasi:io/poll', 'netwasm:runtime/reactor-host'];
 
 serveWorker(async (data, report) => {
   // These captures survive both instantiation failures and execution traps.
@@ -20,6 +16,11 @@ serveWorker(async (data, report) => {
   let loaded = [];
   let generatedImports = [];
   let componentSha256;
+  let filesystem;
+  let restoreHttpBudget;
+  let httpBudgetFailure;
+  let previousFetch;
+  let fetchFailure;
   const moduleMemories = new WeakMap();
   let allocatedMemoryPages = 0;
   let coreInstances = 0;
@@ -37,10 +38,10 @@ serveWorker(async (data, report) => {
   }, flush() {} });
   try {
     if (data.operation !== 'run' || !(data.component instanceof Uint8Array)) throw Error('Invalid guest run request');
-    const managedProcess = data.recipe === 'tunit';
+    const managedProcess = data.recipe === 'tunit' || data.recipe === 'http';
     const args = data.args === undefined ? [] : data.args;
     if (!Array.isArray(args) || (args.length !== 0 &&
-        (!managedProcess || args.length !== 1 || args[0] !== '--list'))) throw Error('Unsupported guest arguments');
+        (data.recipe !== 'tunit' || args.length !== 1 || args[0] !== '--list'))) throw Error('Unsupported guest arguments');
     const argumentsSnapshot = args.slice();
     const component = data.component.slice();
     // The curated serialization example produces a measured 1.3 MiB component.
@@ -57,13 +58,13 @@ serveWorker(async (data, report) => {
     const failed = verified.find(result => result.status === 'rejected');
     if (failed) throw failed.reason;
     loader.installFetchAdapter();
-    const { jco, cliModule, io, clockModule, executeComponent } = await import(loader.url('jco/guest-runtime.mjs'));
+    const { jco, executeComponent } = await import(loader.url('jco/guest-runtime.mjs'));
+    const { cliModule, io, clockModule, filesystemModule, httpModule, randomModule } =
+      await import(loader.url('jco/guest-providers.mjs'));
+    restoreHttpBudget = installGuestHttpBudget(httpModule, message => { httpBudgetFailure = message; });
     const generated = await jco.generate(component, { name: 'guest', instantiation: { tag: 'async' },
       noTypescript: true, noNodejsCompat: true, base64Cutoff: 0, bindgenEnableWasmExnref: true });
     generatedImports = generated.imports;
-    const permittedImports = managedProcess ? processImports : allowedImports;
-    if (generatedImports.some(name => !permittedImports.includes(name)))
-      throw Error(`Unsupported guest import: ${generatedImports.filter(name => !permittedImports.includes(name)).join(', ')}`);
     if (generated.files.reduce((total, [, bytes]) => total + bytes.byteLength, 0) > 8388608)
       throw Error('Generated graph limit exceeded');
     const javascript = generated.files.filter(([name]) => name.endsWith('.js'));
@@ -72,17 +73,51 @@ serveWorker(async (data, report) => {
     graph = await Promise.all(generated.files.map(async ([name, bytes]) => ({ name, bytes: bytes.byteLength, sha256: await digest(bytes) })));
     complete();
     begin('instantiate');
-    const cli = cliModule.createCli({ arguments: argumentsSnapshot, environment: {}, initialCwd: '/',
+    const environment = { TZ: 'UTC' };
+    if (data.recipe === 'http') {
+      const address = new URL(data.sampleHttpUrl);
+      if (address.origin !== self.location.origin || !address.pathname.endsWith('/example-http.json') ||
+          address.search || address.hash) throw Error('Invalid HTTP example URL');
+      environment.PLAYGROUND_HTTP_SAMPLE_URL = address.href;
+    }
+    const cli = cliModule.createCli({ arguments: argumentsSnapshot, environment, initialCwd: '/',
       stdout: capture('stdout'), stderr: capture('stderr') });
+    if (data.recipe === 'http') {
+      previousFetch = self.fetch;
+      const noteFetchFailure = error => {
+        fetchFailure = (error?.message || String(error)).replace(/[.!?]+$/, '').slice(0, 256);
+        throw error;
+      };
+      self.fetch = (...arguments_) => {
+        try { return Promise.resolve(previousFetch.apply(self, arguments_)).catch(noteFetchFailure); }
+        catch (error) { return noteFetchFailure(error); }
+      };
+    }
+    filesystem = filesystemModule.createFilesystem({
+      adapter: new filesystemModule.InMemoryFilesystemAdapter(), preopens: {} });
     // Each WASI getter returns an owned stream. Dropping one write's handle
     // must not close the stream returned by a later Console.WriteLine.
     const imports = { 'wasi:cli/environment': cli.environment, 'wasi:cli/exit': cli.exit,
+      'wasi:cli/stdin': cli.stdin,
       'wasi:cli/stderr': { getStderr: () => io.outputStreamCreate(capture('stderr')) },
       'wasi:cli/stdout': { getStdout: () => io.outputStreamCreate(capture('stdout')) },
-      'wasi:io/error': io.error, 'wasi:io/streams': io.streams,
-      // Ordinary programs can read elapsed time; subscriptions belong to the managed host.
-      'wasi:clocks/monotonic-clock': Object.freeze({
-        now: clockModule.monotonicClock.now, resolution: clockModule.monotonicClock.resolution }) };
+      'wasi:cli/terminal-stderr': cli.terminalStderr,
+      'wasi:cli/terminal-stdin': cli.terminalStdin,
+      'wasi:cli/terminal-stdout': cli.terminalStdout,
+      'wasi:io/error': io.error, 'wasi:io/streams': io.streams, 'wasi:io/poll': io.poll,
+      'wasi:clocks/monotonic-clock': clockModule.monotonicClock,
+      'wasi:clocks/wall-clock': clockModule.wallClock,
+      'wasi:filesystem/preopens': filesystem.preopens,
+      'wasi:filesystem/types': filesystem.types,
+      'wasi:http/outgoing-handler': httpModule.outgoingHandler,
+      'wasi:http/types': httpModule.types,
+      'wasi:random/insecure-seed': randomModule.insecureSeed,
+      'wasi:random/insecure': randomModule.insecure,
+      'wasi:random/random': randomModule.random };
+    const permittedImports = managedProcess ? [...Object.keys(imports), 'netwasm:runtime/reactor-host']
+      : Object.keys(imports);
+    const unsupported = generatedImports.filter(name => !permittedImports.includes(name));
+    if (unsupported.length) throw Error(`Unsupported guest import: ${unsupported.join(', ')}`);
     url = URL.createObjectURL(new Blob([files['guest.js']], { type: 'text/javascript' }));
     const main = await import(url);
     const loadCoreModule = async name => {
@@ -124,8 +159,13 @@ serveWorker(async (data, report) => {
         imports: { ...imports, 'wasi:io/poll': io.poll,
           'wasi:clocks/monotonic-clock': clockModule.monotonicClock } });
       complete(); finishOutput();
+      const failureContext = httpBudgetFailure ?? (fetchFailure && outcome.completionKind === 'managedFailure'
+        ? `A browser Fetch request also failed: ${fetchFailure}. Check the URL, network access and CORS policy.`
+        : undefined);
+      const failure = outcome.primaryFailure?.message;
       return { success: outcome.completionKind === 'normal', exitCode: outcome.exitCode,
-        error: outcome.primaryFailure?.message, stage: outcome.primaryFailure?.phase,
+        error: failureContext ? `${failure ?? 'The managed process failed.'} ${failureContext}` : failure,
+        stage: outcome.primaryFailure?.phase,
         executionResult: outcome, ...output, consoleBytes,
         providedArguments: cli.environment.getArguments(), componentSha256,
         graph, loaded, memoryMaximumBytes: allocatedMemoryPages * 65536, coreInstances, imports: generatedImports, timings };
@@ -139,7 +179,7 @@ serveWorker(async (data, report) => {
     running = true;
     report({ guestEntered: true });
     let exitCode = 0;
-    try { command.run(); }
+    try { await command.run(); }
     catch (error) {
       if (error?.exitError) exitCode = error.code;
       else if (Object.hasOwn(error ?? {}, 'payload') && error.payload === undefined) exitCode = 1;
@@ -155,5 +195,6 @@ serveWorker(async (data, report) => {
     return { success: false, ...output, error: errorText(error), stage,
       code: running ? 'guest-trap' : 'guest-failure', consoleBytes, componentSha256,
       graph, loaded, memoryMaximumBytes: allocatedMemoryPages * 65536, coreInstances, imports: generatedImports, timings, recoverable: true };
-  } finally { if (url) URL.revokeObjectURL(url); }
+  } finally { restoreHttpBudget?.(); if (previousFetch) self.fetch = previousFetch;
+    filesystem?.dispose(); if (url) URL.revokeObjectURL(url); }
 });
