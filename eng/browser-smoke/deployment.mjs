@@ -137,7 +137,8 @@ try {
     throw Error(`Unexpected bundle requests: ${JSON.stringify(bundleRequests)}`);
   const directPayloads = toolchainRequests.filter(request => /\.(?:wasm|dll|a|dat|json)$/.test(request) &&
     !request.endsWith('/index.json') && !request.endsWith('/asset-manifest.json'));
-  if (directPayloads.length || toolchainRequests.length > 20)
+  // The separately bundled Preview 2 guest provider adds one verified module request.
+  if (directPayloads.length || toolchainRequests.length > 21)
     throw Error(`Toolchain request graph was not bundled: ${JSON.stringify({ count: toolchainRequests.length, directPayloads })}`);
   const bytes = readFileSync(componentPath);
   const result = { passed: true, browser: browser.version(), stdout, status,
