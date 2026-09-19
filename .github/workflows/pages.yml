@@ -69,6 +69,7 @@ jobs:
           done
           curl --fail --silent "$PLAYGROUND_URL" >/dev/null
           node eng/browser-smoke/deployment.mjs
+          node eng/browser-smoke/wasi-examples.mjs
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@7b1f4a764d45c48632c6b24a0339c27f5614fb0b # v4
         with:
@@ -141,7 +142,9 @@ jobs:
         env:
           PLAYGROUND_URL: ${{ needs.deploy.outputs.page_url }}
           PLAYGROUND_EVIDENCE: .cache/pages-live-smoke
-        run: node eng/browser-smoke/deployment.mjs
+        run: |
+          node eng/browser-smoke/deployment.mjs
+          node eng/browser-smoke/wasi-examples.mjs
       - name: Retain public deployment evidence
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4

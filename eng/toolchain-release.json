@@ -1,10 +1,10 @@
 {
   "schemaVersion": 1,
   "status": "ready",
-  "version": "0.2.9",
-  "tag": "v0.2.9",
+  "version": "0.2.10",
+  "tag": "v0.2.10",
   "asset": {
-    "name": "netwasm-playground-toolchain-v0.2.9.tar.gz",
-    "url": "https://github.com/zion-sati/NetWasm.Playground/releases/download/v0.2.9/netwasm-playground-toolchain-v0.2.9.tar.gz"
+    "name": "netwasm-playground-toolchain-v0.2.10.tar.gz",
+    "url": "https://github.com/zion-sati/NetWasm.Playground/releases/download/v0.2.10/netwasm-playground-toolchain-v0.2.10.tar.gz"
   }
 }
