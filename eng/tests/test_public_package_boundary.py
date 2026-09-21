@@ -105,6 +105,15 @@ class PublicPackageBoundaryTests(unittest.TestCase):
         release = (ROOT / ".github/workflows/release.yml").read_text()
         self.assertNotIn("--candidate-feed", release)
 
+        ci = (ROOT / ".github/workflows/ci.yml").read_text()
+        self.assertIn("bash eng/qualify-released-toolchain.sh", ci)
+        self.assertNotIn("qualify-csharp15-candidate.sh", ci)
+        self.assertNotIn("candidate/netwasm", ci)
+        qualifier = (ROOT / "eng/qualify-released-toolchain.sh").read_text()
+        self.assertIn("eng/build-release-compiler.py", qualifier)
+        self.assertIn("eng/rebuild-public-toolchain.py", qualifier)
+        self.assertNotIn("--candidate-feed", qualifier)
+
         rebuilder_help = subprocess.check_output(
             ["python3", str(ROOT / "eng/rebuild-public-toolchain.py"), "--help"],
             text=True)
