@@ -4,8 +4,7 @@ let report = () => {}, initialized;
 let frontendCache, compilerToolchainId;
 const loader = createAssetLoader(assets => report({ assets }));
 const recipes = new Map();
-const coreRecipes = new Set(['hello', 'datetime', 'csharp15-collection-arguments', 'csharp15-extension-indexer',
-  'csharp15-labeled-jumps', 'csharp15-unions', 'csharp15-closed-hierarchies', 'csharp15-memory-safety']);
+const coreRecipes = new Set(['hello', 'datetime', 'csharp15-tour']);
 async function recipeInputs(id) {
   if (!recipes.has(id)) recipes.set(id, (async () => {
     if (coreRecipes.has(id) && !(await loader.manifest())[`recipes/${id}.json`])
@@ -85,7 +84,7 @@ async function initialize() {
 serveWorker(async (data, emit) => {
   report = emit;
   if (data.operation !== 'compile' && data.operation !== 'prune' && data.operation !== 'initialize') throw Error('Unsupported compiler operation');
-  if (data.operation === 'compile' && (![...coreRecipes, 'http', 'allocation', 'linq', 'json-dom', 'json-generated', 'tunit', 'regex', 'di', 'hashing'].includes(data.recipe) || typeof data.source !== 'string' || data.source.length > 65536 || new TextEncoder().encode(data.source).length > 65536 || !['15', 'preview'].includes(data.language) || typeof data.updatedMemorySafetyRules !== 'boolean' || (data.updatedMemorySafetyRules && data.language !== 'preview'))) throw Error('Invalid compiler source, recipe, or language settings');
+  if (data.operation === 'compile' && (![...coreRecipes, 'http', 'allocation', 'linq', 'async-linq', 'pipelines', 'web-encoding', 'xml', 'json-dom', 'json-generated', 'tunit', 'regex', 'di', 'hashing'].includes(data.recipe) || typeof data.source !== 'string' || data.source.length > 65536 || new TextEncoder().encode(data.source).length > 65536 || !['15', 'preview'].includes(data.language) || typeof data.updatedMemorySafetyRules !== 'boolean' || (data.updatedMemorySafetyRules && data.language !== 'preview'))) throw Error('Invalid compiler source, recipe, or language settings');
   const module = data.operation === 'prune' ? (() => {
     if (!(data.module instanceof Uint8Array) || data.module.length > 4 * 1048576 || typeof data.prefix !== 'string' || data.prefix.length > 255) throw Error('Invalid export pruning request');
     return data.module.slice();
@@ -106,23 +105,18 @@ serveWorker(async (data, emit) => {
   const recipeCompilerInputs = inputs.slice();
   if (supportJson !== undefined) recipeCompilerInputs[1] = supportJson;
   if (typeof program.CompileRecipe !== 'function' && data.recipe !== 'hello') throw Error('Rebuild the compiler host for library recipes');
-  if (data.recipe === 'http' && typeof program.CompileHttpRecipe !== 'function')
-    throw Error('Rebuild the compiler host for the HTTP recipe');
   if (['json-generated', 'tunit', 'di'].includes(data.recipe) && typeof program.CompileGeneratedRecipe !== 'function') throw Error('Rebuild the compiler host for source generation');
   const generated = ['json-generated', 'tunit', 'di'].includes(data.recipe);
   const trustedRecipe = data.recipe === 'tunit' ? 'tunit' : data.recipe === 'di' ? 'di' : 'json';
   const languageInputs = [data.language, data.updatedMemorySafetyRules];
   const supportsFrontendCache = data.frontendCache !== false && frontendCache && typeof program.PrepareRecipe === 'function' &&
     typeof program.PrepareGeneratedRecipe === 'function' && typeof program.ImportFrontendArtifact === 'function' &&
-    typeof program.CompilePreparedRecipe === 'function' &&
-    (data.recipe !== 'http' || typeof program.PrepareHttpRecipe === 'function');
+    typeof program.CompilePreparedRecipe === 'function';
   let result;
   if (supportsFrontendCache) {
     const prepared = JSON.parse(generated
       ? program.PrepareGeneratedRecipe(data.source, ...recipeCompilerInputs, ...additional, trustedRecipe, ...languageInputs)
-      : data.recipe === 'http'
-        ? program.PrepareHttpRecipe(data.source, ...recipeCompilerInputs, ...additional, ...languageInputs)
-        : program.PrepareRecipe(data.source, ...recipeCompilerInputs, ...additional, ...languageInputs));
+      : program.PrepareRecipe(data.source, ...recipeCompilerInputs, ...additional, ...languageInputs));
     if (!prepared.frontendCache) result = prepared;
     else {
       report({ stage: 'cache-read', state: 'running' });
@@ -174,8 +168,7 @@ serveWorker(async (data, emit) => {
     }
   } else result = JSON.parse(generated
     ? program.CompileGeneratedRecipe(data.source, ...recipeCompilerInputs, ...additional, trustedRecipe, false, ...languageInputs)
-    : data.recipe === 'http' ? program.CompileHttpRecipe(data.source, ...recipeCompilerInputs, ...additional, ...languageInputs)
-      : typeof program.CompileRecipe === 'function' ? program.CompileRecipe(data.source, ...recipeCompilerInputs, ...additional, ...languageInputs)
+    : typeof program.CompileRecipe === 'function' ? program.CompileRecipe(data.source, ...recipeCompilerInputs, ...additional, ...languageInputs)
         : program.Compile(data.source, ...recipeCompilerInputs, ...languageInputs));
   if (typeof result.application === 'string') result.application = fromBase64(result.application);
   if (typeof result.pe === 'string') result.pe = fromBase64(result.pe);

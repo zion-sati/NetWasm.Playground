@@ -27,7 +27,7 @@ class PublicPackageBoundaryTests(unittest.TestCase):
         self.assertIn('RELEASE.verify_staged(base_toolchain)', script)
         self.assertIn("Public package member changed", script)
         self.assertIn("identity = {'schemaVersion': 3, 'pins': pins", script)
-        self.assertIn('rebind_notice_origins(stage, pins)', script)
+        self.assertIn('rebind_notice_origins(stage, release_pins)', script)
         self.assertIn("registration5-semver1", script)
         self.assertIn("NOTICES.verify(stage / 'notices')", script)
         self.assertNotIn('playground.netwasm.com/toolchain/', json.dumps(base))
@@ -102,6 +102,23 @@ class PublicPackageBoundaryTests(unittest.TestCase):
         self.assertIn("--candidate-feed", help_text)
         self.assertIn("--candidate-version", help_text)
         release = (ROOT / ".github/workflows/release.yml").read_text()
+        self.assertNotIn("--candidate-feed", release)
+
+        rebuilder_help = subprocess.check_output(
+            ["python3", str(ROOT / "eng/rebuild-public-toolchain.py"), "--help"],
+            text=True)
+        self.assertIn("--candidate-feed", rebuilder_help)
+        self.assertIn("--candidate-version", rebuilder_help)
+        self.assertIn("--candidate-commit", rebuilder_help)
+        self.assertIn("--runtime-plan", rebuilder_help)
+
+        incomplete = subprocess.run([
+            "python3", str(ROOT / "eng/rebuild-public-toolchain.py"),
+            "--compiler-framework", ".", "--candidate-feed", ".",
+            "--candidate-version", "0.0.0-ci.1",
+        ], text=True, capture_output=True)
+        self.assertEqual(2, incomplete.returncode)
+        self.assertIn("must be supplied together", incomplete.stderr)
         self.assertNotIn("--candidate-feed", release)
 
     def test_asset_stager_has_no_source_checkout_option(self):

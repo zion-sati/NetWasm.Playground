@@ -38,7 +38,8 @@ serveWorker(async (data, report) => {
   }, flush() {} });
   try {
     if (data.operation !== 'run' || !(data.component instanceof Uint8Array)) throw Error('Invalid guest run request');
-    const managedProcess = data.recipe === 'tunit' || data.recipe === 'http';
+    if (!['command', 'async-command'].includes(data.componentContract)) throw Error('Invalid guest component contract');
+    const managedProcess = data.componentContract === 'async-command';
     const args = data.args === undefined ? [] : data.args;
     if (!Array.isArray(args) || (args.length !== 0 &&
         (data.recipe !== 'tunit' || args.length !== 1 || args[0] !== '--list'))) throw Error('Unsupported guest arguments');

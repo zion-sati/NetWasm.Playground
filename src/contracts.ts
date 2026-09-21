@@ -59,6 +59,7 @@ export interface CompilationResult {
   updatedMemorySafetyRules?: boolean;
   cancelled?: boolean;
   component?: Uint8Array;
+  componentContract?: 'command' | 'async-command';
   diagnostics: Diagnostic[];
   timings: StageTiming[];
   frontendCacheMetrics?: FrontendCacheMetrics;

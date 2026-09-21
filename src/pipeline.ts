@@ -232,9 +232,9 @@ export class PlaygroundPipeline {
       language: snapshot.language, updatedMemorySafetyRules: snapshot.updatedMemorySafetyRules,
       diagnostics: [], timings };
     try {
-      if (!['hello', 'csharp15-collection-arguments', 'csharp15-extension-indexer', 'csharp15-labeled-jumps',
-        'csharp15-unions', 'csharp15-closed-hierarchies', 'csharp15-memory-safety', 'datetime', 'http',
-        'allocation', 'linq', 'json-dom', 'json-generated', 'tunit', 'regex', 'di', 'hashing'].includes(snapshot.recipeId)) throw new Error('Unknown compilation recipe');
+      if (!['hello', 'csharp15-tour', 'datetime', 'http',
+        'allocation', 'linq', 'async-linq', 'pipelines', 'web-encoding', 'xml', 'json-dom',
+        'json-generated', 'tunit', 'regex', 'di', 'hashing'].includes(snapshot.recipeId)) throw new Error('Unknown compilation recipe');
       if (!optimizationModes.includes(optimization)) throw new Error('Unknown optimization mode');
       if (!['15', 'preview'].includes(snapshot.language) ||
           (snapshot.updatedMemorySafetyRules && snapshot.language !== 'preview'))
@@ -269,7 +269,9 @@ export class PlaygroundPipeline {
         this.tool('wasm-opt', optimizationArguments(args(plan.Optimization), optimization),
           { [basename(plan.ExportPruning.OutputPath)]: pruned.module }, ['linked.wasm'])))['linked.wasm'];
       await this.stage('validate', timings, () => this.tool('wasm-tools', ['validate', 'linked.wasm'], { 'linked.wasm': linked }, []));
-      const asynchronous = snapshot.recipeId === 'tunit' || snapshot.recipeId === 'http';
+      if (!['command', 'async-command'].includes(compilation.componentContract))
+        throw new Error('Compiler returned an invalid component contract');
+      const asynchronous = compilation.componentContract === 'async-command';
       const witName = asynchronous ? 'async-command.wit.wasm' : 'command.wit.wasm';
       const witWorld = snapshot.recipeId === 'http' ? 'netwasm:component/async-http-command@1.0.0'
         : asynchronous ? 'netwasm:component/async-command@1.0.0' : 'wasi:cli/command@0.2.11';
@@ -281,7 +283,7 @@ export class PlaygroundPipeline {
         return packaged['component.wasm'];
       });
       if (epoch !== this.epoch) throw new Error('Stopped');
-      return { ...result, success: true, component,
+      return { ...result, success: true, component, componentContract: compilation.componentContract,
         frontendCacheMetrics: compilation.frontendCacheMetrics, assets: { ...this.assets } };
     } catch (error) { return { ...result, success: false, cancelled: epoch !== this.epoch, stage: this.currentStage, error: String(error) }; }
     finally {
@@ -300,6 +302,8 @@ export class PlaygroundPipeline {
     const base = { requestId: snapshot.requestId, revision: snapshot.revision, timings, stdout: '', stderr: '' };
     try {
       if (!compilation.component) throw new Error('No compiled component');
+      const componentContract = compilation.componentContract ?? 'command';
+      if (!['command', 'async-command'].includes(componentContract)) throw new Error('Invalid compiled component contract');
       await this.initialize(); this.channels.get('guest')?.reset(); this.channels.delete('guest');
       const component = compilation.component.slice();
       const result = await this.stage('run', timings, async () => {
@@ -308,6 +312,7 @@ export class PlaygroundPipeline {
         const sampleHttpUrl = snapshot.recipeId === 'http'
           ? new URL(`${import.meta.env.BASE_URL}example-http.json`, location.origin).href : undefined;
         return this.channel('guest').request({ operation: 'run', component, recipe: snapshot.recipeId,
+          componentContract,
           sampleHttpUrl }, [component.buffer], 60_000, 5_000);
       });
       for (const timing of result.timings ?? []) this.emit({ type: 'stage', stage: timing.stage, state: 'complete', milliseconds: timing.milliseconds });

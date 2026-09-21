@@ -16,32 +16,61 @@ Console.WriteLine(42);
 `,
   },
   {
-    id: 'csharp15-collection-arguments',
-    name: 'C# 15 · Collection arguments',
+    id: 'csharp15-tour',
+    name: 'C# 15 · Feature tour',
+    language: 'preview',
+    updatedMemorySafetyRules: true,
     source: `using System;
 using System.Collections.Generic;
 
 List<int> values = [with(capacity: 8), 20, 22];
-Console.WriteLine($"{values[0]} + {values[1]} = {values[0] + values[1]}");
-`,
-  },
-  {
-    id: 'csharp15-extension-indexer',
-    name: 'C# 15 · Extension indexer',
-    source: `using System;
+Console.WriteLine($"Collection arguments: {values[0] + values[1]}");
 
-var buffer = new Buffer();
+var buffer = new FeatureBuffer();
 buffer[0] = 42;
-Console.WriteLine(buffer[0]);
+Console.WriteLine($"Extension indexer: {buffer[0]}");
 
-public sealed class Buffer
+var jumpResult = 40;
+outer:
+for (var x = 0; x < 3; x++)
+{
+    for (var y = 0; y < 3; y++)
+    {
+        if (x == 0 && y == 1) continue outer;
+        if (x == 2 && y == 1) break outer;
+        jumpResult++;
+    }
+}
+Console.WriteLine($"Labeled jumps: {jumpResult}");
+
+Pet pet = new Dog(42);
+Console.WriteLine($"Union: {pet switch
+{
+    Cat cat => cat.Value,
+    Dog dog => dog.Value,
+}}");
+
+State state = new Ready(42);
+Console.WriteLine($"Closed hierarchy: {state switch
+{
+    Ready ready => ready.Value,
+    Waiting => 0,
+}}");
+
+var value = 41;
+var pointer = unsafe(&value);
+Console.WriteLine($"Updated memory safety: {unsafe(Read(pointer)) + 1}");
+
+static unsafe int Read(int* value) => unsafe(*value);
+
+public sealed class FeatureBuffer
 {
     public int[] Values { get; } = new int[1];
 }
 
-public static class BufferExtensions
+public static class FeatureBufferExtensions
 {
-    extension(Buffer buffer)
+    extension(FeatureBuffer buffer)
     {
         public int this[int index]
         {
@@ -50,55 +79,10 @@ public static class BufferExtensions
         }
     }
 }
-`,
-  },
-  {
-    id: 'csharp15-labeled-jumps',
-    name: 'C# 15 · Labeled jumps',
-    source: `using System;
-
-var result = 40;
-outer:
-for (var x = 0; x < 3; x++)
-{
-    for (var y = 0; y < 3; y++)
-    {
-        if (x == 0 && y == 1) continue outer;
-        if (x == 2 && y == 1) break outer;
-        result++;
-    }
-}
-Console.WriteLine(result);
-`,
-  },
-  {
-    id: 'csharp15-unions',
-    name: 'C# 15 · Unions',
-    source: `using System;
-
-Pet pet = new Dog(42);
-Console.WriteLine(pet switch
-{
-    Cat cat => cat.Value,
-    Dog dog => dog.Value,
-});
 
 public sealed record Cat(int Value);
 public sealed record Dog(int Value);
 public union Pet(Cat, Dog);
-`,
-  },
-  {
-    id: 'csharp15-closed-hierarchies',
-    name: 'C# 15 · Closed hierarchy',
-    source: `using System;
-
-State state = new Ready(42);
-Console.WriteLine(state switch
-{
-    Ready ready => ready.Value,
-    Waiting => 0,
-});
 
 public closed class State;
 public sealed class Ready(int value) : State
@@ -106,20 +90,6 @@ public sealed class Ready(int value) : State
     public int Value { get; } = value;
 }
 public sealed class Waiting : State;
-`,
-  },
-  {
-    id: 'csharp15-memory-safety',
-    name: 'C# 15 preview · Memory safety',
-    language: 'preview',
-    updatedMemorySafetyRules: true,
-    source: `using System;
-
-var value = 41;
-var pointer = unsafe(&value);
-Console.WriteLine(unsafe(Read(pointer)) + 1);
-
-static int* Read(int* value) => value;
 `,
   },
   {
@@ -190,6 +160,85 @@ int evenSum = numbers
     .Sum();
 
 Console.WriteLine($"Even sum: {evenSum}");
+`,
+  },
+  {
+    id: 'async-linq',
+    name: 'Async LINQ',
+    source: `using System;
+using System.Linq;
+using System.Threading.Tasks;
+
+public static class Program
+{
+    public static async Task<int> Main()
+    {
+        var values = await global::System.Linq.AsyncEnumerable.Range(1, 6)
+            .Where(value => value % 2 == 0)
+            .Select(value => value * 10)
+            .ToArrayAsync();
+
+        Console.WriteLine($"Async values: {string.Join(", ", values)}");
+        return 0;
+    }
+}
+`,
+  },
+  {
+    id: 'pipelines',
+    name: 'Pipelines and memory',
+    source: `using System;
+using System.IO.Pipelines;
+using System.Threading.Tasks;
+
+public static class Program
+{
+    public static async Task<int> Main()
+    {
+        var pipe = new Pipe();
+        var memory = pipe.Writer.GetMemory(3);
+        memory.Span[0] = 13;
+        memory.Span[1] = 21;
+        memory.Span[2] = 34;
+        pipe.Writer.Advance(3);
+        await pipe.Writer.FlushAsync();
+
+        var read = await pipe.Reader.ReadAsync();
+        Console.WriteLine($"Buffered bytes: {read.Buffer.Length}");
+        Console.WriteLine($"First byte: {read.Buffer.FirstSpan[0]}");
+        pipe.Reader.AdvanceTo(read.Buffer.End);
+        pipe.Writer.Complete();
+        pipe.Reader.Complete();
+        return 0;
+    }
+}
+`,
+  },
+  {
+    id: 'web-encoding',
+    name: 'Web text encoding',
+    source: `using System;
+using System.Text.Encodings.Web;
+
+string input = "<NetWasm & C#>";
+Console.WriteLine(JavaScriptEncoder.Default.Encode(input));
+`,
+  },
+  {
+    id: 'xml',
+    name: 'XML',
+    source: `using System;
+using System.IO;
+using System.Xml;
+
+using var reader = XmlReader.Create(new StringReader("<runtime name=\\\"NetWasm\\\"><answer>42</answer></runtime>"));
+while (reader.Read())
+{
+    if (reader.NodeType == XmlNodeType.Element && reader.Name == "runtime")
+        Console.WriteLine($"Runtime: {reader.GetAttribute("name")}");
+    if (reader.NodeType == XmlNodeType.Element && reader.Name == "answer" && reader.Read())
+        Console.WriteLine($"Answer: {reader.Value}");
+}
 `,
   },
   {

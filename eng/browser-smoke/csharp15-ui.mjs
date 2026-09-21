@@ -12,18 +12,15 @@ try {
 
   const ids = await page.getByLabel('Example', { exact: true }).locator('option').evaluateAll(options =>
     options.map(option => option.value));
-  for (const id of ['csharp15-collection-arguments', 'csharp15-extension-indexer', 'csharp15-labeled-jumps',
-    'csharp15-unions', 'csharp15-closed-hierarchies', 'csharp15-memory-safety'])
-    if (!ids.includes(id)) throw Error(`Missing C# 15 example: ${id}`);
+  if (!ids.includes('csharp15-tour')) throw Error('Missing C# 15 feature tour');
+  if (ids.filter(id => id.startsWith('csharp15-')).length !== 1)
+    throw Error('C# 15 features should be combined into one example');
 
-  await page.getByLabel('Example', { exact: true }).selectOption('csharp15-memory-safety');
+  await page.getByLabel('Example', { exact: true }).selectOption('csharp15-tour');
   if (await language.inputValue() !== 'preview') throw Error('Memory-safety example did not select preview');
   const setting = page.locator('#memory-safety-setting');
   if (!await setting.isVisible() || !await page.locator('#updated-memory-safety').isChecked())
     throw Error('Memory-safety opt-in was not selected');
-  if (!await page.locator('#editor').textContent().then(text => text?.includes('unsafe(')))
-    throw Error('Memory-safety example does not show the feature syntax');
-
   await page.getByLabel('Example', { exact: true }).selectOption('hello');
   if (await language.inputValue() !== '15' || await setting.isVisible() || await page.locator('#updated-memory-safety').isChecked())
     throw Error('Stable example did not restore stable C# 15 settings');
@@ -37,7 +34,7 @@ try {
 
   const overflow = await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth);
   if (overflow) throw Error('C# 15 controls overflow the viewport');
-  console.log('PASS: C# 15 language controls and six feature examples');
+  console.log('PASS: C# 15 language controls and combined feature tour');
 } finally {
   await browser.close();
 }

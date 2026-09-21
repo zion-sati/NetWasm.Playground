@@ -23,6 +23,7 @@ using NetWasm.Compiler.ComponentModel.Browser;
 using Microsoft.CodeAnalysis.Diagnostics;
 using System.Collections.Immutable;
 using System.Security.Cryptography;
+using System.Threading;
 using TUnit.Core.SourceGenerator.Generators;
 using JsonSourceGenerator = jsonsourcegen::System.Text.Json.SourceGeneration.JsonSourceGenerator;
 
@@ -96,6 +97,7 @@ public static partial class Program
         CoreLinkPlanInfo? coreLinkPlan = null,
         string? trustedRecipe = null,
         int? catalogCaseCount = null,
+        string? componentContract = null,
         string? pe = null
 #if FRONTEND_CACHE_TRANSPORT
         , FrontendCacheInfo? frontendCache = null,
@@ -128,6 +130,7 @@ public static partial class Program
         DiagnosticInfo[] GeneratorDiagnostics,
         string? TrustedRecipe,
         int CatalogCaseCount,
+        string ComponentContract,
         string RuntimeManifest,
         string RuntimeSystemLibrariesJson);
     private static PendingFrontendCompilation? pendingFrontendCompilation;
@@ -333,13 +336,18 @@ public static partial class Program
                 generatorDiagnostics.Take(128).Select(Describe).ToArray()));
             Stage("netwasm");
             started = Stopwatch.GetTimestamp();
+            var entryPoint = generatedCompilation.GetEntryPoint(CancellationToken.None);
+            var inferredAsyncPlatform = entryPoint?.ReturnType is INamedTypeSymbol returnType &&
+                returnType.Name == "Task" && returnType.ContainingNamespace.ToDisplayString() == "System.Threading.Tasks";
+            var asynchronous = tunit || useAsyncPlatform || inferredAsyncPlatform;
+            var componentContract = asynchronous ? "async-command" : "command";
             var images = new Dictionary<string,byte[]> { ["NetWasmApp.dll"] = pe.ToArray(), ["NetWasm.CoreLib.dll"] = Convert.FromBase64String(implementation) };
             var additionalImplementations = JsonSerializer.Deserialize(additionalImplementationsJson, CompilerHostJsonContext.Default.DictionaryStringString)!;
             foreach (var image in additionalImplementations) images.Add(image.Key, Convert.FromBase64String(image.Value));
             images["compiler.wit.wasm"] = Convert.FromBase64String(witBytes);
             var options = new CompilerOptions(
                 "NetWasmApp.dll", ["NetWasm.CoreLib.dll", .. additionalImplementations.Keys], "Program", "<Main>$", [],
-                WitPath: "compiler.wit.wasm", WitWorld: tunit || useAsyncPlatform ? "netwasm:platform@1.0.0/async-platform" : "netwasm:platform@1.0.0/platform",
+                WitPath: "compiler.wit.wasm", WitWorld: asynchronous ? "netwasm:platform@1.0.0/async-platform" : "netwasm:platform@1.0.0/platform",
                 EntryPointKind: CompilerEntryPointKind.ManagedExecutable);
             var request = new BrowserCompilationRequest(options, images,
                 new Dictionary<string,string> { ["compiler.wit.wasm"] = witJson }, selectManagedExecutableEntryPoint: true);
@@ -357,11 +365,12 @@ public static partial class Program
                         throw new InvalidOperationException("Frontend cache preparation is unavailable.");
                     pendingFrontendCompilation = new(session, preparation, [], pe.ToArray(), timings.ToArray(),
                         generatedSources, generatorDiagnostics.Take(128).Select(Describe).ToArray(), trustedRecipe,
-                        tunit ? CountCatalogCases(generatedCompilation) : 0, runtimeManifest,
+                        tunit ? CountCatalogCases(generatedCompilation) : 0, componentContract, runtimeManifest,
                         runtimeSystemLibrariesJson);
                     return Serialize(new(1, true, timings: timings.ToArray(), generatedSources: generatedSources,
                         generatorDiagnostics: generatorDiagnostics.Take(128).Select(Describe).ToArray(),
                         trustedRecipe: trustedRecipe, catalogCaseCount: tunit ? CountCatalogCases(generatedCompilation) : 0,
+                        componentContract: componentContract,
                         frontendCache: new(preparation.FrontendCache.Schema,
                             preparation.FrontendCache.Namespace, preparation.Handle)));
                 }
@@ -393,7 +402,7 @@ public static partial class Program
                 runtimeFeatures: compiled.RuntimeFeatures.ToArray(), imports: compiled.FunctionImports.Select(Describe).ToArray(),
                 interopManifest: Describe(compiled.InteropManifest), entryPoint: Describe(compiled.EntryPoint),
                 runtimeLinkPlan: Describe(runtimeLinkPlan), coreLinkPlan: Describe(coreLinkPlan), trustedRecipe: trustedRecipe,
-                catalogCaseCount: tunit ? CountCatalogCases(generatedCompilation) : 0,
+                catalogCaseCount: tunit ? CountCatalogCases(generatedCompilation) : 0, componentContract: componentContract,
                 pe: emitted.Success ? Convert.ToBase64String(pe.ToArray()) : null));
         }
         catch (CompilerException error)
@@ -453,6 +462,7 @@ public static partial class Program
                 interopManifest: Describe(compiled.InteropManifest), entryPoint: Describe(compiled.EntryPoint),
                 runtimeLinkPlan: Describe(runtimeLinkPlan), coreLinkPlan: Describe(coreLinkPlan),
                 trustedRecipe: pending.TrustedRecipe, catalogCaseCount: pending.CatalogCaseCount,
+                componentContract: pending.ComponentContract,
                 pe: Convert.ToBase64String(pending.Pe),
                 frontendPublication: prepared.FrontendPublication is null ? null : new(
                     prepared.FrontendPublication.Token, prepared.FrontendPublication.EntryCount,
