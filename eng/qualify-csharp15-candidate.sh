@@ -45,7 +45,7 @@ rebuild=(python3 "$root/eng/rebuild-public-toolchain.py"
 "${rebuild[@]}"
 
 cd "$root"
-npm run dev -- --port 4173 >"$work/preliminary-server.log" 2>&1 &
+./node_modules/.bin/vite --host 127.0.0.1 --port 4173 --strictPort >"$work/preliminary-server.log" 2>&1 &
 server_pid=$!
 trap 'kill "${server_pid:-}" 2>/dev/null || true' EXIT
 for _ in {1..60}; do
@@ -61,7 +61,7 @@ unset server_pid
 
 "${rebuild[@]}" --runtime-plan "$runtime_plan"
 
-npm run dev -- --port 4173 >"$work/development-server.log" 2>&1 &
+./node_modules/.bin/vite --host 127.0.0.1 --port 4173 --strictPort >"$work/development-server.log" 2>&1 &
 server_pid=$!
 for _ in {1..60}; do
   curl --fail --silent http://127.0.0.1:4173/ >/dev/null && break
@@ -77,7 +77,7 @@ wait "$server_pid" 2>/dev/null || true
 unset server_pid
 
 PLAYGROUND_BASE=/ npm run build
-npm run preview -- --host 127.0.0.1 --port 4173 >"$work/production-server.log" 2>&1 &
+./node_modules/.bin/vite preview --host 127.0.0.1 --port 4173 --strictPort >"$work/production-server.log" 2>&1 &
 server_pid=$!
 for _ in {1..60}; do
   curl --fail --silent http://127.0.0.1:4173/ >/dev/null && break
