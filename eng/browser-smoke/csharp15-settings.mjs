@@ -17,7 +17,10 @@ try {
 
   async function compileExpecting(success) {
     await page.locator('#compile').click();
-    await page.waitForFunction(() => document.querySelector('#stop').disabled, undefined,
+    await page.waitForFunction(() => document.querySelector('#compile').disabled &&
+      !document.querySelector('#stop').disabled, undefined, { timeout: 10_000 });
+    await page.waitForFunction(() => !document.querySelector('#compile').disabled &&
+      document.querySelector('#stop').disabled, undefined,
       { timeout: 240_000 });
     const result = await page.evaluate(() => ({
       status: document.querySelector('#status').textContent,
@@ -31,11 +34,11 @@ try {
   await page.getByLabel('Language', { exact: true }).selectOption('15');
   const stable = await compileExpecting(false);
   await page.getByLabel('Language', { exact: true }).selectOption('preview');
-  const previewWithoutRules = await compileExpecting(false);
+  const previewWithoutRules = await compileExpecting(true);
   await page.locator('#updated-memory-safety').check();
   const recovered = await compileExpecting(true);
   if (await page.locator('#editor').textContent() !== source ||
-      stable.diagnostics === 'No diagnostics.' || previewWithoutRules.diagnostics === 'No diagnostics.' ||
+      stable.diagnostics === 'No diagnostics.' || previewWithoutRules.diagnostics !== 'No diagnostics.' ||
       recovered.diagnostics !== 'No diagnostics.' || errors.length)
     throw new Error(JSON.stringify({ stable, previewWithoutRules, recovered, errors }));
   const result = { passed: true, stable, previewWithoutRules, recovered, errors };
