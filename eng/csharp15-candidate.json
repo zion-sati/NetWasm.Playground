@@ -3,10 +3,10 @@
   "qualificationOnly": true,
   "netwasm": {
     "repository": "zion-sati/NetWasm",
-    "commit": "b4ce6f79f5149511d57e86be0143398fc282dcfe"
+    "commit": "7895ed4aa1452384e874fa07e8cca5e355418e5b"
   },
   "tunit": {
     "repository": "zion-sati/TUnit-NetWasm",
-    "commit": "a459bf1461847e8190d58dcccdcc6581883af10e"
+    "commit": "ce4c304a1425fb6b67d5d8d064d05145c301ed61"
   }
 }
