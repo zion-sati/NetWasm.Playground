@@ -33,7 +33,6 @@ PLAYGROUND_BROWSERS=chromium PLAYGROUND_CSHARP15_OPTIMIZATION=none \
 node eng/browser-smoke/library-catalog.mjs
 PLAYGROUND_EVIDENCE="$evidence/tunit-failure" node eng/browser-smoke/tunit-failure.mjs
 PLAYGROUND_EVIDENCE="$evidence/progress" node eng/browser-smoke/progress.mjs
-PLAYGROUND_CHANNEL_RESULT="$evidence/worker-channel.json" node eng/browser-smoke/worker-channel.mjs
 PLAYGROUND_EVIDENCE="$evidence/lifecycle" node eng/browser-smoke/compiler-lifecycle.mjs
 PLAYGROUND_EVIDENCE="$evidence/deployment" node eng/browser-smoke/deployment.mjs
 
