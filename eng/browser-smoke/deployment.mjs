@@ -6,6 +6,7 @@ import { createHash } from 'node:crypto';
 const url = process.env.PLAYGROUND_URL;
 const output = process.env.PLAYGROUND_EVIDENCE;
 if (!url || !output) throw Error('PLAYGROUND_URL and PLAYGROUND_EVIDENCE are required');
+const playgroundVersion = JSON.parse(readFileSync(new URL('../../package.json', import.meta.url))).version;
 mkdirSync(output, { recursive: true });
 const browser = await chromium.launch({ headless: true });
 const errors = [];
@@ -76,12 +77,14 @@ try {
     const statuses = await Promise.all(icons.map(async href => (await fetch(href)).status));
     const brandLink = document.querySelector('.brand > a');
     return { csp, icons, statuses, brandLink: brandLink ? { href: brandLink.href, text: brandLink.textContent } : null,
-      brandText: document.querySelector('.brand')?.textContent };
+      brandText: document.querySelector('.brand')?.textContent,
+      version: document.querySelector('#playground-version')?.textContent };
   });
   if (!pageContract.csp.includes('https://static.cloudflareinsights.com') ||
       !pageContract.csp.includes('https://cloudflareinsights.com') || pageContract.icons.length !== 2 ||
       pageContract.statuses.some(status => status !== 200) || pageContract.brandLink?.href !== 'https://www.netwasm.com/' ||
-      pageContract.brandLink?.text !== 'NetWasm' || pageContract.brandText !== 'NetWasm Playground')
+      pageContract.brandLink?.text !== 'NetWasm' || pageContract.brandText !== `NetWasm Playgroundv${playgroundVersion}` ||
+      pageContract.version !== `v${playgroundVersion}`)
     throw Error(`Page resource contract failed: ${JSON.stringify(pageContract)}`);
   await page.locator('.monaco-editor').waitFor();
   await page.waitForFunction(() => performance.getEntriesByType('resource').some(entry => entry.name.includes('/toolchain/')));
