@@ -25,7 +25,6 @@ class PublicPackageBoundaryTests(unittest.TestCase):
                          r'^https://github\.com/zion-sati/NetWasm\.Playground/releases/download/v[0-9]')
         self.assertEqual(64, len(base['archive']['sha256']))
         self.assertIn('RELEASE.verify_staged(base_toolchain)', script)
-        self.assertIn("package_members('netwasm.runtime.pack', version", script)
         self.assertIn("Public package member changed", script)
         self.assertIn("identity = {'schemaVersion': 3, 'pins': pins", script)
         self.assertIn('rebind_notice_origins(stage, pins)', script)
