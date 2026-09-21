@@ -2,6 +2,8 @@ export interface ExampleRecipe {
   id: string;
   name: string;
   source: string;
+  language?: '15' | 'preview';
+  updatedMemorySafetyRules?: boolean;
 }
 
 export const examples: readonly ExampleRecipe[] = [
@@ -11,6 +13,113 @@ export const examples: readonly ExampleRecipe[] = [
     source: `using System;
 
 Console.WriteLine(42);
+`,
+  },
+  {
+    id: 'csharp15-collection-arguments',
+    name: 'C# 15 · Collection arguments',
+    source: `using System;
+using System.Collections.Generic;
+
+List<int> values = [with(capacity: 8), 20, 22];
+Console.WriteLine($"{values[0]} + {values[1]} = {values[0] + values[1]}");
+`,
+  },
+  {
+    id: 'csharp15-extension-indexer',
+    name: 'C# 15 · Extension indexer',
+    source: `using System;
+
+var buffer = new Buffer();
+buffer[0] = 42;
+Console.WriteLine(buffer[0]);
+
+public sealed class Buffer
+{
+    public int[] Values { get; } = new int[1];
+}
+
+public static class BufferExtensions
+{
+    extension(Buffer buffer)
+    {
+        public int this[int index]
+        {
+            get => buffer.Values[index];
+            set => buffer.Values[index] = value;
+        }
+    }
+}
+`,
+  },
+  {
+    id: 'csharp15-labeled-jumps',
+    name: 'C# 15 · Labeled jumps',
+    source: `using System;
+
+var result = 40;
+outer:
+for (var x = 0; x < 3; x++)
+{
+    for (var y = 0; y < 3; y++)
+    {
+        if (x == 0 && y == 1) continue outer;
+        if (x == 2 && y == 1) break outer;
+        result++;
+    }
+}
+Console.WriteLine(result);
+`,
+  },
+  {
+    id: 'csharp15-unions',
+    name: 'C# 15 · Unions',
+    source: `using System;
+
+Pet pet = new Dog(42);
+Console.WriteLine(pet switch
+{
+    Cat cat => cat.Value,
+    Dog dog => dog.Value,
+});
+
+public sealed record Cat(int Value);
+public sealed record Dog(int Value);
+public union Pet(Cat, Dog);
+`,
+  },
+  {
+    id: 'csharp15-closed-hierarchies',
+    name: 'C# 15 · Closed hierarchy',
+    source: `using System;
+
+State state = new Ready(42);
+Console.WriteLine(state switch
+{
+    Ready ready => ready.Value,
+    Waiting => 0,
+});
+
+public closed class State;
+public sealed class Ready(int value) : State
+{
+    public int Value { get; } = value;
+}
+public sealed class Waiting : State;
+`,
+  },
+  {
+    id: 'csharp15-memory-safety',
+    name: 'C# 15 preview · Memory safety',
+    language: 'preview',
+    updatedMemorySafetyRules: true,
+    source: `using System;
+
+var value = 41;
+var pointer = unsafe(&value);
+Console.WriteLine(unsafe(Read(pointer)) + 1);
+
+static int* Read(int* value) => value;
 `,
   },
   {

@@ -23,7 +23,7 @@ try {
       return;
     }
     const result = JSON.parse(exports.NetWasm.Playground.CompilerProbe.Program.Compile(
-      data.source, reference, support, implementation, witJson, witBytes, runtimeManifest));
+      data.source, reference, support, implementation, witJson, witBytes, runtimeManifest, '[]', '15', false));
     result.hostLinearMemoryBytes = runtime.Module?.HEAPU8?.buffer?.byteLength ?? null;
     self.postMessage({id:data.id, result});
   }

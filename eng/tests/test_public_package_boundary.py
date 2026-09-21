@@ -82,13 +82,27 @@ class PublicPackageBoundaryTests(unittest.TestCase):
         }, references)
         define_constants = project.findtext(".//DefineConstants", default="")
         self.assertIn("FRONTEND_CACHE_TRANSPORT", define_constants.split(";"))
+        self.assertEqual("net11.0", project.findtext(".//TargetFramework"))
+        self.assertEqual("11.0.0-rc.1.26425.128", json.loads(
+            (ROOT / "eng/browser-host.json").read_text())["runtimeFrameworkVersion"])
 
         release_builder = (ROOT / 'eng/build-release-compiler.py').read_text()
+        self.assertIn("11.0.100-rc.1.26425.128", release_builder)
         self.assertIn("'-p:DefineConstants=FRONTEND_CACHE_TRANSPORT'", release_builder)
         self.assertIn("'-p:WasmBuildNative=true'", release_builder)
         self.assertIn("'-p:RunAOTCompilation=false'", release_builder)
         self.assertIn("'-p:PublishTrimmed=false'", release_builder)
         self.assertIn("'-p:ILLinkTreatWarningsAsErrors=false'", release_builder)
+
+    def test_candidate_compiler_feed_is_explicit_and_not_the_release_default(self):
+        help_text = subprocess.check_output(
+            ["python3", str(ROOT / "eng/build-release-compiler.py"), "--help"],
+            text=True)
+
+        self.assertIn("--candidate-feed", help_text)
+        self.assertIn("--candidate-version", help_text)
+        release = (ROOT / ".github/workflows/release.yml").read_text()
+        self.assertNotIn("--candidate-feed", release)
 
     def test_asset_stager_has_no_source_checkout_option(self):
         help_text = subprocess.check_output(

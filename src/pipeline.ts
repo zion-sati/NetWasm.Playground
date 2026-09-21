@@ -228,14 +228,24 @@ export class PlaygroundPipeline {
   async compile(snapshot: SourceSnapshot): Promise<CompilationResult> {
     const optimization = snapshot.optimization ?? 'Oz';
     const epoch = this.epoch; this.context = snapshot; const timings: StageTiming[] = [];
-    const result = { requestId: snapshot.requestId, revision: snapshot.revision, optimization, diagnostics: [], timings };
+    const result = { requestId: snapshot.requestId, revision: snapshot.revision, optimization,
+      language: snapshot.language, updatedMemorySafetyRules: snapshot.updatedMemorySafetyRules,
+      diagnostics: [], timings };
     try {
-      if (!['hello', 'datetime', 'http', 'allocation', 'linq', 'json-dom', 'json-generated', 'tunit', 'regex', 'di', 'hashing'].includes(snapshot.recipeId)) throw new Error('Unknown compilation recipe');
+      if (!['hello', 'csharp15-collection-arguments', 'csharp15-extension-indexer', 'csharp15-labeled-jumps',
+        'csharp15-unions', 'csharp15-closed-hierarchies', 'csharp15-memory-safety', 'datetime', 'http',
+        'allocation', 'linq', 'json-dom', 'json-generated', 'tunit', 'regex', 'di', 'hashing'].includes(snapshot.recipeId)) throw new Error('Unknown compilation recipe');
       if (!optimizationModes.includes(optimization)) throw new Error('Unknown optimization mode');
+      if (!['15', 'preview'].includes(snapshot.language) ||
+          (snapshot.updatedMemorySafetyRules && snapshot.language !== 'preview'))
+        throw new Error('Unknown C# language settings');
       if (snapshot.source.length > 65536 || new TextEncoder().encode(snapshot.source).byteLength > 65536) throw new Error('Source limit exceeded (64 KiB)');
       await this.stage('download', timings, () => this.initialize());
       await this.stage('compiler-initialize', timings, () => this.initializeChannel('compiler'));
-      const compilation = await this.stage('compile', timings, () => this.channel('compiler').request({ operation: 'compile', recipe: snapshot.recipeId, source: snapshot.source }));
+      const compilation = await this.stage('compile', timings, () => this.channel('compiler').request({
+        operation: 'compile', recipe: snapshot.recipeId, source: snapshot.source,
+        language: snapshot.language, updatedMemorySafetyRules: snapshot.updatedMemorySafetyRules,
+      }));
       for (const timing of compilation.timings ?? []) this.emit({ type: 'stage', stage: timing.stage, state: 'complete', milliseconds: timing.milliseconds });
       if (!compilation.success) return { ...result, success: false, diagnostics: compilation.diagnostics ?? [],
         stage: compilation.stage, error: compilation.error, assets: { ...this.assets } };

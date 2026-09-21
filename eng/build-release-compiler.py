@@ -46,9 +46,20 @@ def package_member(package, version, member):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--output', type=Path, required=True)
+    parser.add_argument('--candidate-feed', type=Path,
+                        help='Temporary CI/local feed containing an exact candidate package graph')
+    parser.add_argument('--candidate-version',
+                        help='Exact candidate version; required with --candidate-feed')
     args = parser.parse_args()
+    if bool(args.candidate_feed) != bool(args.candidate_version):
+        parser.error('--candidate-feed and --candidate-version must be supplied together')
     pins = json.loads((ROOT / 'eng/upstream-sources.json').read_text())['sources']
-    version = pins['netwasm']['packageVersion']
+    version = args.candidate_version or pins['netwasm']['packageVersion']
+    candidate_feed = args.candidate_feed.resolve() if args.candidate_feed else None
+    if candidate_feed:
+        for package in ('NetWasm.Compiler.Browser', 'NetWasm.Runtime.Pack'):
+            if not (candidate_feed / f'{package}.{version}.nupkg').is_file():
+                parser.error(f'candidate feed lacks {package}.{version}.nupkg')
     runtime = json.loads((ROOT / 'eng/browser-host.json').read_text())['runtimeFrameworkVersion']
     with tempfile.TemporaryDirectory(prefix='netwasm-release-compiler-') as temporary:
         work = Path(temporary)
@@ -82,10 +93,18 @@ def main():
             json.dumps(program) + ';\ninternal const bool DependencyInjectionAvailable = true;\n'
             'internal static global::Microsoft.CodeAnalysis.IIncrementalGenerator CreateDependencyInjectionGenerator() => '
             'new global::NetWasm.Microsoft.Extensions.DependencyInjection.Generator.NetWasmDependencyInjectionGenerator(); }\n')
-        (app / 'global.json').write_text(json.dumps({'sdk': {'version': '10.0.302', 'rollForward': 'disable'}}, indent=2))
+        (app / 'global.json').write_text(json.dumps({'sdk': {'version': '11.0.100-rc.1.26425.128', 'rollForward': 'disable',
+                                                             'allowPrerelease': True}}, indent=2))
         nuget = work / 'NuGet.Config'
-        nuget.write_text('<configuration><packageSources><clear/><add key="nuget.org" value="' + FEED +
-                         '"/></packageSources><fallbackPackageFolders><clear/></fallbackPackageFolders></configuration>\n')
+        configuration = ET.Element('configuration')
+        sources = ET.SubElement(configuration, 'packageSources')
+        ET.SubElement(sources, 'clear')
+        if candidate_feed:
+            ET.SubElement(sources, 'add', key='candidate', value=str(candidate_feed))
+        ET.SubElement(sources, 'add', key='nuget.org', value=FEED)
+        fallbacks = ET.SubElement(configuration, 'fallbackPackageFolders')
+        ET.SubElement(fallbacks, 'clear')
+        ET.ElementTree(configuration).write(nuget, encoding='unicode')
         env = dict(os.environ, NUGET_PACKAGES=str(work / 'packages'), NUGET_HTTP_CACHE_PATH=str(work / 'http-cache'))
         # Keep the Mono runtime native, but execute the compiler's managed IL in
         # interpreter mode. Full browser AOT has produced method-layout-sensitive
