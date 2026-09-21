@@ -7,6 +7,6 @@
   },
   "tunit": {
     "repository": "zion-sati/TUnit-NetWasm",
-    "commit": "d02947165a6e3f84c79aecbf3471d0673ea58c05"
+    "commit": "a459bf1461847e8190d58dcccdcc6581883af10e"
   }
 }
