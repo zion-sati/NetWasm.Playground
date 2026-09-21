@@ -218,24 +218,34 @@ export class PlaygroundPipeline {
     const milliseconds = performance.now() - started;
     timings.push({ stage: name, milliseconds }); this.emit({ type: 'stage', stage: name, state: 'complete', milliseconds }); return result;
   }
-  private async tool(operation: string, args: string[], files: Record<string, Uint8Array>, outputs: string[]) {
+  private async tool(operation: string, args: string[], files: Record<string, Uint8Array>, outputs: string[], timeout = 120_000) {
     // Snapshot input buffers because callers may retain an artifact for later stages.
     const owned = Object.fromEntries(Object.entries(files).map(([name, bytes]) => [name, bytes.slice()]));
-    const result = await this.channel('tools').request({ operation, args, files: owned, outputs }, Object.values(owned).map(bytes => bytes.buffer));
+    const result = await this.channel('tools').request({ operation, args, files: owned, outputs }, Object.values(owned).map(bytes => bytes.buffer), timeout);
     if (result.exitCode !== 0) throw new Error(result.stderr || result.failure || `${operation} failed`);
     return result.files as Record<string, Uint8Array>;
   }
   async compile(snapshot: SourceSnapshot): Promise<CompilationResult> {
     const optimization = snapshot.optimization ?? 'Oz';
     const epoch = this.epoch; this.context = snapshot; const timings: StageTiming[] = [];
-    const result = { requestId: snapshot.requestId, revision: snapshot.revision, optimization, diagnostics: [], timings };
+    const result = { requestId: snapshot.requestId, revision: snapshot.revision, optimization,
+      language: snapshot.language, updatedMemorySafetyRules: snapshot.updatedMemorySafetyRules,
+      diagnostics: [], timings };
     try {
-      if (!['hello', 'datetime', 'http', 'allocation', 'linq', 'json-dom', 'json-generated', 'tunit', 'regex', 'di', 'hashing'].includes(snapshot.recipeId)) throw new Error('Unknown compilation recipe');
+      if (!['hello', 'csharp15-tour', 'datetime', 'http',
+        'allocation', 'linq', 'async-linq', 'pipelines', 'web-encoding', 'xml', 'json-dom',
+        'json-generated', 'tunit', 'regex', 'di', 'logging', 'hashing'].includes(snapshot.recipeId)) throw new Error('Unknown compilation recipe');
       if (!optimizationModes.includes(optimization)) throw new Error('Unknown optimization mode');
+      if (!['15', 'preview'].includes(snapshot.language) ||
+          (snapshot.updatedMemorySafetyRules && snapshot.language !== 'preview'))
+        throw new Error('Unknown C# language settings');
       if (snapshot.source.length > 65536 || new TextEncoder().encode(snapshot.source).byteLength > 65536) throw new Error('Source limit exceeded (64 KiB)');
       await this.stage('download', timings, () => this.initialize());
       await this.stage('compiler-initialize', timings, () => this.initializeChannel('compiler'));
-      const compilation = await this.stage('compile', timings, () => this.channel('compiler').request({ operation: 'compile', recipe: snapshot.recipeId, source: snapshot.source }));
+      const compilation = await this.stage('compile', timings, () => this.channel('compiler').request({
+        operation: 'compile', recipe: snapshot.recipeId, source: snapshot.source,
+        language: snapshot.language, updatedMemorySafetyRules: snapshot.updatedMemorySafetyRules,
+      }));
       for (const timing of compilation.timings ?? []) this.emit({ type: 'stage', stage: timing.stage, state: 'complete', milliseconds: timing.milliseconds });
       if (!compilation.success) return { ...result, success: false, diagnostics: compilation.diagnostics ?? [],
         stage: compilation.stage, error: compilation.error, assets: { ...this.assets } };
@@ -257,9 +267,11 @@ export class PlaygroundPipeline {
       const pruned = await this.stage('prune', timings, () => this.channel('compiler').request({ operation: 'prune', module, prefix: plan.ExportPruning.Prefix }, [module.buffer]));
       const linked = optimization === 'none' ? pruned.module : (await this.stage('optimize', timings, () =>
         this.tool('wasm-opt', optimizationArguments(args(plan.Optimization), optimization),
-          { [basename(plan.ExportPruning.OutputPath)]: pruned.module }, ['linked.wasm'])))['linked.wasm'];
+          { [basename(plan.ExportPruning.OutputPath)]: pruned.module }, ['linked.wasm'], 300_000)))['linked.wasm'];
       await this.stage('validate', timings, () => this.tool('wasm-tools', ['validate', 'linked.wasm'], { 'linked.wasm': linked }, []));
-      const asynchronous = snapshot.recipeId === 'tunit' || snapshot.recipeId === 'http';
+      if (!['command', 'async-command'].includes(compilation.componentContract))
+        throw new Error('Compiler returned an invalid component contract');
+      const asynchronous = compilation.componentContract === 'async-command';
       const witName = asynchronous ? 'async-command.wit.wasm' : 'command.wit.wasm';
       const witWorld = snapshot.recipeId === 'http' ? 'netwasm:component/async-http-command@1.0.0'
         : asynchronous ? 'netwasm:component/async-command@1.0.0' : 'wasi:cli/command@0.2.11';
@@ -271,7 +283,7 @@ export class PlaygroundPipeline {
         return packaged['component.wasm'];
       });
       if (epoch !== this.epoch) throw new Error('Stopped');
-      return { ...result, success: true, component,
+      return { ...result, success: true, component, componentContract: compilation.componentContract,
         frontendCacheMetrics: compilation.frontendCacheMetrics, assets: { ...this.assets } };
     } catch (error) { return { ...result, success: false, cancelled: epoch !== this.epoch, stage: this.currentStage, error: String(error) }; }
     finally {
@@ -290,6 +302,8 @@ export class PlaygroundPipeline {
     const base = { requestId: snapshot.requestId, revision: snapshot.revision, timings, stdout: '', stderr: '' };
     try {
       if (!compilation.component) throw new Error('No compiled component');
+      const componentContract = compilation.componentContract ?? 'command';
+      if (!['command', 'async-command'].includes(componentContract)) throw new Error('Invalid compiled component contract');
       await this.initialize(); this.channels.get('guest')?.reset(); this.channels.delete('guest');
       const component = compilation.component.slice();
       const result = await this.stage('run', timings, async () => {
@@ -298,6 +312,7 @@ export class PlaygroundPipeline {
         const sampleHttpUrl = snapshot.recipeId === 'http'
           ? new URL(`${import.meta.env.BASE_URL}example-http.json`, location.origin).href : undefined;
         return this.channel('guest').request({ operation: 'run', component, recipe: snapshot.recipeId,
+          componentContract,
           sampleHttpUrl }, [component.buffer], 60_000, 5_000);
       });
       for (const timing of result.timings ?? []) this.emit({ type: 'stage', stage: timing.stage, state: 'complete', milliseconds: timing.milliseconds });

@@ -1,11 +1,15 @@
 import type { OptimizationMode } from './optimization';
 
+export type LanguageMode = '15' | 'preview';
+
 export interface SourceSnapshot {
   requestId: number;
   revision: number;
   source: string;
   recipeId: string;
   optimization?: OptimizationMode;
+  language: LanguageMode;
+  updatedMemorySafetyRules: boolean;
 }
 
 export interface Diagnostic {
@@ -51,8 +55,11 @@ export interface CompilationResult {
   revision: number;
   success: boolean;
   optimization?: OptimizationMode;
+  language?: LanguageMode;
+  updatedMemorySafetyRules?: boolean;
   cancelled?: boolean;
   component?: Uint8Array;
+  componentContract?: 'command' | 'async-command';
   diagnostics: Diagnostic[];
   timings: StageTiming[];
   frontendCacheMetrics?: FrontendCacheMetrics;

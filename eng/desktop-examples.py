@@ -10,7 +10,22 @@ import subprocess
 from xml.sax.saxutils import escape
 
 ROOT = Path(__file__).resolve().parents[1]
-PACKAGES = {'hello': [], 'allocation': [], 'linq': ['NetWasm.System.Linq'], 'json-dom': ['NetWasm.System.Text.Json'], 'json-generated': ['NetWasm.System.Text.Json'], 'regex': ['NetWasm.System.Text.RegularExpressions'], 'di': ['NetWasm.Microsoft.Extensions.DependencyInjection'], 'hashing': ['NetWasm.System.IO.Hashing']}
+PACKAGES = {
+    'hello': [],
+    'allocation': [],
+    'linq': ['NetWasm.System.Linq'],
+    'async-linq': ['NetWasm.System.Linq.AsyncEnumerable'],
+    'pipelines': ['NetWasm.System.IO.Pipelines'],
+    'web-encoding': ['NetWasm.System.Text.Encodings.Web'],
+    'xml': ['NetWasm.System.Xml'],
+    'json-dom': ['NetWasm.System.Text.Json'],
+    'json-generated': ['NetWasm.System.Text.Json'],
+    'regex': ['NetWasm.System.Text.RegularExpressions'],
+    'di': ['NetWasm.Microsoft.Extensions.DependencyInjection'],
+    'logging': ['NetWasm.Microsoft.Extensions.Logging'],
+    'hashing': ['NetWasm.System.IO.Hashing'],
+}
+ASYNC_RECIPES = {'async-linq', 'pipelines'}
 def fingerprint(path):
     return {'bytes': path.stat().st_size, 'sha256': hashlib.sha256(path.read_bytes()).hexdigest()}
 def main():
@@ -48,7 +63,8 @@ def main():
         support=[{'path':path.relative_to(baseline/'app').as_posix(),'text':path.read_text()} for path in sorted((baseline/'app/obj/Release/netwasm0.1').glob('*.cs'))]
         for index,file in enumerate(support): (app/f'Support{index}.cs').write_text(file['text'])
         refs=''.join(f'<PackageReference Include="{package}" Version="[{version}]"/>' for package in PACKAGES[recipe])
-        (app/'NetWasmApp.csproj').write_text('<Project Sdk="NetWasm.Sdk"><PropertyGroup><OutputType>Exe</OutputType><TargetFramework>netwasm0.1</TargetFramework><ImplicitUsings>disable</ImplicitUsings><Nullable>enable</Nullable><GenerateAssemblyInfo>false</GenerateAssemblyInfo><GenerateTargetFrameworkAttribute>false</GenerateTargetFrameworkAttribute></PropertyGroup><ItemGroup>'+refs+'</ItemGroup></Project>\n')
+        contract = '<NetWasmComponentContract>async-command</NetWasmComponentContract>' if recipe in ASYNC_RECIPES else ''
+        (app/'NetWasmApp.csproj').write_text('<Project Sdk="NetWasm.Sdk"><PropertyGroup><OutputType>Exe</OutputType><TargetFramework>netwasm0.1</TargetFramework><ImplicitUsings>disable</ImplicitUsings><Nullable>enable</Nullable><GenerateAssemblyInfo>false</GenerateAssemblyInfo><GenerateTargetFrameworkAttribute>false</GenerateTargetFrameworkAttribute>'+contract+'</PropertyGroup><ItemGroup>'+refs+'</ItemGroup></Project>\n')
         (app/'linker.targets').write_text('<Project><Target Name="UseVerifiedExampleLinker" AfterTargets="NetWasmSdkResolveBuildEnvironment"><PropertyGroup><NetWasmWasmLdPath>'+escape(str(args.wasm_ld.absolute()))+'</NetWasmWasmLdPath></PropertyGroup></Target></Project>')
         def execute(command,name):
             result=subprocess.run(command,cwd=app,env=env,capture_output=True,text=True)
@@ -59,8 +75,22 @@ def main():
         assets=json.loads((app/'obj/project.assets.json').read_text())
         if set(assets['project']['restore']['sources'])!={'https://api.nuget.org/v3/index.json'} or {str(Path(p).resolve()) for p in assets['packageFolders']}!={str(run/'packages')}: raise RuntimeError('Non-public restore source/cache')
         execute(['dotnet','publish','-c','Release','--no-restore','-o',str(app/'publish'),'-p:CustomAfterMicrosoftCommonTargets='+str(app/'linker.targets')],'publish')
-        stdout=execute(['wasmtime',str(app/'publish/NetWasmApp.wasm')],'run')
-        expected={'regex':'Ada: 42\nGrace: 99\nAda scored 42, Grace scored 99\n','di':'Hello, Ada!\n','hashing':'CRC32: CBF43926\n','hello':'42\n','linq':'Even sum: 120\n','json-dom':'Name: Ada\nAge: 29\nTags: 2\n','json-generated':'{"Name":"Ada","Score":42}\n'}
+        run_command = ['dotnet', 'run', '-c', 'Release', '--no-build', '--no-restore'] if recipe in ASYNC_RECIPES else ['wasmtime',str(app/'publish/NetWasmApp.wasm')]
+        stdout=execute(run_command,'run')
+        expected={
+            'regex':'Ada: 42\nGrace: 99\nAda scored 42, Grace scored 99\n',
+            'di':'Hello, Ada!\n',
+            'logging':'info WidgetClient[1]\n      Fetched 42 widgets in 12.5 ms\n',
+            'hashing':'CRC32: CBF43926\n',
+            'hello':'42\n',
+            'linq':'Even sum: 120\n',
+            'async-linq':'Async values: 20, 40, 60\n',
+            'pipelines':'Buffered bytes: 3\nFirst byte: 13\n',
+            'web-encoding':'\\u003CNetWasm \\u0026 C#\\u003E\n',
+            'xml':'Runtime: NetWasm\nAnswer: 42\n',
+            'json-dom':'Name: Ada\nAge: 29\nTags: 2\n',
+            'json-generated':'{"Name":"Ada","Score":42}\n',
+        }
         if recipe=='allocation':
             if not stdout.startswith('Survivor: 42\nGuest collections: ') or int(stdout.strip().split(': ')[-1])<1: raise RuntimeError('Guest GC output mismatch')
         elif stdout!=expected[recipe]: raise RuntimeError('Example output mismatch')

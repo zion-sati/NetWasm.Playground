@@ -26,3 +26,52 @@ jobs:
       - run: npm run typecheck
       - name: Build application shell
         run: npm run build
+
+  released-toolchain:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - name: Check out Playground
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - name: Set up .NET
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6
+        with:
+          dotnet-version: 11.0.100-rc.1.26425.128
+      - name: Install WebAssembly build workload
+        run: dotnet workload install wasm-tools --skip-manifest-update
+      - name: Set up Node.js
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: 26.7.0
+          cache: npm
+      - run: npm ci
+      - name: Install browser and Wasmtime
+        shell: bash
+        run: |
+          npx playwright install --with-deps chromium
+          archive="$RUNNER_TEMP/wasmtime.tar.xz"
+          curl --fail --silent --show-error --location --retry 3 --retry-all-errors \
+            --output "$archive" \
+            https://github.com/bytecodealliance/wasmtime/releases/download/v47.0.3/wasmtime-v47.0.3-x86_64-linux.tar.xz
+          printf '%s  %s\n' \
+            'ca1fc56d1afc40c8782e96c297fd182a0da162f9a8f52a1e7b094e1dd648e178' \
+            "$archive" | sha256sum --check --strict
+          tar -xJf "$archive" -C "$RUNNER_TEMP"
+          echo "$RUNNER_TEMP/wasmtime-v47.0.3-x86_64-linux" >> "$GITHUB_PATH"
+      - name: Build and qualify released browser toolchain
+        env:
+          NETWASM_RELEASED_WORK: ${{ runner.temp }}/netwasm-playground-released
+        run: bash eng/qualify-released-toolchain.sh
+      - name: Retain qualification evidence
+        if: always()
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: released-browser-toolchain-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/netwasm-playground-released/evidence
+            ${{ runner.temp }}/netwasm-playground-released/production-server.log
+          if-no-files-found: warn
+          retention-days: 14

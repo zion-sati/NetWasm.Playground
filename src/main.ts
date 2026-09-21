@@ -6,7 +6,7 @@ import 'monaco-editor/features/find/register';
 import 'monaco-editor/features/hover/register';
 import EditorWorker from 'monaco-editor/editor/editor.worker?worker';
 import { PlaygroundPipeline } from './pipeline';
-import type { CompilationResult, Diagnostic, PipelineEvent, SourceSnapshot, StageTiming, ToolchainPreloadProgress } from './contracts';
+import type { CompilationResult, Diagnostic, LanguageMode, PipelineEvent, SourceSnapshot, StageTiming, ToolchainPreloadProgress } from './contracts';
 import { examples } from './examples';
 import { formatTestReport } from './tunit-report';
 import './style.css';
@@ -19,7 +19,7 @@ import packageManifest from '../package.json';
 document.querySelector<HTMLDivElement>('#app')!.innerHTML = `
 <header><div class="brand"><a href="https://www.netwasm.com/">NetWasm</a> <span>Playground</span><span id="playground-version" class="version" aria-label="Playground version">v${packageManifest.version}</span></div><span class="badge">C# → WebAssembly</span></header>
 <main><section class="intro"><h1>Small code. Real WebAssembly.</h1><p>Compiled locally in your browser. Your source code never leaves this page.</p></section>
-<section class="workbench" aria-label="C# playground"><aside class="compile-notice"><span aria-hidden="true">⏱</span><p><strong>Browser compilation is slower.</strong> NetWasm's compiler currently runs in Mono interpreter mode on a single browser thread because Microsoft's browser AOT compiler miscompiles this workload and can crash with memory-access violations. Even simple samples can take tens of seconds. Optimization defaults to <b>-Oz</b> for the smallest output; choose <b>None</b> for the fastest compile-and-test loop.</p></aside><div class="toolbar"><div class="options"><label class="recipe">Example <select id="example" aria-label="Example"></select></label><label class="recipe">Optimization <select id="optimization" aria-label="Optimization"></select></label></div><div class="actions"><button id="compile"><span class="compile-spinner" aria-hidden="true"></span>Compile</button><button id="run" class="primary">Run <span aria-hidden="true">▶</span></button><button id="stop" disabled>Stop</button><button id="download" disabled>Download</button></div></div>
+<section class="workbench" aria-label="C# playground"><aside class="compile-notice"><span aria-hidden="true">⏱</span><p><strong>Browser compilation is slower.</strong> NetWasm's compiler runs in Mono interpreter mode on a single browser thread for reliability. Even simple samples can take tens of seconds. Optimization defaults to <b>-Oz</b> for the smallest output; choose <b>None</b> for the fastest compile-and-test loop.</p></aside><div class="toolbar"><div class="options"><label class="recipe">Example <select id="example" aria-label="Example"></select></label><label class="recipe">Language <select id="language" aria-label="Language"><option value="15">C# 15</option><option value="preview">C# 15 preview</option></select></label><label class="recipe">Optimization <select id="optimization" aria-label="Optimization"></select></label><label id="memory-safety-setting" class="feature-setting" hidden><input id="updated-memory-safety" type="checkbox"><span>Updated memory safety rules<small>Requires explicit <code>unsafe(...)</code> at affected call sites.</small></span></label></div><div class="actions"><button id="compile"><span class="compile-spinner" aria-hidden="true"></span>Compile</button><button id="run" class="primary">Run <span aria-hidden="true">▶</span></button><button id="stop" disabled>Stop</button><button id="download" disabled>Download</button></div></div>
 <div class="panes"><section class="source-pane"><div class="pane-heading"><h2 id="source-name">Program.cs</h2><span>C# · Release</span></div><div id="editor" aria-label="C# source editor"></div></section><section class="results-pane"><div class="pane-heading"><h2>Console</h2><span id="exit"></span></div><pre id="output" tabindex="0" aria-label="Program output"></pre><div class="diagnostic-heading"><h2>Diagnostics</h2><span id="diagnostic-count">0</span></div><div id="diagnostics" aria-label="Compiler diagnostics"><p class="empty">Compile to check your source.</p></div></section></div>
 <div id="toolchain-progress" class="toolchain-progress" role="status" aria-live="polite" hidden><div><strong>Preparing toolchain in the background</strong><span id="toolchain-progress-detail">Reading manifest…</span></div><progress id="toolchain-progress-bar" aria-label="Toolchain preload progress"></progress></div><footer class="results"><div id="status" role="status" aria-live="polite">Ready</div><div id="size">No component yet</div></footer><div class="details"><ol id="stages" aria-label="Pipeline progress"></ol><div id="timings"></div><div id="comparison"></div><div id="assets"></div></div></section><p class="cache-note">Reusable compiler artifacts stay in this browser so later compilations can be faster. Source files are not stored. <button id="clear-cache" type="button">Clear compilation cache</button></p><p id="footnote" class="footnote">One file, no setup. Download the compiled WASI Preview 2 component to run with Wasmtime.</p><p class="footnote">Current Chromium and Firefox recommended. Safari support is experimental.</p></main>`;
 const el = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id)! as T;
@@ -30,9 +30,13 @@ const downloadButton = el<HTMLButtonElement>('download');
 const clearCacheButton = el<HTMLButtonElement>('clear-cache');
 const exampleSelect = el<HTMLSelectElement>('example');
 const optimizationSelect = el<HTMLSelectElement>('optimization');
+const languageSelect = el<HTMLSelectElement>('language');
+const updatedMemorySafety = el<HTMLInputElement>('updated-memory-safety');
+const memorySafetySetting = el<HTMLLabelElement>('memory-safety-setting');
 for (const example of examples) { const option = document.createElement('option'); option.value = example.id; option.textContent = example.name; exampleSelect.append(option); }
 for (const mode of optimizationModes) { const option = document.createElement('option'); option.value = mode; option.textContent = optimizationLabels[mode]; optimizationSelect.append(option); }
 optimizationSelect.value = 'Oz';
+languageSelect.value = '15';
 const colorScheme = window.matchMedia('(prefers-color-scheme: dark)');
 const editor = monaco.editor.create(el('editor'), { value: examples[0].source, language: 'csharp', theme: colorScheme.matches ? 'vs-dark' : 'vs', automaticLayout: true, minimap: { enabled: false }, fontSize: 14, lineHeight: 23, scrollBeyondLastLine: false, scrollbar: { alwaysConsumeMouseWheel: false }, padding: { top: 18 }, tabSize: 4, fixedOverflowWidgets: true, accessibilitySupport: 'auto' });
 colorScheme.addEventListener('change', event => monaco.editor.setTheme(event.matches ? 'vs-dark' : 'vs'));
@@ -113,6 +117,9 @@ exampleSelect.onchange = () => {
   const example = examples.find(example => example.id === exampleSelect.value);
   if (!example) return;
   const previousRevision = revision;
+  languageSelect.value = example.language ?? '15';
+  updatedMemorySafety.checked = example.updatedMemorySafetyRules ?? false;
+  memorySafetySetting.hidden = languageSelect.value !== 'preview';
   editor.setValue(example.source);
   // A recipe change must invalidate its artifact even when the source is equal.
   if (revision === previousRevision) { revision++; invalidateDownload(); setDiagnostics([]); el('status').textContent = 'Example changed'; }
@@ -122,19 +129,34 @@ exampleSelect.onchange = () => {
   editor.setPosition({ lineNumber: 1, column: 1 });
 };
 optimizationSelect.onchange = () => { invalidateDownload(); el('status').textContent = `Optimization changed to ${optimizationLabels[optimizationSelect.value as OptimizationMode]}`; };
-function snapshot(): SourceSnapshot { return { requestId: ++nextRequest, revision, source: editor.getValue(), recipeId: exampleSelect.value, optimization: optimizationSelect.value as OptimizationMode }; }
+function languageSettingsChanged() {
+  if (languageSelect.value !== 'preview') updatedMemorySafety.checked = false;
+  memorySafetySetting.hidden = languageSelect.value !== 'preview';
+  revision++; comparisons.clear(); showComparisons(); invalidateDownload(); setDiagnostics([]);
+  el('status').textContent = languageSelect.value === 'preview'
+    ? 'Language changed to C# 15 preview'
+    : 'Language changed to C# 15';
+}
+languageSelect.onchange = languageSettingsChanged;
+updatedMemorySafety.onchange = () => {
+  revision++; comparisons.clear(); showComparisons(); invalidateDownload(); setDiagnostics([]);
+  el('status').textContent = updatedMemorySafety.checked
+    ? 'Updated memory safety rules enabled'
+    : 'Updated memory safety rules disabled';
+};
+function snapshot(): SourceSnapshot { return { requestId: ++nextRequest, revision, source: editor.getValue(), recipeId: exampleSelect.value, optimization: optimizationSelect.value as OptimizationMode, language: languageSelect.value as LanguageMode, updatedMemorySafetyRules: updatedMemorySafety.checked }; }
 function request(run: boolean) { const job = { snapshot: snapshot(), run }; if (active) { queued = job; el('status').textContent = 'Latest request queued'; } else void execute(job); }
 async function execute(job: { snapshot: SourceSnapshot; run: boolean }) {
-  runOnly = job.run && !!compilation?.success && compilation.revision === job.snapshot.revision && compilation.optimization === job.snapshot.optimization;
+  runOnly = job.run && !!compilation?.success && compilation.revision === job.snapshot.revision && compilation.optimization === job.snapshot.optimization && compilation.language === job.snapshot.language && compilation.updatedMemorySafetyRules === job.snapshot.updatedMemorySafetyRules;
   const optimized = job.snapshot.optimization !== 'none';
   progressTotal = runOnly ? 1 : job.run ? (optimized ? 8 : 7) : (optimized ? 7 : 6);
-  compileButton.disabled = true; runButton.disabled = true; optimizationSelect.disabled = true; clearCacheButton.disabled = true;
+  compileButton.disabled = true; runButton.disabled = true; optimizationSelect.disabled = true; languageSelect.disabled = true; updatedMemorySafety.disabled = true; clearCacheButton.disabled = true;
   document.querySelector('.workbench')!.setAttribute('aria-busy', 'true');
   active = job.snapshot; stopped = false; stopButton.disabled = false; stages.clear(); el('stages').replaceChildren(); el('output').textContent = ''; el('exit').textContent = ''; el('timings').textContent = ''; el('status').textContent = 'Starting';
   pipeline ??= new PlaygroundPipeline(onEvent);
   try {
     let result = compilation;
-    if (!job.run || !result?.success || result.revision !== job.snapshot.revision || result.optimization !== job.snapshot.optimization) {
+    if (!job.run || !result?.success || result.revision !== job.snapshot.revision || result.optimization !== job.snapshot.optimization || result.language !== job.snapshot.language || result.updatedMemorySafetyRules !== job.snapshot.updatedMemorySafetyRules) {
       result = await pipeline.compile(job.snapshot);
       if (!stopped && revision === job.snapshot.revision) {
         setDiagnostics(result.diagnostics); showTimings(result.timings);
@@ -147,7 +169,7 @@ async function execute(job: { snapshot: SourceSnapshot; run: boolean }) {
       if (!stopped && revision === job.snapshot.revision) { el('output').textContent = run.stdout + run.stderr; el('exit').textContent = run.exitCode === undefined ? '' : `Exit ${run.exitCode}`; showTimings([...result.timings, ...run.timings]); el('status').textContent = run.cancelled ? 'Stopped' : run.success ? 'Run complete' : run.error ? errorSummary(run.error) : 'Run failed'; if (job.snapshot.recipeId === 'tunit' && !run.cancelled && !run.error && run.exitCode !== undefined) { const report = formatTestReport(run.stdout); el('output').textContent = report.text + run.stderr; el('status').textContent = `Tests complete · ${report.passed} passed · ${report.failed} failed`; } }
     } else if (!stopped && result?.success && revision === job.snapshot.revision) el('status').textContent = 'Compilation complete';
   } catch (error) { if (!stopped && revision === job.snapshot.revision) el('status').textContent = errorSummary(error); }
-  finally { active = undefined; stopButton.disabled = true; compileButton.disabled = !!unsupported; runButton.disabled = !!unsupported; optimizationSelect.disabled = false; clearCacheButton.disabled = false; document.querySelector('.workbench')!.setAttribute('aria-busy', 'false'); const next = queued; queued = undefined; if (next) void execute(next); }
+  finally { active = undefined; stopButton.disabled = true; compileButton.disabled = !!unsupported; runButton.disabled = !!unsupported; optimizationSelect.disabled = false; languageSelect.disabled = false; updatedMemorySafety.disabled = false; clearCacheButton.disabled = false; document.querySelector('.workbench')!.setAttribute('aria-busy', 'false'); const next = queued; queued = undefined; if (next) void execute(next); }
 }
 unsupported = browserSupportMessage();
 if (unsupported) { compileButton.disabled = true; runButton.disabled = true; el('status').textContent = unsupported; }

@@ -23,7 +23,9 @@ using NetWasm.Compiler.ComponentModel.Browser;
 using Microsoft.CodeAnalysis.Diagnostics;
 using System.Collections.Immutable;
 using System.Security.Cryptography;
+using System.Threading;
 using TUnit.Core.SourceGenerator.Generators;
+using Microsoft.Extensions.Logging.Generators;
 using JsonSourceGenerator = jsonsourcegen::System.Text.Json.SourceGeneration.JsonSourceGenerator;
 
 [assembly: SupportedOSPlatform("browser")]
@@ -96,6 +98,7 @@ public static partial class Program
         CoreLinkPlanInfo? coreLinkPlan = null,
         string? trustedRecipe = null,
         int? catalogCaseCount = null,
+        string? componentContract = null,
         string? pe = null
 #if FRONTEND_CACHE_TRANSPORT
         , FrontendCacheInfo? frontendCache = null,
@@ -128,6 +131,7 @@ public static partial class Program
         DiagnosticInfo[] GeneratorDiagnostics,
         string? TrustedRecipe,
         int CatalogCaseCount,
+        string ComponentContract,
         string RuntimeManifest,
         string RuntimeSystemLibrariesJson);
     private static PendingFrontendCompilation? pendingFrontendCompilation;
@@ -194,51 +198,63 @@ public static partial class Program
 
     [JSExport]
     public static string Compile(string source, string reference, string supportJson, string implementation, string witJson, string witBytes, string runtimeManifest,
-        string runtimeSystemLibrariesJson)
+        string runtimeSystemLibrariesJson, string languageVersion, bool updatedMemorySafetyRules)
         => CompileRecipe(source, reference, supportJson, implementation, witJson, witBytes, runtimeManifest,
-            runtimeSystemLibrariesJson, "{}", "{}");
+            runtimeSystemLibrariesJson, "{}", "{}", languageVersion, updatedMemorySafetyRules);
 
     [JSExport]
     public static string CompileRecipe(string source, string reference, string supportJson, string implementation, string witJson, string witBytes, string runtimeManifest,
-        string runtimeSystemLibrariesJson, string additionalReferencesJson, string additionalImplementationsJson)
+        string runtimeSystemLibrariesJson, string additionalReferencesJson, string additionalImplementationsJson,
+        string languageVersion, bool updatedMemorySafetyRules)
         => CompileCore(source, reference, supportJson, implementation, witJson, witBytes, runtimeManifest,
-            runtimeSystemLibrariesJson, additionalReferencesJson, additionalImplementationsJson, null, false);
+            runtimeSystemLibrariesJson, additionalReferencesJson, additionalImplementationsJson, null, false,
+            languageVersion, updatedMemorySafetyRules);
 
     [JSExport]
     public static string CompileHttpRecipe(string source, string reference, string supportJson, string implementation, string witJson, string witBytes, string runtimeManifest,
-        string runtimeSystemLibrariesJson, string additionalReferencesJson, string additionalImplementationsJson)
+        string runtimeSystemLibrariesJson, string additionalReferencesJson, string additionalImplementationsJson,
+        string languageVersion, bool updatedMemorySafetyRules)
         => CompileCore(source, reference, supportJson, implementation, witJson, witBytes, runtimeManifest,
-            runtimeSystemLibrariesJson, additionalReferencesJson, additionalImplementationsJson, null, false, useAsyncPlatform: true);
+            runtimeSystemLibrariesJson, additionalReferencesJson, additionalImplementationsJson, null, false,
+            languageVersion, updatedMemorySafetyRules, useAsyncPlatform: true);
 
     [JSExport]
     public static string CompileGeneratedRecipe(string source, string reference, string supportJson, string implementation, string witJson, string witBytes, string runtimeManifest,
-        string runtimeSystemLibrariesJson, string additionalReferencesJson, string additionalImplementationsJson, string trustedRecipe, bool includeGeneratedSourceText)
+        string runtimeSystemLibrariesJson, string additionalReferencesJson, string additionalImplementationsJson, string trustedRecipe, bool includeGeneratedSourceText,
+        string languageVersion, bool updatedMemorySafetyRules)
         => CompileCore(source, reference, supportJson, implementation, witJson, witBytes, runtimeManifest,
-            runtimeSystemLibrariesJson, additionalReferencesJson, additionalImplementationsJson, trustedRecipe, includeGeneratedSourceText);
+            runtimeSystemLibrariesJson, additionalReferencesJson, additionalImplementationsJson, trustedRecipe, includeGeneratedSourceText,
+            languageVersion, updatedMemorySafetyRules);
 
 #if FRONTEND_CACHE_TRANSPORT
     [JSExport]
     public static string PrepareRecipe(string source, string reference, string supportJson, string implementation, string witJson, string witBytes, string runtimeManifest,
-        string runtimeSystemLibrariesJson, string additionalReferencesJson, string additionalImplementationsJson)
+        string runtimeSystemLibrariesJson, string additionalReferencesJson, string additionalImplementationsJson,
+        string languageVersion, bool updatedMemorySafetyRules)
         => CompileCore(source, reference, supportJson, implementation, witJson, witBytes, runtimeManifest,
-            runtimeSystemLibrariesJson, additionalReferencesJson, additionalImplementationsJson, null, false, prepareFrontendCache: true);
+            runtimeSystemLibrariesJson, additionalReferencesJson, additionalImplementationsJson, null, false,
+            languageVersion, updatedMemorySafetyRules, prepareFrontendCache: true);
 
     [JSExport]
     public static string PrepareHttpRecipe(string source, string reference, string supportJson, string implementation, string witJson, string witBytes, string runtimeManifest,
-        string runtimeSystemLibrariesJson, string additionalReferencesJson, string additionalImplementationsJson)
+        string runtimeSystemLibrariesJson, string additionalReferencesJson, string additionalImplementationsJson,
+        string languageVersion, bool updatedMemorySafetyRules)
         => CompileCore(source, reference, supportJson, implementation, witJson, witBytes, runtimeManifest,
             runtimeSystemLibrariesJson, additionalReferencesJson, additionalImplementationsJson, null, false,
-            useAsyncPlatform: true, prepareFrontendCache: true);
+            languageVersion, updatedMemorySafetyRules, useAsyncPlatform: true, prepareFrontendCache: true);
 
     [JSExport]
     public static string PrepareGeneratedRecipe(string source, string reference, string supportJson, string implementation, string witJson, string witBytes, string runtimeManifest,
-        string runtimeSystemLibrariesJson, string additionalReferencesJson, string additionalImplementationsJson, string trustedRecipe)
+        string runtimeSystemLibrariesJson, string additionalReferencesJson, string additionalImplementationsJson, string trustedRecipe,
+        string languageVersion, bool updatedMemorySafetyRules)
         => CompileCore(source, reference, supportJson, implementation, witJson, witBytes, runtimeManifest,
-            runtimeSystemLibrariesJson, additionalReferencesJson, additionalImplementationsJson, trustedRecipe, false, prepareFrontendCache: true);
+            runtimeSystemLibrariesJson, additionalReferencesJson, additionalImplementationsJson, trustedRecipe, false,
+            languageVersion, updatedMemorySafetyRules, prepareFrontendCache: true);
 #endif
 
     private static string CompileCore(string source, string reference, string supportJson, string implementation, string witJson, string witBytes, string runtimeManifest,
         string runtimeSystemLibrariesJson, string additionalReferencesJson, string additionalImplementationsJson, string? trustedRecipe, bool includeGeneratedSourceText,
+        string languageVersion, bool updatedMemorySafetyRules,
         bool useAsyncPlatform = false
 #if FRONTEND_CACHE_TRANSPORT
         , bool prepareFrontendCache = false
@@ -251,14 +267,19 @@ public static partial class Program
         double generatorMilliseconds = 0;
         try
         {
-            if (trustedRecipe is not (null or "json" or "tunit" or "di") ||
+            if (trustedRecipe is not (null or "json" or "tunit" or "di" or "logging") ||
                 (trustedRecipe == "di" && !TrustedGeneratorAssets.DependencyInjectionAvailable))
                 return Serialize(new(1, false, "request", "unsupported-generator-recipe", true, []));
+            if (languageVersion is not ("15" or "preview") ||
+                (updatedMemorySafetyRules && languageVersion != "preview"))
+                return Serialize(new(1, false, "request", "unsupported-language-settings", true, []));
             var tunit = trustedRecipe == "tunit";
             Stage("roslyn");
             var started = Stopwatch.GetTimestamp();
-            var parse = new CSharpParseOptions(LanguageVersion.Latest,
+            var parse = new CSharpParseOptions(languageVersion == "15" ? LanguageVersion.CSharp15 : LanguageVersion.Preview,
                 preprocessorSymbols: ["TRACE", "NETWASM", "NETWASM0_1", "RELEASE"]);
+            if (updatedMemorySafetyRules)
+                parse = parse.WithFeatures([new("updated-memory-safety-rules", "true")]);
             var trees = new[] { CSharpSyntaxTree.ParseText(SourceText.From(source, Encoding.UTF8), parse, tunit ? "Tests.cs" : "Program.cs") }
                 .Concat(JsonSerializer.Deserialize(supportJson, CompilerHostJsonContext.Default.SupportSourceArray)!
                     .Select(file => CSharpSyntaxTree.ParseText(SourceText.From(file.text, Encoding.UTF8), parse, file.path)));
@@ -269,6 +290,7 @@ public static partial class Program
                 new CSharpCompilationOptions(OutputKind.ConsoleApplication,
                     optimizationLevel: OptimizationLevel.Release,
                     nullableContextOptions: NullableContextOptions.Enable,
+                    allowUnsafe: true,
                     concurrentBuild: false, deterministic: true,
                     mainTypeName: tunit ? "NetWasm.TUnit.Generated.NetWasmTestProgram" : null));
             Compilation generatedCompilation = compilation;
@@ -280,6 +302,7 @@ public static partial class Program
                 {
                     "tunit" => [new TestMetadataGenerator(), new HookMetadataGenerator(), new AotConverterGenerator(), new PropertyInjectionSourceGenerator()],
                     "di" => [TrustedGeneratorAssets.CreateDependencyInjectionGenerator()],
+                    "logging" => [TrustedGeneratorAssets.CreateLoggingGenerator()],
                     _ => [new JsonSourceGenerator()],
                 };
                 GeneratorDriver driver = CSharpGeneratorDriver.Create(generators.Select(generator => generator.AsSourceGenerator()),
@@ -315,13 +338,18 @@ public static partial class Program
                 generatorDiagnostics.Take(128).Select(Describe).ToArray()));
             Stage("netwasm");
             started = Stopwatch.GetTimestamp();
+            var entryPoint = generatedCompilation.GetEntryPoint(CancellationToken.None);
+            var inferredAsyncPlatform = entryPoint?.ReturnType is INamedTypeSymbol returnType &&
+                returnType.Name == "Task" && returnType.ContainingNamespace.ToDisplayString() == "System.Threading.Tasks";
+            var asynchronous = tunit || useAsyncPlatform || inferredAsyncPlatform;
+            var componentContract = asynchronous ? "async-command" : "command";
             var images = new Dictionary<string,byte[]> { ["NetWasmApp.dll"] = pe.ToArray(), ["NetWasm.CoreLib.dll"] = Convert.FromBase64String(implementation) };
             var additionalImplementations = JsonSerializer.Deserialize(additionalImplementationsJson, CompilerHostJsonContext.Default.DictionaryStringString)!;
             foreach (var image in additionalImplementations) images.Add(image.Key, Convert.FromBase64String(image.Value));
             images["compiler.wit.wasm"] = Convert.FromBase64String(witBytes);
             var options = new CompilerOptions(
                 "NetWasmApp.dll", ["NetWasm.CoreLib.dll", .. additionalImplementations.Keys], "Program", "<Main>$", [],
-                WitPath: "compiler.wit.wasm", WitWorld: tunit || useAsyncPlatform ? "netwasm:platform@1.0.0/async-platform" : "netwasm:platform@1.0.0/platform",
+                WitPath: "compiler.wit.wasm", WitWorld: asynchronous ? "netwasm:platform@1.0.0/async-platform" : "netwasm:platform@1.0.0/platform",
                 EntryPointKind: CompilerEntryPointKind.ManagedExecutable);
             var request = new BrowserCompilationRequest(options, images,
                 new Dictionary<string,string> { ["compiler.wit.wasm"] = witJson }, selectManagedExecutableEntryPoint: true);
@@ -339,11 +367,12 @@ public static partial class Program
                         throw new InvalidOperationException("Frontend cache preparation is unavailable.");
                     pendingFrontendCompilation = new(session, preparation, [], pe.ToArray(), timings.ToArray(),
                         generatedSources, generatorDiagnostics.Take(128).Select(Describe).ToArray(), trustedRecipe,
-                        tunit ? CountCatalogCases(generatedCompilation) : 0, runtimeManifest,
+                        tunit ? CountCatalogCases(generatedCompilation) : 0, componentContract, runtimeManifest,
                         runtimeSystemLibrariesJson);
                     return Serialize(new(1, true, timings: timings.ToArray(), generatedSources: generatedSources,
                         generatorDiagnostics: generatorDiagnostics.Take(128).Select(Describe).ToArray(),
                         trustedRecipe: trustedRecipe, catalogCaseCount: tunit ? CountCatalogCases(generatedCompilation) : 0,
+                        componentContract: componentContract,
                         frontendCache: new(preparation.FrontendCache.Schema,
                             preparation.FrontendCache.Namespace, preparation.Handle)));
                 }
@@ -375,7 +404,7 @@ public static partial class Program
                 runtimeFeatures: compiled.RuntimeFeatures.ToArray(), imports: compiled.FunctionImports.Select(Describe).ToArray(),
                 interopManifest: Describe(compiled.InteropManifest), entryPoint: Describe(compiled.EntryPoint),
                 runtimeLinkPlan: Describe(runtimeLinkPlan), coreLinkPlan: Describe(coreLinkPlan), trustedRecipe: trustedRecipe,
-                catalogCaseCount: tunit ? CountCatalogCases(generatedCompilation) : 0,
+                catalogCaseCount: tunit ? CountCatalogCases(generatedCompilation) : 0, componentContract: componentContract,
                 pe: emitted.Success ? Convert.ToBase64String(pe.ToArray()) : null));
         }
         catch (CompilerException error)
@@ -435,6 +464,7 @@ public static partial class Program
                 interopManifest: Describe(compiled.InteropManifest), entryPoint: Describe(compiled.EntryPoint),
                 runtimeLinkPlan: Describe(runtimeLinkPlan), coreLinkPlan: Describe(coreLinkPlan),
                 trustedRecipe: pending.TrustedRecipe, catalogCaseCount: pending.CatalogCaseCount,
+                componentContract: pending.ComponentContract,
                 pe: Convert.ToBase64String(pending.Pe),
                 frontendPublication: prepared.FrontendPublication is null ? null : new(
                     prepared.FrontendPublication.Token, prepared.FrontendPublication.EntryCount,

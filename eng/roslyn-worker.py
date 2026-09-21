@@ -202,7 +202,8 @@ try {
   const recipe = recipes[data.recipe];
   try {
    const result = JSON.parse(api.CompileGeneratedRecipe(data.source, reference, JSON.stringify(recipe.support), implementation,
-     witJson, wit, manifest, JSON.stringify(recipe.references), JSON.stringify(recipe.implementations), data.recipe, data.evidence));
+     witJson, wit, manifest, JSON.stringify(recipe.references), JSON.stringify(recipe.implementations), data.recipe, data.evidence,
+     '15', false));
    result.hostLinearMemoryBytes = runtime.Module?.HEAPU8?.buffer?.byteLength ?? null;
    self.postMessage({id:data.id,result});
   } catch(error) { self.postMessage({id:data.id,error:String(error)}); }

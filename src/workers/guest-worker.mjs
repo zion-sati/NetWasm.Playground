@@ -2,6 +2,9 @@ import { checkGuestMemory } from './guest-memory.mjs';
 import { installGuestHttpBudget } from './guest-http-budget.mjs';
 import { createAssetLoader, serveWorker, digest, errorText } from './asset-loader.mjs';
 
+// The structured logging example produces a measured 4.12 MiB component.
+const maximumComponentBytes = 5 * 1048576;
+
 serveWorker(async (data, report) => {
   // These captures survive both instantiation failures and execution traps.
   const output = { stdout: '', stderr: '' };
@@ -38,14 +41,15 @@ serveWorker(async (data, report) => {
   }, flush() {} });
   try {
     if (data.operation !== 'run' || !(data.component instanceof Uint8Array)) throw Error('Invalid guest run request');
-    const managedProcess = data.recipe === 'tunit' || data.recipe === 'http';
+    if (!['command', 'async-command'].includes(data.componentContract)) throw Error('Invalid guest component contract');
+    const managedProcess = data.componentContract === 'async-command';
     const args = data.args === undefined ? [] : data.args;
     if (!Array.isArray(args) || (args.length !== 0 &&
         (data.recipe !== 'tunit' || args.length !== 1 || args[0] !== '--list'))) throw Error('Unsupported guest arguments');
     const argumentsSnapshot = args.slice();
     const component = data.component.slice();
-    // The curated serialization example produces a measured 1.3 MiB component.
-    if (component.byteLength > 4 * 1048576) throw Error('Component input limit exceeded');
+    if (component.byteLength > maximumComponentBytes)
+      throw Error(`Component input limit exceeded (${component.byteLength} > ${maximumComponentBytes})`);
     componentSha256 = await digest(component);
     if (data.sha256 !== undefined && componentSha256 !== data.sha256) throw Error('Component digest mismatch');
     begin('transpile');

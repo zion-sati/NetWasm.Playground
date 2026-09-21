@@ -17,6 +17,8 @@ import zipfile
 
 ROOT = Path(__file__).resolve().parents[1]
 ARCHIVES = {}
+CANDIDATE_FEED = None
+CANDIDATE_VERSION = None
 SPEC = importlib.util.spec_from_file_location('prepare_web', ROOT / 'eng/prepare-web.py')
 PREPARE = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(PREPARE)
@@ -74,8 +76,21 @@ def verified_archive(package, version):
     return ARCHIVES[key]
 
 
+def package_archive(package, version):
+    if CANDIDATE_FEED is not None and version == CANDIDATE_VERSION:
+        expected = f'{package}.{version}.nupkg'.lower()
+        matches = [path for path in CANDIDATE_FEED.glob('*.nupkg')
+                   if path.name.lower() == expected]
+        if len(matches) != 1:
+            raise ValueError(f'Candidate feed lacks one exact package: {package}/{version}')
+        if matches[0].stat().st_size > 256 * 1024 * 1024:
+            raise ValueError(f'Candidate package exceeds the size limit: {package}/{version}')
+        return matches[0].read_bytes()
+    return verified_archive(package, version)[1]
+
+
 def package_members(package, version, members):
-    _, payload, _ = verified_archive(package, version)
+    payload = package_archive(package, version)
     with zipfile.ZipFile(io.BytesIO(payload)) as archive:
         extracted = {name: archive.read(name) for name in members}
     for name, expected in members.items():
@@ -98,6 +113,9 @@ def rebind_notice_origins(stage, pins):
         url, archive, restore_hash = verified_archive(package, version)
         packages[package] = (version, url, archive, restore_hash)
     for target, entry in origins['files'].items():
+        catalog_entry = NOTICES.PUBLIC_CATALOG['files'].get(target)
+        if catalog_entry is not None:
+            entry['covers'] = catalog_entry['covers']
         source = entry['source']
         source_family = next((family for family in ('netwasm', 'libraries')
                               if source.get('kind') == 'git' and
@@ -147,7 +165,7 @@ def add_guest_providers(stage, toolchain_archive):
 def add_http_example(stage, library_version):
     member = 'lib/NetWasm,Version=v0.1/System.Net.Http.dll'
     assembly = package_members('netwasm.system.net.http', library_version, {
-        member: 'b4e4ee180a33509d6148a6ee0d76a3fa5ab556f8792471ce52584ac05a092433',
+        member: '0aa5c026c3c2307824feb43a97f407f1aa99f473ba9cf6fa620d4b57d4b7e085',
     })[member]
     for role in ('references', 'implementations'):
         destination = stage / role / 'System.Net.Http.dll'
@@ -163,26 +181,31 @@ def add_http_example(stage, library_version):
 ASSEMBLY_PACKAGES = {
     'Microsoft.Extensions.DependencyInjection.Abstractions.dll': 'netwasm.microsoft.extensions.dependencyinjection.abstractions',
     'Microsoft.Extensions.DependencyInjection.dll': 'netwasm.microsoft.extensions.dependencyinjection',
+    'Microsoft.Extensions.Logging.Abstractions.dll': 'netwasm.microsoft.extensions.logging.abstractions',
+    'Microsoft.Extensions.Logging.dll': 'netwasm.microsoft.extensions.logging',
+    'Microsoft.Extensions.Options.dll': 'netwasm.microsoft.extensions.options',
     'NetWasm.TUnit.Runner.dll': 'netwasm.tunit',
     'System.IO.Hashing.dll': 'netwasm.system.io.hashing',
     'System.IO.Pipelines.dll': 'netwasm.system.io.pipelines',
+    'System.Linq.AsyncEnumerable.dll': 'netwasm.system.linq.asyncenumerable',
     'System.Linq.dll': 'netwasm.system.linq',
     'System.Memory.dll': 'netwasm.system.memory',
     'System.Text.Encodings.Web.dll': 'netwasm.system.text.encodings.web',
     'System.Text.Json.dll': 'netwasm.system.text.json',
     'System.Text.RegularExpressions.dll': 'netwasm.system.text.regularexpressions',
+    'System.Xml.ReaderWriter.dll': 'netwasm.system.xml',
     'TUnit.Assertions.dll': 'netwasm.tunit.assertions',
     'TUnit.Core.dll': 'netwasm.tunit.core',
 }
 
 
 def public_member(package, version, member):
-    _, archive, _ = verified_archive(package, version)
+    archive = package_archive(package, version)
     with zipfile.ZipFile(io.BytesIO(archive)) as package_zip:
         return package_zip.read(member)
 
 
-def refresh_public_assets(stage, pins):
+def refresh_public_assets(stage, pins, runtime_plan=None):
     """Replace every versioned compiler input in the pinned reusable browser base."""
     core = pins['netwasm']['packageVersion']
     libraries = pins['libraries']['packageVersion']
@@ -218,11 +241,31 @@ def refresh_public_assets(stage, pins):
     for name, package in ASSEMBLY_PACKAGES.items():
         version = tunit if package.startswith('netwasm.tunit') else libraries
         member = f'lib/NetWasm,Version=v0.1/{name}'
+        assembly = public_member(package, version, member)
         for role in ('references', 'implementations'):
-            replace(f'{role}/{name}', package, version, member)
+            destination = stage / role / name
+            destination.parent.mkdir(exist_ok=True)
+            destination.write_bytes(assembly)
     actual = {path.name for path in (stage / 'references').glob('*.dll')}
     if actual != set(ASSEMBLY_PACKAGES):
         raise ValueError(f'Unexpected reusable browser reference set: {sorted(actual ^ set(ASSEMBLY_PACKAGES))}')
+
+    library_recipes = {
+        'async-linq': ['System.Linq.AsyncEnumerable.dll', 'System.Linq.dll'],
+        'pipelines': ['System.IO.Pipelines.dll', 'System.Memory.dll'],
+        'web-encoding': ['System.Text.Encodings.Web.dll'],
+        'xml': ['System.Xml.ReaderWriter.dll'],
+        'logging': ['Microsoft.Extensions.Logging.Abstractions.dll', 'Microsoft.Extensions.Logging.dll',
+                    'Microsoft.Extensions.Options.dll', 'Microsoft.Extensions.DependencyInjection.Abstractions.dll',
+                    'Microsoft.Extensions.DependencyInjection.dll'],
+    }
+    for recipe_id, assemblies in library_recipes.items():
+        paths = {name: f'references/{name}' for name in assemblies}
+        implementations = {name: f'implementations/{name}' for name in assemblies}
+        packages = sorted({ASSEMBLY_PACKAGES[name] for name in assemblies})
+        (stage / 'recipes' / f'{recipe_id}.json').write_bytes(encoded({
+            'schemaVersion': 1, 'id': recipe_id, 'references': paths,
+            'implementations': implementations, 'packages': packages, 'version': libraries}))
 
     for recipe_path in sorted((stage / 'recipes').glob('*.json')):
         if recipe_path.name == 'tunit-support.json':
@@ -239,6 +282,24 @@ def refresh_public_assets(stage, pins):
         f"https://raw.githubusercontent.com/zion-sati/NetWasm/{pins['netwasm']['commit']}/eng/toolchain.json",
         128 * 1024))
     inputs.pop('desktopReceiptSha256', None)
+    if runtime_plan is not None:
+        if (not isinstance(runtime_plan, dict) or set(runtime_plan) != {'arguments', 'inputs'} or
+                not isinstance(runtime_plan['arguments'], list) or not isinstance(runtime_plan['inputs'], list)):
+            raise ValueError('Candidate runtime plan has an unexpected shape')
+        if (len(runtime_plan['arguments']) > 256 or
+                any(not isinstance(argument, str) or len(argument) > 4096
+                    for argument in runtime_plan['arguments'])):
+            raise ValueError('Candidate runtime plan has invalid arguments')
+        paths = set()
+        for item in runtime_plan['inputs']:
+            if (not isinstance(item, dict) or set(item) != {'path', 'sha256'} or
+                    not isinstance(item['path'], str) or
+                    not isinstance(item['sha256'], str) or
+                    not re.fullmatch(r'[a-f0-9]{64}', item['sha256']) or
+                    item['path'] in paths):
+                raise ValueError('Candidate runtime plan has invalid inputs')
+            paths.add(item['path'])
+        inputs['expectedRuntimePlan'] = runtime_plan
     for item in inputs['expectedRuntimePlan']['inputs']:
         if not item['path'].startswith('/netwasm-link/runtime/'):
             raise ValueError('Unexpected public runtime plan path')
@@ -248,11 +309,40 @@ def refresh_public_assets(stage, pins):
 
 
 def main():
+    global CANDIDATE_FEED, CANDIDATE_VERSION
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--compiler-framework', type=Path, required=True)
     parser.add_argument('--workers', type=Path, default=ROOT / 'src/workers')
     parser.add_argument('--output', type=Path, default=ROOT / 'public/toolchain')
+    parser.add_argument('--candidate-feed', type=Path)
+    parser.add_argument('--candidate-version')
+    parser.add_argument('--candidate-commit')
+    parser.add_argument('--candidate-tunit-version')
+    parser.add_argument('--candidate-tunit-commit')
+    parser.add_argument('--runtime-plan', type=Path,
+                        help='Actual candidate compiler runtime plan captured from a preliminary toolchain')
     args = parser.parse_args()
+    candidate_values = (args.candidate_feed, args.candidate_version, args.candidate_commit)
+    if any(candidate_values) != all(candidate_values):
+        parser.error('--candidate-feed, --candidate-version and --candidate-commit must be supplied together')
+    if args.candidate_commit and not re.fullmatch(r'[a-f0-9]{40}', args.candidate_commit):
+        parser.error('--candidate-commit must be a full Git SHA')
+    if args.candidate_version and not re.fullmatch(r'[0-9]+\.[0-9]+\.[0-9]+-[0-9A-Za-z.-]+', args.candidate_version):
+        parser.error('--candidate-version must be an exact prerelease version')
+    tunit_values = (args.candidate_tunit_version, args.candidate_tunit_commit)
+    if any(tunit_values) != all(tunit_values) or any(tunit_values) and not args.candidate_feed:
+        parser.error('--candidate-tunit-version and --candidate-tunit-commit require each other and a candidate feed')
+    if args.candidate_tunit_version and not re.fullmatch(r'[0-9]+\.[0-9]+\.[0-9]+-[0-9A-Za-z.-]+', args.candidate_tunit_version):
+        parser.error('--candidate-tunit-version must be an exact prerelease version')
+    if args.candidate_tunit_commit and not re.fullmatch(r'[a-f0-9]{40}', args.candidate_tunit_commit):
+        parser.error('--candidate-tunit-commit must be a full Git SHA')
+    if args.candidate_feed and not args.candidate_feed.is_dir():
+        parser.error('--candidate-feed must be an existing directory')
+    if args.runtime_plan and not args.candidate_feed:
+        parser.error('--runtime-plan is only valid with a candidate feed')
+    CANDIDATE_FEED = args.candidate_feed.resolve() if args.candidate_feed else None
+    CANDIDATE_VERSION = args.candidate_version
+    runtime_plan = json.loads(args.runtime_plan.read_text()) if args.runtime_plan else None
     base = json.loads((ROOT / 'eng/toolchain-base.json').read_text())
     archive = base.get('archive', {})
     if base.get('schemaVersion') != 2 or not isinstance(archive.get('bytes'), int) or archive['bytes'] < 1 or \
@@ -300,10 +390,17 @@ def main():
             destination = stage.joinpath(*path.parts)
             destination.parent.mkdir(parents=True, exist_ok=True)
             destination.write_bytes(payload)
-        pins = json.loads((ROOT / 'eng/upstream-sources.json').read_text())['sources']
-        refresh_public_assets(stage, pins)
-        packages = rebind_notice_origins(stage, pins)
-        add_guest_providers(stage, packages['netwasm.toolchain'][2])
+        release_pins = json.loads((ROOT / 'eng/upstream-sources.json').read_text())['sources']
+        pins = json.loads(json.dumps(release_pins))
+        if CANDIDATE_FEED is not None:
+            pins['netwasm']['packageVersion'] = CANDIDATE_VERSION
+            pins['netwasm']['commit'] = args.candidate_commit
+        if args.candidate_tunit_version:
+            pins['tunit']['packageVersion'] = args.candidate_tunit_version
+            pins['tunit']['commit'] = args.candidate_tunit_commit
+        refresh_public_assets(stage, pins, runtime_plan)
+        rebind_notice_origins(stage, release_pins)
+        add_guest_providers(stage, package_archive('netwasm.toolchain', pins['netwasm']['packageVersion']))
         add_http_example(stage, pins['libraries']['packageVersion'])
         framework = stage / 'compiler/_framework'
         shutil.copytree(args.compiler_framework, framework)

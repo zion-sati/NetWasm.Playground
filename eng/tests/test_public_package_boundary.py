@@ -27,7 +27,7 @@ class PublicPackageBoundaryTests(unittest.TestCase):
         self.assertIn('RELEASE.verify_staged(base_toolchain)', script)
         self.assertIn("Public package member changed", script)
         self.assertIn("identity = {'schemaVersion': 3, 'pins': pins", script)
-        self.assertIn('rebind_notice_origins(stage, pins)', script)
+        self.assertIn('rebind_notice_origins(stage, release_pins)', script)
         self.assertIn("registration5-semver1", script)
         self.assertIn("NOTICES.verify(stage / 'notices')", script)
         self.assertNotIn('playground.netwasm.com/toolchain/', json.dumps(base))
@@ -82,13 +82,56 @@ class PublicPackageBoundaryTests(unittest.TestCase):
         }, references)
         define_constants = project.findtext(".//DefineConstants", default="")
         self.assertIn("FRONTEND_CACHE_TRANSPORT", define_constants.split(";"))
+        self.assertEqual("net11.0", project.findtext(".//TargetFramework"))
+        self.assertEqual("11.0.0-rc.1.26425.128", json.loads(
+            (ROOT / "eng/browser-host.json").read_text())["runtimeFrameworkVersion"])
 
         release_builder = (ROOT / 'eng/build-release-compiler.py').read_text()
+        self.assertIn("11.0.100-rc.1.26425.128", release_builder)
         self.assertIn("'-p:DefineConstants=FRONTEND_CACHE_TRANSPORT'", release_builder)
         self.assertIn("'-p:WasmBuildNative=true'", release_builder)
         self.assertIn("'-p:RunAOTCompilation=false'", release_builder)
         self.assertIn("'-p:PublishTrimmed=false'", release_builder)
         self.assertIn("'-p:ILLinkTreatWarningsAsErrors=false'", release_builder)
+
+    def test_candidate_compiler_feed_is_explicit_and_not_the_release_default(self):
+        help_text = subprocess.check_output(
+            ["python3", str(ROOT / "eng/build-release-compiler.py"), "--help"],
+            text=True)
+
+        self.assertIn("--candidate-feed", help_text)
+        self.assertIn("--candidate-version", help_text)
+        self.assertIn("--candidate-tunit-version", help_text)
+        release = (ROOT / ".github/workflows/release.yml").read_text()
+        self.assertNotIn("--candidate-feed", release)
+
+        ci = (ROOT / ".github/workflows/ci.yml").read_text()
+        self.assertIn("bash eng/qualify-released-toolchain.sh", ci)
+        self.assertNotIn("qualify-csharp15-candidate.sh", ci)
+        self.assertNotIn("candidate/netwasm", ci)
+        qualifier = (ROOT / "eng/qualify-released-toolchain.sh").read_text()
+        self.assertIn("eng/build-release-compiler.py", qualifier)
+        self.assertIn("eng/rebuild-public-toolchain.py", qualifier)
+        self.assertNotIn("--candidate-feed", qualifier)
+
+        rebuilder_help = subprocess.check_output(
+            ["python3", str(ROOT / "eng/rebuild-public-toolchain.py"), "--help"],
+            text=True)
+        self.assertIn("--candidate-feed", rebuilder_help)
+        self.assertIn("--candidate-version", rebuilder_help)
+        self.assertIn("--candidate-commit", rebuilder_help)
+        self.assertIn("--candidate-tunit-version", rebuilder_help)
+        self.assertIn("--candidate-tunit-commit", rebuilder_help)
+        self.assertIn("--runtime-plan", rebuilder_help)
+
+        incomplete = subprocess.run([
+            "python3", str(ROOT / "eng/rebuild-public-toolchain.py"),
+            "--compiler-framework", ".", "--candidate-feed", ".",
+            "--candidate-version", "0.0.0-ci.1",
+        ], text=True, capture_output=True)
+        self.assertEqual(2, incomplete.returncode)
+        self.assertIn("must be supplied together", incomplete.stderr)
+        self.assertNotIn("--candidate-feed", release)
 
     def test_asset_stager_has_no_source_checkout_option(self):
         help_text = subprocess.check_output(
