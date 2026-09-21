@@ -68,6 +68,7 @@ jobs:
             sleep 1
           done
           curl --fail --silent "$PLAYGROUND_URL" >/dev/null
+          node eng/browser-smoke/back-navigation.mjs
           node eng/browser-smoke/deployment.mjs
           node eng/browser-smoke/wasi-examples.mjs
       - name: Upload Pages artifact
@@ -143,6 +144,7 @@ jobs:
           PLAYGROUND_URL: ${{ needs.deploy.outputs.page_url }}
           PLAYGROUND_EVIDENCE: .cache/pages-live-smoke
         run: |
+          node eng/browser-smoke/back-navigation.mjs
           node eng/browser-smoke/deployment.mjs
           node eng/browser-smoke/wasi-examples.mjs
       - name: Retain public deployment evidence

@@ -202,4 +202,19 @@ clearCacheButton.onclick = () => {
     el('status').textContent = errorSummary(error);
   }).finally(() => { clearCacheButton.disabled = false; });
 };
-window.addEventListener('pagehide', () => { pipeline?.dispose(); if (downloadUrl) URL.revokeObjectURL(downloadUrl); editor.dispose(); });
+window.addEventListener('pagehide', event => {
+  // A persisted page is only being frozen for browser back/forward navigation.
+  // Its JavaScript heap is restored as-is, so disposing Monaco here leaves the
+  // restored page with a dead editor that cannot render later model changes.
+  if (event.persisted) return;
+  pipeline?.dispose();
+  if (downloadUrl) URL.revokeObjectURL(downloadUrl);
+  editor.dispose();
+});
+window.addEventListener('pageshow', event => {
+  if (!event.persisted) return;
+  requestAnimationFrame(() => {
+    editor.layout();
+    editor.render(true);
+  });
+});
