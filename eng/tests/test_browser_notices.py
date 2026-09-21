@@ -13,10 +13,10 @@ class BrowserNoticeVersionTests(unittest.TestCase):
     def test_released_package_versions_follow_public_pins(self):
         versions = MODULE.current_package_versions()
 
-        self.assertEqual("0.2.3", versions["netwasm.toolchain"])
-        self.assertEqual("0.2.2", versions["netwasm.tunit"])
-        self.assertEqual("0.2.2", versions["netwasm.tunit.assertions"])
-        self.assertEqual("0.2.2", versions["netwasm.tunit.core"])
+        self.assertEqual("0.3.0", versions["netwasm.toolchain"])
+        self.assertEqual("0.3.0", versions["netwasm.tunit"])
+        self.assertEqual("0.3.0", versions["netwasm.tunit.assertions"])
+        self.assertEqual("0.3.0", versions["netwasm.tunit.core"])
 
     def test_normalization_rejects_stale_release_coordinates(self):
         files = {"notice": {"source": {

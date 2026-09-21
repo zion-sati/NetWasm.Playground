@@ -9,7 +9,7 @@ const browser=await chromium.launch({headless:true});const results=[],errors=[];
 try {
  const page=await browser.newPage({acceptDownloads:true});page.on('pageerror',error=>errors.push(String(error)));
  await page.goto(url);await page.locator('.monaco-editor').waitFor();
- if(process.env.PLAYGROUND_COMPARE_DESKTOP_BYTES==='1')await page.getByLabel('Optimization',{exact:true}).selectOption('Oz');
+ await page.getByLabel('Optimization',{exact:true}).selectOption(process.env.PLAYGROUND_COMPARE_DESKTOP_BYTES==='1'?'Oz':'none');
  for(const example of expected) {
   await page.getByLabel('Example',{exact:true}).selectOption(example.id);
   if(await page.locator('#download').isEnabled())throw Error('Recipe change retained stale download');

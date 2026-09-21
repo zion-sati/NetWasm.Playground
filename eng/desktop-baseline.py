@@ -109,9 +109,12 @@ def main():
         raise RuntimeError("Restore used an unexpected source")
     if {str(Path(folder).resolve()) for folder in assets["packageFolders"]} != {str(run / "packages")}:
         raise RuntimeError("Restore used an unexpected package folder")
-    binaryen = run / f"packages/netwasm.toolchain/{version}/tools/binaryen/bin"
+    host_tool_bins = list((run / "packages").glob(f"netwasm.hosttools.*/{version}/tools/bin"))
+    if len(host_tool_bins) != 1:
+        raise RuntimeError("Expected one restored native host-tools package")
     tools = {"wasm-ld": str(args.wasm_ld.absolute()),
-             "wasm-merge": str(binaryen / "wasm-merge"), "wasm-opt": str(binaryen / "wasm-opt")}
+             "wasm-merge": str(host_tool_bins[0] / "wasm-merge"),
+             "wasm-opt": str(host_tool_bins[0] / "wasm-opt")}
     wrappers = run / "wrappers"
     wrappers.mkdir()
     (run / "capture-config.json").write_text(json.dumps({
@@ -119,9 +122,10 @@ def main():
         "pythonAdapter": str(ROOT / "eng/capture-tool.py")}, indent=2))
     (wrappers / "wasm-ld").symlink_to(ROOT / "eng/capture-tool.py")
     for name in ("wasm-merge", "wasm-opt"):
-        (wrappers / name).write_bytes((ROOT / "eng/capture-tool.mjs").read_bytes())
-    properties = {"NetWasmWasmLdPath": "wasm-ld", "NetWasmBinaryenWasmMergePath": "wasm-merge",
-                  "NetWasmBinaryenWasmOptPath": "wasm-opt"}
+        (wrappers / name).symlink_to(ROOT / "eng/capture-tool.py")
+    properties = {"NetWasmWasmLdPath": "wasm-ld",
+                  "NetWasmNativeBinaryenWasmMergePath": "wasm-merge",
+                  "NetWasmNativeBinaryenWasmOptPath": "wasm-opt"}
     (run / "capture.targets").write_text(
         '<Project><Target Name="CaptureDesktopToolBoundaries" '
         'AfterTargets="NetWasmSdkResolveBuildEnvironment"><PropertyGroup>' +
@@ -135,7 +139,7 @@ def main():
     if output != "42":
         raise RuntimeError("The real component did not print 42")
     invocations = [json.loads(path.read_text()) for path in (run / "captured-tools").glob("*/invocation.json")]
-    for name in tools:
+    for name in ("wasm-ld", "wasm-opt"):
         if not any(Path(item["tool"]).name == name and item["inputs"] and item["exitCode"] == 0
                    for item in invocations):
             raise RuntimeError(f"Missing successful {name} boundary")
