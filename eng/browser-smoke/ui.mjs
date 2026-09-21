@@ -3,6 +3,7 @@ import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 const url = process.env.PLAYGROUND_URL;
 if (!url) throw new Error('PLAYGROUND_URL is required');
+const playgroundVersion = JSON.parse(readFileSync(new URL('../../package.json', import.meta.url))).version;
 const output = process.env.PLAYGROUND_EVIDENCE || '.';
 mkdirSync(output, { recursive: true });
 const browser = await chromium.launch({ headless: true });
@@ -14,6 +15,7 @@ try {
   page.on('pageerror', error => errors.push(String(error)));
   page.on('request', request => requests.push({ url: request.url(), method: request.method(), body: request.postData() }));
   await page.goto(url);
+  assert(await page.getByLabel('Playground version', { exact: true }).textContent() === `v${playgroundVersion}`, 'Playground version is missing or stale');
   await page.locator('.monaco-editor').waitFor();
   await page.getByLabel('Optimization', { exact: true }).selectOption('Oz');
   assert(!requests.some(request => request.url.includes('/toolchain/')), 'Toolchain fetched before first action');
