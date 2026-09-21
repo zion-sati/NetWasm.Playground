@@ -15,16 +15,19 @@ import zipfile
 ROOT = Path(__file__).resolve().parents[1]
 FEED = 'https://api.nuget.org/v3/index.json'
 PACKAGES = {
-    'json': ('netwasm.system.text.json', '0.3.0',
+    'json': ('netwasm.system.text.json', '0.4.0',
              'analyzers/dotnet/cs/System.Text.Json.SourceGeneration.dll',
              '595434b3c5d64e527c22104ba20f8796d8a9a18a076b36ca99d38c09f311893f'),
-    'tunit-generator': ('netwasm.tunit.core', '0.3.0',
+    'tunit-generator': ('netwasm.tunit.core', '0.4.0',
                         'analyzers/dotnet/roslyn4.14/cs/TUnit.Core.SourceGenerator.dll',
-                        'df661d15a469323ac7a0fc9ecd0b0b1ff9a96bda4131a18d9dd80a5fcdfbd744'),
-    'di': ('netwasm.microsoft.extensions.dependencyinjection', '0.3.0',
+                        'bed94cb5b69336320ff7d387fdffedb4d97b89616918a9c63a537d6656b6aa8a'),
+    'di': ('netwasm.microsoft.extensions.dependencyinjection', '0.4.0',
            'analyzers/dotnet/cs/NetWasm.Microsoft.Extensions.DependencyInjection.Generator.dll',
-           '11dc3d56e8757befc232be278c5f754ff69cc3d7be48116ac6e4ebf08741a2ff'),
-    'tunit-program': ('netwasm.tunit', '0.3.0',
+           '3661e3ec356ee8ebe9e73b6d4c4feb6254a395460766acc6d7f8a0cf67c427d3'),
+    'logging': ('netwasm.microsoft.extensions.logging.abstractions', '0.4.0',
+                'analyzers/dotnet/cs/NetWasm.Microsoft.Extensions.Logging.Generators.dll',
+                'f219353ffd51e4635fcc90e7bc8042127c57c093e014da17a8ffc8387cee4741'),
+    'tunit-program': ('netwasm.tunit', '0.4.0',
                       'build/NetWasm,Version=v0.1/NetWasm.TUnit.Program.cs',
                       '7a9860417e8486dabfd02875784f8d71f19c7c36882c2b9dfc6d70d130a8fde5'),
 }
@@ -99,7 +102,8 @@ def main():
         group = ET.SubElement(project.getroot(), 'ItemGroup')
         for name, key in [('System.Text.Json.SourceGeneration', 'json'),
                           ('TUnit.Core.SourceGenerator', 'tunit-generator'),
-                          ('NetWasm.Microsoft.Extensions.DependencyInjection.Generator', 'di')]:
+                          ('NetWasm.Microsoft.Extensions.DependencyInjection.Generator', 'di'),
+                          ('NetWasm.Microsoft.Extensions.Logging.Generators', 'logging')]:
             reference = ET.SubElement(group, 'Reference', Include=name)
             ET.SubElement(reference, 'HintPath').text = str(extracted[key])
             if key == 'json':
@@ -111,7 +115,9 @@ def main():
             'internal static class TrustedGeneratorAssets { internal const string TUnitProgram = ' +
             json.dumps(program) + ';\ninternal const bool DependencyInjectionAvailable = true;\n'
             'internal static global::Microsoft.CodeAnalysis.IIncrementalGenerator CreateDependencyInjectionGenerator() => '
-            'new global::NetWasm.Microsoft.Extensions.DependencyInjection.Generator.NetWasmDependencyInjectionGenerator(); }\n')
+            'new global::NetWasm.Microsoft.Extensions.DependencyInjection.Generator.NetWasmDependencyInjectionGenerator();\n'
+            'internal static global::Microsoft.CodeAnalysis.IIncrementalGenerator CreateLoggingGenerator() => '
+            'new global::Microsoft.Extensions.Logging.Generators.LoggerMessageGenerator(); }\n')
         (app / 'global.json').write_text(json.dumps({'sdk': {'version': '11.0.100-rc.1.26425.128', 'rollForward': 'disable',
                                                              'allowPrerelease': True}}, indent=2))
         nuget = work / 'NuGet.Config'

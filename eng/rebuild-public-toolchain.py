@@ -113,6 +113,9 @@ def rebind_notice_origins(stage, pins):
         url, archive, restore_hash = verified_archive(package, version)
         packages[package] = (version, url, archive, restore_hash)
     for target, entry in origins['files'].items():
+        catalog_entry = NOTICES.PUBLIC_CATALOG['files'].get(target)
+        if catalog_entry is not None:
+            entry['covers'] = catalog_entry['covers']
         source = entry['source']
         source_family = next((family for family in ('netwasm', 'libraries')
                               if source.get('kind') == 'git' and
@@ -162,7 +165,7 @@ def add_guest_providers(stage, toolchain_archive):
 def add_http_example(stage, library_version):
     member = 'lib/NetWasm,Version=v0.1/System.Net.Http.dll'
     assembly = package_members('netwasm.system.net.http', library_version, {
-        member: 'b4e4ee180a33509d6148a6ee0d76a3fa5ab556f8792471ce52584ac05a092433',
+        member: '0aa5c026c3c2307824feb43a97f407f1aa99f473ba9cf6fa620d4b57d4b7e085',
     })[member]
     for role in ('references', 'implementations'):
         destination = stage / role / 'System.Net.Http.dll'
@@ -178,6 +181,9 @@ def add_http_example(stage, library_version):
 ASSEMBLY_PACKAGES = {
     'Microsoft.Extensions.DependencyInjection.Abstractions.dll': 'netwasm.microsoft.extensions.dependencyinjection.abstractions',
     'Microsoft.Extensions.DependencyInjection.dll': 'netwasm.microsoft.extensions.dependencyinjection',
+    'Microsoft.Extensions.Logging.Abstractions.dll': 'netwasm.microsoft.extensions.logging.abstractions',
+    'Microsoft.Extensions.Logging.dll': 'netwasm.microsoft.extensions.logging',
+    'Microsoft.Extensions.Options.dll': 'netwasm.microsoft.extensions.options',
     'NetWasm.TUnit.Runner.dll': 'netwasm.tunit',
     'System.IO.Hashing.dll': 'netwasm.system.io.hashing',
     'System.IO.Pipelines.dll': 'netwasm.system.io.pipelines',
@@ -249,6 +255,9 @@ def refresh_public_assets(stage, pins, runtime_plan=None):
         'pipelines': ['System.IO.Pipelines.dll', 'System.Memory.dll'],
         'web-encoding': ['System.Text.Encodings.Web.dll'],
         'xml': ['System.Xml.ReaderWriter.dll'],
+        'logging': ['Microsoft.Extensions.Logging.Abstractions.dll', 'Microsoft.Extensions.Logging.dll',
+                    'Microsoft.Extensions.Options.dll', 'Microsoft.Extensions.DependencyInjection.Abstractions.dll',
+                    'Microsoft.Extensions.DependencyInjection.dll'],
     }
     for recipe_id, assemblies in library_recipes.items():
         paths = {name: f'references/{name}' for name in assemblies}

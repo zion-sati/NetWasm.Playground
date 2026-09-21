@@ -341,6 +341,29 @@ Console.WriteLine($"CRC32: {checksum:X8}");
 `,
   },
   {
+    id: 'logging',
+    name: 'Structured logging',
+    source: `using Microsoft.Extensions.Logging;
+
+using var factory = LoggerFactory.Create(builder => builder
+    .AddSimpleConsole()
+    .SetMinimumLevel(LogLevel.Information));
+
+ILogger logger = factory.CreateLogger("WidgetClient");
+Log.Fetched(logger, 42, 12.5);
+
+public static partial class Log
+{
+    [LoggerMessage(
+        EventId = 1,
+        Level = LogLevel.Information,
+        Message = "Fetched {Count} widgets in {ElapsedMs} ms")]
+    public static partial void Fetched(
+        ILogger logger, int count, double elapsedMs);
+}
+`,
+  },
+  {
     id: 'tunit',
     name: 'TUnit tests',
     source: `using System.Threading.Tasks;

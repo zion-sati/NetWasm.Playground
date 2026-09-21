@@ -25,6 +25,7 @@ using System.Collections.Immutable;
 using System.Security.Cryptography;
 using System.Threading;
 using TUnit.Core.SourceGenerator.Generators;
+using Microsoft.Extensions.Logging.Generators;
 using JsonSourceGenerator = jsonsourcegen::System.Text.Json.SourceGeneration.JsonSourceGenerator;
 
 [assembly: SupportedOSPlatform("browser")]
@@ -266,7 +267,7 @@ public static partial class Program
         double generatorMilliseconds = 0;
         try
         {
-            if (trustedRecipe is not (null or "json" or "tunit" or "di") ||
+            if (trustedRecipe is not (null or "json" or "tunit" or "di" or "logging") ||
                 (trustedRecipe == "di" && !TrustedGeneratorAssets.DependencyInjectionAvailable))
                 return Serialize(new(1, false, "request", "unsupported-generator-recipe", true, []));
             if (languageVersion is not ("15" or "preview") ||
@@ -301,6 +302,7 @@ public static partial class Program
                 {
                     "tunit" => [new TestMetadataGenerator(), new HookMetadataGenerator(), new AotConverterGenerator(), new PropertyInjectionSourceGenerator()],
                     "di" => [TrustedGeneratorAssets.CreateDependencyInjectionGenerator()],
+                    "logging" => [TrustedGeneratorAssets.CreateLoggingGenerator()],
                     _ => [new JsonSourceGenerator()],
                 };
                 GeneratorDriver driver = CSharpGeneratorDriver.Create(generators.Select(generator => generator.AsSourceGenerator()),

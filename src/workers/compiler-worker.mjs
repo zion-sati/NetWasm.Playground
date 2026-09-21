@@ -84,9 +84,9 @@ async function initialize() {
 serveWorker(async (data, emit) => {
   report = emit;
   if (data.operation !== 'compile' && data.operation !== 'prune' && data.operation !== 'initialize') throw Error('Unsupported compiler operation');
-  if (data.operation === 'compile' && (![...coreRecipes, 'http', 'allocation', 'linq', 'async-linq', 'pipelines', 'web-encoding', 'xml', 'json-dom', 'json-generated', 'tunit', 'regex', 'di', 'hashing'].includes(data.recipe) || typeof data.source !== 'string' || data.source.length > 65536 || new TextEncoder().encode(data.source).length > 65536 || !['15', 'preview'].includes(data.language) || typeof data.updatedMemorySafetyRules !== 'boolean' || (data.updatedMemorySafetyRules && data.language !== 'preview'))) throw Error('Invalid compiler source, recipe, or language settings');
+  if (data.operation === 'compile' && (![...coreRecipes, 'http', 'allocation', 'linq', 'async-linq', 'pipelines', 'web-encoding', 'xml', 'json-dom', 'json-generated', 'tunit', 'regex', 'di', 'logging', 'hashing'].includes(data.recipe) || typeof data.source !== 'string' || data.source.length > 65536 || new TextEncoder().encode(data.source).length > 65536 || !['15', 'preview'].includes(data.language) || typeof data.updatedMemorySafetyRules !== 'boolean' || (data.updatedMemorySafetyRules && data.language !== 'preview'))) throw Error('Invalid compiler source, recipe, or language settings');
   const module = data.operation === 'prune' ? (() => {
-    if (!(data.module instanceof Uint8Array) || data.module.length > 4 * 1048576 || typeof data.prefix !== 'string' || data.prefix.length > 255) throw Error('Invalid export pruning request');
+    if (!(data.module instanceof Uint8Array) || data.module.length > 5 * 1048576 || typeof data.prefix !== 'string' || data.prefix.length > 255) throw Error('Invalid export pruning request');
     return data.module.slice();
   })() : undefined;
   if (data.operation === 'initialize') {
@@ -105,9 +105,9 @@ serveWorker(async (data, emit) => {
   const recipeCompilerInputs = inputs.slice();
   if (supportJson !== undefined) recipeCompilerInputs[1] = supportJson;
   if (typeof program.CompileRecipe !== 'function' && data.recipe !== 'hello') throw Error('Rebuild the compiler host for library recipes');
-  if (['json-generated', 'tunit', 'di'].includes(data.recipe) && typeof program.CompileGeneratedRecipe !== 'function') throw Error('Rebuild the compiler host for source generation');
-  const generated = ['json-generated', 'tunit', 'di'].includes(data.recipe);
-  const trustedRecipe = data.recipe === 'tunit' ? 'tunit' : data.recipe === 'di' ? 'di' : 'json';
+  if (['json-generated', 'tunit', 'di', 'logging'].includes(data.recipe) && typeof program.CompileGeneratedRecipe !== 'function') throw Error('Rebuild the compiler host for source generation');
+  const generated = ['json-generated', 'tunit', 'di', 'logging'].includes(data.recipe);
+  const trustedRecipe = data.recipe === 'tunit' ? 'tunit' : data.recipe === 'di' ? 'di' : data.recipe === 'logging' ? 'logging' : 'json';
   const languageInputs = [data.language, data.updatedMemorySafetyRules];
   const supportsFrontendCache = data.frontendCache !== false && frontendCache && typeof program.PrepareRecipe === 'function' &&
     typeof program.PrepareGeneratedRecipe === 'function' && typeof program.ImportFrontendArtifact === 'function' &&

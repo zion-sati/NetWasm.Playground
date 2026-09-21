@@ -22,6 +22,7 @@ PACKAGES = {
     'json-generated': ['NetWasm.System.Text.Json'],
     'regex': ['NetWasm.System.Text.RegularExpressions'],
     'di': ['NetWasm.Microsoft.Extensions.DependencyInjection'],
+    'logging': ['NetWasm.Microsoft.Extensions.Logging'],
     'hashing': ['NetWasm.System.IO.Hashing'],
 }
 ASYNC_RECIPES = {'async-linq', 'pipelines'}
@@ -79,6 +80,7 @@ def main():
         expected={
             'regex':'Ada: 42\nGrace: 99\nAda scored 42, Grace scored 99\n',
             'di':'Hello, Ada!\n',
+            'logging':'info WidgetClient[1]\n      Fetched 42 widgets in 12.5 ms\n',
             'hashing':'CRC32: CBF43926\n',
             'hello':'42\n',
             'linq':'Even sum: 120\n',

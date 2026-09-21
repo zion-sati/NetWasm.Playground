@@ -138,7 +138,7 @@ export function ownedFiles(files = {}, maximum = 268435456) {
   return Object.fromEntries(Object.entries(files).map(([name, bytes]) => {
     if (!(bytes instanceof Uint8Array)) throw Error('Tool inputs must be Uint8Array');
     total += bytes.byteLength;
-    if (total > maximum) throw Error('Tool input byte limit exceeded');
+    if (total > maximum) throw Error(`Tool input byte limit exceeded (${total} > ${maximum})`);
     return [name, bytes.slice()];
   }));
 }

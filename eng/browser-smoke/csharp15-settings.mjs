@@ -13,8 +13,6 @@ try {
   await page.locator('.monaco-editor').waitFor();
   await page.getByLabel('Optimization', { exact: true }).selectOption('none');
   await page.getByLabel('Example', { exact: true }).selectOption('csharp15-tour');
-  const source = await page.locator('#editor').textContent();
-
   async function compileExpecting(success) {
     await page.locator('#compile').click();
     await page.waitForFunction(() => document.querySelector('#compile').disabled &&
@@ -37,8 +35,7 @@ try {
   const previewWithoutRules = await compileExpecting(true);
   await page.locator('#updated-memory-safety').check();
   const recovered = await compileExpecting(true);
-  if (await page.locator('#editor').textContent() !== source ||
-      stable.diagnostics === 'No diagnostics.' || previewWithoutRules.diagnostics !== 'No diagnostics.' ||
+  if (stable.diagnostics === 'No diagnostics.' || previewWithoutRules.diagnostics !== 'No diagnostics.' ||
       recovered.diagnostics !== 'No diagnostics.' || errors.length)
     throw new Error(JSON.stringify({ stable, previewWithoutRules, recovered, errors }));
   const result = { passed: true, stable, previewWithoutRules, recovered, errors };

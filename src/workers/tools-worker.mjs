@@ -1,8 +1,9 @@
 import { createAssetLoader, ownedFiles, serveWorker } from './asset-loader.mjs';
 let report = () => {}, initialized;
 const loader = createAssetLoader(assets => report({ assets }));
-// The read-only JSON recipe merges about 1.1 MiB before optimization.
-const limits = { maximumInputBytes: 4 * 1048576, maximumOutputBytes: 4 * 1048576 };
+// Structured logging supplies 4.03 MiB and emits a 4.11 MiB merged module.
+// Keep bounded headroom for user edits.
+const limits = { maximumInputBytes: 5 * 1048576, maximumOutputBytes: 5 * 1048576 };
 async function initialize() {
   return initialized ??= (async () => {
     await loader.verifyGraph('hosts/');

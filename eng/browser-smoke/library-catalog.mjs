@@ -5,6 +5,7 @@ const examples = new Map([
   ['json-generated', '{"Name":"Ada","Score":42}\n'],
   ['regex', 'Ada: 42\nGrace: 99\nAda scored 42, Grace scored 99\n'],
   ['di', 'Hello, Ada!\n'],
+  ['logging', 'info WidgetClient[1]\n      Fetched 42 widgets in 12.5 ms\n'],
   ['async-linq', 'Async values: 20, 40, 60\n'],
   ['pipelines', 'Buffered bytes: 3\nFirst byte: 13\n'],
   ['web-encoding', '\\u003CNetWasm \\u0026 C#\\u003E\n'],
