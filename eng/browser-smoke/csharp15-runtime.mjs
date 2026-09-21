@@ -2,6 +2,7 @@ import { chromium, firefox, webkit } from 'playwright';
 
 const engines = { chromium, firefox, webkit };
 const selected = (process.env.PLAYGROUND_BROWSERS ?? 'chromium,firefox,webkit').split(',');
+const optimization = process.env.PLAYGROUND_CSHARP15_OPTIMIZATION ?? 'none';
 const url = process.env.PLAYGROUND_URL ?? 'http://127.0.0.1:4173/';
 const expectedOutput = [
   'Collection arguments: 42',
@@ -22,7 +23,7 @@ for (const name of selected) {
     const errors = [];
     page.on('pageerror', error => errors.push(error.message));
     await page.goto(url);
-    await page.locator('#optimization').selectOption('none');
+    await page.locator('#optimization').selectOption(optimization);
     await page.locator('#example').selectOption('csharp15-tour');
     await page.locator('#run').click();
     await page.waitForFunction(() => document.querySelector('#stop').disabled, undefined, { timeout: 240_000 });
@@ -33,7 +34,7 @@ for (const name of selected) {
     };
     if (actual.status !== 'Run complete' || actual.output !== expectedOutput || actual.diagnostics !== 'No diagnostics.')
       throw new Error(`${name}/csharp15-tour: ${JSON.stringify(actual)}`);
-    console.log(`PASS ${name}/csharp15-tour: six language features`);
+    console.log(`PASS ${name}/csharp15-tour/${optimization}: six language features`);
     if (errors.length) throw new Error(`${name}: page errors: ${errors.join('; ')}`);
   } finally {
     await browser.close();

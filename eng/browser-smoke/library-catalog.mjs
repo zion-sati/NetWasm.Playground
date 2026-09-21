@@ -2,6 +2,9 @@ import { chromium } from 'playwright';
 
 const url = process.env.PLAYGROUND_URL ?? 'http://127.0.0.1:4173/';
 const examples = new Map([
+  ['json-generated', '{"Name":"Ada","Score":42}\n'],
+  ['regex', 'Ada: 42\nGrace: 99\nAda scored 42, Grace scored 99\n'],
+  ['di', 'Hello, Ada!\n'],
   ['async-linq', 'Async values: 20, 40, 60\n'],
   ['pipelines', 'Buffered bytes: 3\nFirst byte: 13\n'],
   ['web-encoding', '\\u003CNetWasm \\u0026 C#\\u003E\n'],

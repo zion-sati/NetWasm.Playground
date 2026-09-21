@@ -308,6 +308,8 @@ def main():
     parser.add_argument('--candidate-feed', type=Path)
     parser.add_argument('--candidate-version')
     parser.add_argument('--candidate-commit')
+    parser.add_argument('--candidate-tunit-version')
+    parser.add_argument('--candidate-tunit-commit')
     parser.add_argument('--runtime-plan', type=Path,
                         help='Actual candidate compiler runtime plan captured from a preliminary toolchain')
     args = parser.parse_args()
@@ -318,6 +320,13 @@ def main():
         parser.error('--candidate-commit must be a full Git SHA')
     if args.candidate_version and not re.fullmatch(r'[0-9]+\.[0-9]+\.[0-9]+-[0-9A-Za-z.-]+', args.candidate_version):
         parser.error('--candidate-version must be an exact prerelease version')
+    tunit_values = (args.candidate_tunit_version, args.candidate_tunit_commit)
+    if any(tunit_values) != all(tunit_values) or any(tunit_values) and not args.candidate_feed:
+        parser.error('--candidate-tunit-version and --candidate-tunit-commit require each other and a candidate feed')
+    if args.candidate_tunit_version and not re.fullmatch(r'[0-9]+\.[0-9]+\.[0-9]+-[0-9A-Za-z.-]+', args.candidate_tunit_version):
+        parser.error('--candidate-tunit-version must be an exact prerelease version')
+    if args.candidate_tunit_commit and not re.fullmatch(r'[a-f0-9]{40}', args.candidate_tunit_commit):
+        parser.error('--candidate-tunit-commit must be a full Git SHA')
     if args.candidate_feed and not args.candidate_feed.is_dir():
         parser.error('--candidate-feed must be an existing directory')
     if args.runtime_plan and not args.candidate_feed:
@@ -377,6 +386,9 @@ def main():
         if CANDIDATE_FEED is not None:
             pins['netwasm']['packageVersion'] = CANDIDATE_VERSION
             pins['netwasm']['commit'] = args.candidate_commit
+        if args.candidate_tunit_version:
+            pins['tunit']['packageVersion'] = args.candidate_tunit_version
+            pins['tunit']['commit'] = args.candidate_tunit_commit
         refresh_public_assets(stage, pins, runtime_plan)
         rebind_notice_origins(stage, release_pins)
         add_guest_providers(stage, package_archive('netwasm.toolchain', pins['netwasm']['packageVersion']))

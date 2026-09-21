@@ -26,3 +26,123 @@ jobs:
       - run: npm run typecheck
       - name: Build application shell
         run: npm run build
+
+  csharp15-candidate:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - name: Check out Playground
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - name: Read immutable candidate inputs
+        id: candidate
+        shell: bash
+        run: |
+          python3 - <<'PY' >> "$GITHUB_OUTPUT"
+          import json
+          from pathlib import Path
+          candidate = json.loads(Path('eng/csharp15-candidate.json').read_text())
+          if candidate.get('qualificationOnly') is not True:
+              raise SystemExit('Candidate descriptor must remain qualification-only')
+          for key in ('netwasm', 'tunit'):
+              item = candidate[key]
+              if len(item['commit']) != 40 or any(c not in '0123456789abcdef' for c in item['commit']):
+                  raise SystemExit(f'{key} candidate is not an immutable full SHA')
+              print(f"{key}_repository={item['repository']}")
+              print(f"{key}_commit={item['commit']}")
+          PY
+      - name: Check out NetWasm candidate
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          repository: ${{ steps.candidate.outputs.netwasm_repository }}
+          ref: ${{ steps.candidate.outputs.netwasm_commit }}
+          path: candidate/netwasm
+          persist-credentials: false
+      - name: Check out TUnit candidate
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          repository: ${{ steps.candidate.outputs.tunit_repository }}
+          ref: ${{ steps.candidate.outputs.tunit_commit }}
+          path: candidate/tunit
+          persist-credentials: false
+      - name: Read candidate toolchain pins
+        id: toolchain
+        shell: bash
+        run: |
+          python3 - <<'PY' >> "$GITHUB_OUTPUT"
+          import json
+          from pathlib import Path
+          root = Path('candidate/netwasm')
+          native = json.loads((root / 'eng/toolchain.json').read_text())
+          csharp15 = json.loads((root / 'eng/csharp15-toolchain.json').read_text())
+          print(f"sdk11={csharp15['sdk11Version']}")
+          print(f"node={native['node']}")
+          print(f"emscripten={native['emscripten']}")
+          print(f"wasm_tools={native['wasmTools']}")
+          print(f"wasm_tools_sha={native['wasmToolsLinuxX64Sha256']}")
+          PY
+      - name: Set up .NET 10
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6
+        with:
+          global-json-file: candidate/netwasm/global.json
+      - name: Set up pinned .NET 11 candidate compiler
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6
+        with:
+          dotnet-version: ${{ steps.toolchain.outputs.sdk11 }}
+      - name: Set up Node.js
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: ${{ steps.toolchain.outputs.node }}
+          cache: npm
+      - run: npm ci
+      - name: Install pinned native toolchain
+        shell: bash
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y patchelf=0.18.0-1.1build1
+          git clone --depth 1 --branch "${{ steps.toolchain.outputs.emscripten }}" \
+            https://github.com/emscripten-core/emsdk.git "$RUNNER_TEMP/emsdk"
+          "$RUNNER_TEMP/emsdk/emsdk" install "${{ steps.toolchain.outputs.emscripten }}"
+          "$RUNNER_TEMP/emsdk/emsdk" activate "${{ steps.toolchain.outputs.emscripten }}"
+          archive="$RUNNER_TEMP/wasm-tools.tar.gz"
+          curl --fail --silent --show-error --location --retry 3 --retry-all-errors \
+            --output "$archive" \
+            "https://github.com/bytecodealliance/wasm-tools/releases/download/v${{ steps.toolchain.outputs.wasm_tools }}/wasm-tools-${{ steps.toolchain.outputs.wasm_tools }}-x86_64-linux.tar.gz"
+          printf '%s  %s\n' '${{ steps.toolchain.outputs.wasm_tools_sha }}' "$archive" | sha256sum --check --strict
+          mkdir "$RUNNER_TEMP/wasm-tools"
+          tar --extract --gzip --file "$archive" --directory "$RUNNER_TEMP/wasm-tools" --strip-components=1
+          echo "$RUNNER_TEMP/wasm-tools" >> "$GITHUB_PATH"
+      - name: Install browser and Wasmtime
+        shell: bash
+        run: |
+          npx playwright install --with-deps chromium
+          archive="$RUNNER_TEMP/wasmtime.tar.xz"
+          curl --fail --silent --show-error --location --retry 3 --retry-all-errors \
+            --output "$archive" \
+            https://github.com/bytecodealliance/wasmtime/releases/download/v47.0.3/wasmtime-v47.0.3-x86_64-linux.tar.xz
+          printf '%s  %s\n' \
+            'ca1fc56d1afc40c8782e96c297fd182a0da162f9a8f52a1e7b094e1dd648e178' \
+            "$archive" | sha256sum --check --strict
+          tar -xJf "$archive" -C "$RUNNER_TEMP"
+          echo "$RUNNER_TEMP/wasmtime-v47.0.3-x86_64-linux" >> "$GITHUB_PATH"
+      - name: Build and qualify candidate browser toolchain
+        env:
+          NETWASM_CORE_SOURCE: ${{ github.workspace }}/candidate/netwasm
+          NETWASM_CORE_COMMIT: ${{ steps.candidate.outputs.netwasm_commit }}
+          NETWASM_TUNIT_SOURCE: ${{ github.workspace }}/candidate/tunit
+          NETWASM_TUNIT_COMMIT: ${{ steps.candidate.outputs.tunit_commit }}
+          NETWASM_EMSDK_ROOT: ${{ runner.temp }}/emsdk
+          NETWASM_CANDIDATE_WORK: ${{ runner.temp }}/netwasm-playground-candidate
+        run: bash eng/qualify-csharp15-candidate.sh
+      - name: Retain qualification evidence
+        if: always()
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: csharp15-browser-candidate-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/netwasm-playground-candidate/evidence
+            ${{ runner.temp }}/netwasm-playground-candidate/*-server.log
+          if-no-files-found: warn
+          retention-days: 14

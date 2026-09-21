@@ -34,13 +34,20 @@ def sha256(payload):
     return hashlib.sha256(payload).hexdigest()
 
 
-def package_member(package, version, member):
-    url = f'https://api.nuget.org/v3-flatcontainer/{package}/{version}/{package}.{version}.nupkg'
-    request = urllib.request.Request(url, headers={'User-Agent': 'NetWasm.Playground-release-builder'})
-    with urllib.request.urlopen(request) as response:
-        archive = response.read()
+def package_member(package, version, member, candidate_feed=None):
+    candidates = [] if candidate_feed is None else [path for path in candidate_feed.glob('*.nupkg')
+        if path.name.lower() == f'{package}.{version}.nupkg'.lower()]
+    if len(candidates) > 1:
+        raise RuntimeError(f'Candidate feed contains duplicate package identities: {package}/{version}')
+    if candidates:
+        archive = candidates[0].read_bytes()
+    else:
+        url = f'https://api.nuget.org/v3-flatcontainer/{package}/{version}/{package}.{version}.nupkg'
+        request = urllib.request.Request(url, headers={'User-Agent': 'NetWasm.Playground-release-builder'})
+        with urllib.request.urlopen(request) as response:
+            archive = response.read()
     with zipfile.ZipFile(__import__('io').BytesIO(archive)) as package_zip:
-        return package_zip.read(member)
+        return package_zip.read(member), bool(candidates)
 
 
 def main():
@@ -50,9 +57,13 @@ def main():
                         help='Temporary CI/local feed containing an exact candidate package graph')
     parser.add_argument('--candidate-version',
                         help='Exact candidate version; required with --candidate-feed')
+    parser.add_argument('--candidate-tunit-version',
+                        help='Exact TUnit candidate version from the same temporary feed')
     args = parser.parse_args()
     if bool(args.candidate_feed) != bool(args.candidate_version):
         parser.error('--candidate-feed and --candidate-version must be supplied together')
+    if args.candidate_tunit_version and not args.candidate_feed:
+        parser.error('--candidate-tunit-version requires --candidate-feed')
     pins = json.loads((ROOT / 'eng/upstream-sources.json').read_text())['sources']
     version = args.candidate_version or pins['netwasm']['packageVersion']
     candidate_feed = args.candidate_feed.resolve() if args.candidate_feed else None
@@ -60,6 +71,12 @@ def main():
         for package in ('NetWasm.Compiler.Browser', 'NetWasm.Runtime.Pack'):
             if not (candidate_feed / f'{package}.{version}.nupkg').is_file():
                 parser.error(f'candidate feed lacks {package}.{version}.nupkg')
+    if args.candidate_tunit_version:
+        available = {path.name.lower() for path in candidate_feed.glob('*.nupkg')}
+        for package in ('NetWasm.TUnit', 'NetWasm.TUnit.Core'):
+            expected = f'{package}.{args.candidate_tunit_version}.nupkg'.lower()
+            if expected not in available:
+                parser.error(f'candidate feed lacks {package}.{args.candidate_tunit_version}.nupkg')
     runtime = json.loads((ROOT / 'eng/browser-host.json').read_text())['runtimeFrameworkVersion']
     with tempfile.TemporaryDirectory(prefix='netwasm-release-compiler-') as temporary:
         work = Path(temporary)
@@ -69,8 +86,10 @@ def main():
         generators.mkdir()
         extracted = {}
         for key, (package, package_version, member, expected) in PACKAGES.items():
-            payload = package_member(package, package_version, member)
-            if sha256(payload) != expected:
+            if args.candidate_tunit_version and key.startswith('tunit-'):
+                package_version = args.candidate_tunit_version
+            payload, from_candidate = package_member(package, package_version, member, candidate_feed)
+            if not from_candidate and sha256(payload) != expected:
                 raise RuntimeError(f'Public package member changed: {package}/{member}')
             destination = generators / Path(member).name
             destination.write_bytes(payload)

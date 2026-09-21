@@ -41,7 +41,18 @@ try {
         compilers.some(worker => !worker.operations.includes('prune')))
       throw Error(`Compiler worker lifetime mismatch after compilation ${iteration + 1}`);
   }
-  const result = { passed: true, workers: await page.evaluate(() => globalThis.compilerLifecycle()) };
+  const beforeReload = await page.evaluate(() => globalThis.compilerLifecycle());
+  await page.reload();
+  await page.locator('.monaco-editor').waitFor();
+  await page.getByLabel('Optimization', { exact: true }).selectOption('none');
+  await page.locator('#compile').click();
+  await page.waitForFunction(() => document.querySelector('#stop').disabled, undefined,
+    { timeout: 240000 });
+  const afterReload = await page.evaluate(() => globalThis.compilerLifecycle());
+  const reloadedCompilers = afterReload.filter(worker => worker.operations.includes('compile'));
+  if (reloadedCompilers.length !== 1 || reloadedCompilers.some(worker => !worker.terminated))
+    throw Error('Compiler worker did not recover and recycle after page reload');
+  const result = { passed: true, beforeReload, afterReload };
   writeFileSync(`${output}/results.json`, JSON.stringify(result, null, 2));
   console.log('PASS: each compilation terminates its compiler worker after pruning');
 } finally {

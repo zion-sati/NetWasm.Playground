@@ -101,6 +101,7 @@ class PublicPackageBoundaryTests(unittest.TestCase):
 
         self.assertIn("--candidate-feed", help_text)
         self.assertIn("--candidate-version", help_text)
+        self.assertIn("--candidate-tunit-version", help_text)
         release = (ROOT / ".github/workflows/release.yml").read_text()
         self.assertNotIn("--candidate-feed", release)
 
@@ -110,6 +111,8 @@ class PublicPackageBoundaryTests(unittest.TestCase):
         self.assertIn("--candidate-feed", rebuilder_help)
         self.assertIn("--candidate-version", rebuilder_help)
         self.assertIn("--candidate-commit", rebuilder_help)
+        self.assertIn("--candidate-tunit-version", rebuilder_help)
+        self.assertIn("--candidate-tunit-commit", rebuilder_help)
         self.assertIn("--runtime-plan", rebuilder_help)
 
         incomplete = subprocess.run([
