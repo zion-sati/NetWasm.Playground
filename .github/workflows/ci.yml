@@ -91,6 +91,27 @@ jobs:
         uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6
         with:
           dotnet-version: ${{ steps.toolchain.outputs.sdk11 }}
+      - name: Install the matching .NET 11 WebAssembly workload
+        shell: bash
+        env:
+          SDK11_VERSION: ${{ steps.toolchain.outputs.sdk11 }}
+        run: |
+          workload_root="$RUNNER_TEMP/dotnet11-workload"
+          mkdir -p "$workload_root"
+          python3 - <<'PY'
+          import json, os
+          from pathlib import Path
+          Path(os.environ['RUNNER_TEMP'], 'dotnet11-workload', 'global.json').write_text(
+              json.dumps({'sdk': {
+                  'version': os.environ['SDK11_VERSION'],
+                  'rollForward': 'disable',
+                  'allowPrerelease': True,
+              }}, indent=2) + '\n')
+          PY
+          (
+            cd "$workload_root"
+            dotnet workload install wasm-tools --skip-manifest-update
+          )
       - name: Set up Node.js
         uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
