@@ -54,22 +54,42 @@ try {
     if (receipt.path !== `bundles/${role}.${receipt.sha256}.bin` || !/^[a-f0-9]{64}$/.test(receipt.sha256))
       throw Error(`Bundle is not content addressed: ${JSON.stringify({ role, receipt })}`);
   }
-  await page.setViewportSize({ width: 780, height: 900 });
-  const toolbarLayout = await page.evaluate(() => {
+  const inspectToolbar = () => page.evaluate(() => {
     const toolbar = document.querySelector('.toolbar');
+    const options = document.querySelector('.options');
     const controls = [...document.querySelectorAll('.actions button')].map(button => {
       const box = button.getBoundingClientRect();
       return { id: button.id, left: box.left, right: box.right, width: box.width };
     });
     return { viewport: innerWidth, scrollWidth: document.documentElement.scrollWidth,
-      toolbar: toolbar ? { clientWidth: toolbar.clientWidth, scrollWidth: toolbar.scrollWidth } : null, controls };
+      toolbar: toolbar ? { left: toolbar.getBoundingClientRect().left, right: toolbar.getBoundingClientRect().right,
+        clientWidth: toolbar.clientWidth, scrollWidth: toolbar.scrollWidth } : null,
+      options: options ? { clientWidth: options.clientWidth, scrollWidth: options.scrollWidth } : null, controls };
   });
-  if (!toolbarLayout.toolbar || toolbarLayout.scrollWidth > toolbarLayout.viewport ||
-      toolbarLayout.toolbar.scrollWidth > toolbarLayout.toolbar.clientWidth ||
-      toolbarLayout.controls.length !== 4 || toolbarLayout.controls.some(control =>
-        control.width <= 0 || control.left < 0 || control.right > toolbarLayout.viewport))
-    throw Error(`Responsive toolbar overflow: ${JSON.stringify(toolbarLayout)}`);
+  const assertToolbar = toolbarLayout => {
+    if (!toolbarLayout.toolbar || !toolbarLayout.options || toolbarLayout.scrollWidth > toolbarLayout.viewport ||
+        toolbarLayout.toolbar.scrollWidth > toolbarLayout.toolbar.clientWidth ||
+        toolbarLayout.options.scrollWidth > toolbarLayout.options.clientWidth ||
+        toolbarLayout.controls.length !== 4 || toolbarLayout.controls.some(control =>
+          control.width <= 0 || control.left < toolbarLayout.toolbar.left || control.right > toolbarLayout.toolbar.right))
+      throw Error(`Responsive toolbar overflow: ${JSON.stringify(toolbarLayout)}`);
+  };
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.getByLabel('Example', { exact: true }).selectOption('csharp15-tour');
+  await page.getByLabel('Language', { exact: true }).selectOption('preview');
+  const intermediateToolbarLayout = await inspectToolbar();
+  assertToolbar(intermediateToolbarLayout);
+  const memorySafetyLink = page.locator('#memory-safety-setting a');
+  if (!await memorySafetyLink.isVisible() ||
+      await memorySafetyLink.getAttribute('href') !== 'https://learn.microsoft.com/dotnet/csharp/language-reference/proposals/unsafe-evolution')
+    throw Error('Updated memory-safety documentation link is missing');
+  await page.screenshot({ path: `${output}/responsive-toolbar-intermediate.png`, fullPage: false });
+  await page.setViewportSize({ width: 780, height: 900 });
+  const toolbarLayout = await inspectToolbar();
+  assertToolbar(toolbarLayout);
   await page.screenshot({ path: `${output}/responsive-toolbar.png`, fullPage: false });
+  await page.getByLabel('Example', { exact: true }).selectOption('hello');
+  await page.getByLabel('Language', { exact: true }).selectOption('15');
   await page.setViewportSize({ width: 1280, height: 900 });
   const pageContract = await page.evaluate(async () => {
     const csp = document.querySelector('meta[http-equiv="Content-Security-Policy"]')?.content ?? '';
