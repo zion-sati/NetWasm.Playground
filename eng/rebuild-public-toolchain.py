@@ -165,7 +165,7 @@ def add_guest_providers(stage, toolchain_archive):
 def add_http_example(stage, library_version):
     member = 'lib/NetWasm,Version=v0.1/System.Net.Http.dll'
     assembly = package_members('netwasm.system.net.http', library_version, {
-        member: '0aa5c026c3c2307824feb43a97f407f1aa99f473ba9cf6fa620d4b57d4b7e085',
+        member: '8f397e5f9cf0afc411fc92320f2fe37c73628f5b27cc5c5e1222dfd625dc99cd',
     })[member]
     for role in ('references', 'implementations'):
         destination = stage / role / 'System.Net.Http.dll'
@@ -184,6 +184,7 @@ ASSEMBLY_PACKAGES = {
     'Microsoft.Extensions.Logging.Abstractions.dll': 'netwasm.microsoft.extensions.logging.abstractions',
     'Microsoft.Extensions.Logging.dll': 'netwasm.microsoft.extensions.logging',
     'Microsoft.Extensions.Options.dll': 'netwasm.microsoft.extensions.options',
+    'Microsoft.Extensions.Primitives.dll': 'netwasm.microsoft.extensions.primitives',
     'NetWasm.TUnit.Runner.dll': 'netwasm.tunit',
     'System.IO.Hashing.dll': 'netwasm.system.io.hashing',
     'System.IO.Pipelines.dll': 'netwasm.system.io.pipelines',
@@ -256,7 +257,8 @@ def refresh_public_assets(stage, pins, runtime_plan=None):
         'web-encoding': ['System.Text.Encodings.Web.dll'],
         'xml': ['System.Xml.ReaderWriter.dll'],
         'logging': ['Microsoft.Extensions.Logging.Abstractions.dll', 'Microsoft.Extensions.Logging.dll',
-                    'Microsoft.Extensions.Options.dll', 'Microsoft.Extensions.DependencyInjection.Abstractions.dll',
+                    'Microsoft.Extensions.Options.dll', 'Microsoft.Extensions.Primitives.dll',
+                    'Microsoft.Extensions.DependencyInjection.Abstractions.dll',
                     'Microsoft.Extensions.DependencyInjection.dll'],
     }
     for recipe_id, assemblies in library_recipes.items():

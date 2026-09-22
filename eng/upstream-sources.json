@@ -3,9 +3,9 @@
   "sources": {
     "netwasm": {
       "repository": "https://github.com/zion-sati/NetWasm",
-      "commit": "306485113aa2258f408224ae9e9108931892aca9",
-      "tag": "v0.4.0",
-      "packageVersion": "0.4.0",
+      "commit": "8ac247a273d14ba0bbba13d32a7c0ed97337f9e8",
+      "tag": "v0.4.1",
+      "packageVersion": "0.4.1",
       "toolchainManifest": "eng/toolchain.json",
       "browserCompilerCommit": "3b856a0ee73759c78b8dc5511685296cee242a00",
       "browserLinkerCommit": "b89839a8c748c9edd58bce00c30a5a60a2972fbc",
@@ -13,15 +13,15 @@
     },
     "libraries": {
       "repository": "https://github.com/zion-sati/NetWasm.Libraries",
-      "commit": "a836c8358cd7c05e7aa092f1b3939da7c44c2275",
-      "tag": "v0.4.0",
-      "packageVersion": "0.4.0"
+      "commit": "a1eef3dbdfe83204154e174b1dd0534b93894159",
+      "tag": "v0.4.1",
+      "packageVersion": "0.4.1"
     },
     "tunit": {
       "repository": "https://github.com/zion-sati/TUnit-NetWasm",
-      "commit": "d8c02652611dfba4b9b3696688a3743f83ee97fb",
-      "tag": "netwasm-v0.4.0",
-      "packageVersion": "0.4.0"
+      "commit": "a0dd1ccdf9042674c494efd12ea1c8b7d3127494",
+      "tag": "netwasm-v0.4.1",
+      "packageVersion": "0.4.1"
     }
   }
 }
