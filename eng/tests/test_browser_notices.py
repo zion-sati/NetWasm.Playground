@@ -1,4 +1,5 @@
 import importlib.util
+import json
 import unittest
 from pathlib import Path
 
@@ -13,10 +14,10 @@ class BrowserNoticeVersionTests(unittest.TestCase):
     def test_released_package_versions_follow_public_pins(self):
         versions = MODULE.current_package_versions()
 
-        self.assertEqual("0.4.1", versions["netwasm.toolchain"])
-        self.assertEqual("0.4.1", versions["netwasm.tunit"])
-        self.assertEqual("0.4.1", versions["netwasm.tunit.assertions"])
-        self.assertEqual("0.4.1", versions["netwasm.tunit.core"])
+        self.assertEqual("0.4.2", versions["netwasm.toolchain"])
+        self.assertEqual("0.4.2", versions["netwasm.tunit"])
+        self.assertEqual("0.4.2", versions["netwasm.tunit.assertions"])
+        self.assertEqual("0.4.2", versions["netwasm.tunit.core"])
 
     def test_normalization_rejects_stale_release_coordinates(self):
         files = {"notice": {"source": {
@@ -29,6 +30,19 @@ class BrowserNoticeVersionTests(unittest.TestCase):
 
         with self.assertRaisesRegex(ValueError, "released pin"):
             MODULE.normalized_catalog_files(files, True)
+
+    def test_git_notice_origins_follow_public_source_pins(self):
+        pins = json.loads((ROOT / "eng/upstream-sources.json").read_text())["sources"]
+        commits_by_repository = {
+            pins[family]["repository"]: pins[family]["commit"]
+            for family in ("netwasm", "libraries")
+        }
+
+        for path, entry in MODULE.PUBLIC_CATALOG["files"].items():
+            source = entry["source"]
+            expected_commit = commits_by_repository.get(source.get("repository"))
+            if expected_commit is not None:
+                self.assertEqual(expected_commit, source["commit"], path)
 
 
 if __name__ == "__main__":
