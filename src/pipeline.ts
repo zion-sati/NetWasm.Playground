@@ -278,9 +278,10 @@ export class PlaygroundPipeline {
       const wit = await this.loadAsset(witName);
       const component = await this.stage('componentization', timings, async () => {
         const embedded = await this.tool('wasm-tools', ['component', 'embed', witName, 'linked.wasm', '--encoding', 'utf8', '--output', 'embedded.wasm', '--world', witWorld], { [witName]: wit, 'linked.wasm': linked }, ['embedded.wasm']);
-        const packaged = await this.tool('wasm-tools', ['component', 'new', 'embedded.wasm', '--output', 'component.wasm'], embedded, ['component.wasm']);
-        await this.tool('wasm-tools', ['validate', 'component.wasm', '--features', 'all'], packaged, []);
-        return packaged['component.wasm'];
+        const packaged = await this.tool('wasm-tools', ['component', 'new', 'embedded.wasm', '--output', 'component-unstripped.wasm'], embedded, ['component-unstripped.wasm']);
+        const stripped = await this.tool('wasm-tools', ['strip', '--all', 'component-unstripped.wasm', '--output', 'component.wasm'], packaged, ['component.wasm']);
+        await this.tool('wasm-tools', ['validate', 'component.wasm', '--features', 'all'], stripped, []);
+        return stripped['component.wasm'];
       });
       if (epoch !== this.epoch) throw new Error('Stopped');
       return { ...result, success: true, component, componentContract: compilation.componentContract,
