@@ -15,19 +15,19 @@ import zipfile
 ROOT = Path(__file__).resolve().parents[1]
 FEED = 'https://api.nuget.org/v3/index.json'
 PACKAGES = {
-    'json': ('netwasm.system.text.json', '0.4.2',
+    'json': ('netwasm.system.text.json', '0.4.3',
              'analyzers/dotnet/cs/System.Text.Json.SourceGeneration.dll',
-             '595434b3c5d64e527c22104ba20f8796d8a9a18a076b36ca99d38c09f311893f'),
-    'tunit-generator': ('netwasm.tunit.core', '0.4.2',
+             'bdef5ce75fa321acf8d2c2a5b2a9f9eb2a30ef4a28b1694fbca978176c8dd6c9'),
+    'tunit-generator': ('netwasm.tunit.core', '0.4.3',
                         'analyzers/dotnet/roslyn4.14/cs/TUnit.Core.SourceGenerator.dll',
-                        'a3e8067ad677a72f1f1e22dbec5e164151e4325d58941305beada695fca6742d'),
-    'di': ('netwasm.microsoft.extensions.dependencyinjection', '0.4.2',
+                        '1e1a3b8f6367d76c4a85a6f3d000d513e8d85839a02b218c8073035d907e086c'),
+    'di': ('netwasm.microsoft.extensions.dependencyinjection', '0.4.3',
            'analyzers/dotnet/cs/NetWasm.Microsoft.Extensions.DependencyInjection.Generator.dll',
-           'ce4fa57685b6a9858da71393555c7691c403c2be0a55b423137fa2138c535ebb'),
-    'logging': ('netwasm.microsoft.extensions.logging.abstractions', '0.4.2',
+           '9b7a7c508aa0d58de363b92c20fabd4840860e16bf908d668c02a4fb8a4bbe7f'),
+    'logging': ('netwasm.microsoft.extensions.logging.abstractions', '0.4.3',
                 'analyzers/dotnet/cs/NetWasm.Microsoft.Extensions.Logging.Generators.dll',
-                'b0d5b27b1049e66afec8f0c9304eaf9fbcbea70f525f789133dc445a5f113c28'),
-    'tunit-program': ('netwasm.tunit', '0.4.2',
+                '5763df02395ee8f84ec8812e52345477acc73595da7b2462ef9ae0bc78acf866'),
+    'tunit-program': ('netwasm.tunit', '0.4.3',
                       'build/NetWasm,Version=v0.1/NetWasm.TUnit.Program.cs',
                       'c649b3d2f5989b90b4d226095d11628c276134086cf0841727befa2a36ef6636'),
 }

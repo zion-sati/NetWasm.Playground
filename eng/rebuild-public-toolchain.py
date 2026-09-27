@@ -165,7 +165,7 @@ def add_guest_providers(stage, toolchain_archive):
 def add_http_example(stage, library_version):
     member = 'lib/NetWasm,Version=v0.1/System.Net.Http.dll'
     assembly = package_members('netwasm.system.net.http', library_version, {
-        member: 'b862209ee6cac166fa39ce2380d60c2f2c8db4054d886d8050b4da79bc8c1863',
+        member: '18fa71aea89caaac094933daf8ae2bf64867e4155de3844beee76a1ff43b1bc9',
     })[member]
     for role in ('references', 'implementations'):
         destination = stage / role / 'System.Net.Http.dll'
