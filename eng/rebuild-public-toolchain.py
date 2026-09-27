@@ -231,15 +231,48 @@ def refresh_public_assets(stage, pins, runtime_plan=None):
     if target is None or not isinstance(target.get('systemLibraries', {}).get('names'), list):
         raise ValueError('Public runtime pack lacks wasm32 system libraries')
     replace('compiler/runtime-pack.json', 'netwasm.runtime.pack', core, 'runtime/runtime-pack.json')
-    replace('runtime/wasm32/libnetwasm-runtime.a', 'netwasm.runtime.pack', core,
-            'runtime/wasm32/libnetwasm-runtime.a')
+    runtime_directory = stage / 'runtime/wasm32'
+    if not runtime_directory.is_dir():
+        raise ValueError('Public base lacks the wasm32 runtime directory')
+    runtime_files = {}
+    for field in ('runtimeArchive', 'collectorArchive', 'allowedUndefinedSymbols'):
+        asset = target.get(field)
+        if (not isinstance(asset, dict) or set(asset) != {'path', 'sha256'} or
+                not isinstance(asset['path'], str) or not isinstance(asset['sha256'], str) or
+                not re.fullmatch(r'[a-f0-9]{64}', asset['sha256'])):
+            raise ValueError(f'Public runtime pack has an invalid {field}')
+        relative = safe_path(asset['path'])
+        if relative.parent != PurePosixPath('wasm32'):
+            raise ValueError(f'Public runtime pack has an invalid wasm32 asset path: {asset["path"]}')
+        payload = public_member('netwasm.runtime.pack', core, f'runtime/{relative.as_posix()}')
+        if sha256(payload) != asset['sha256']:
+            raise ValueError(f'Public runtime pack asset changed: {asset["path"]}')
+        runtime_files[relative.name] = payload
+    for existing in runtime_directory.iterdir():
+        if existing.name == 'system':
+            if not existing.is_dir():
+                raise ValueError('Public base runtime system-library entry is not a directory')
+        elif not existing.is_file():
+            raise ValueError(f'Unexpected public base runtime entry: {existing.name}')
+        elif existing.name not in runtime_files:
+            existing.unlink()
+    for name, payload in runtime_files.items():
+        (runtime_directory / name).write_bytes(payload)
     system_names = target['systemLibraries']['names']
+    system_assets = target['systemLibraries'].get('assets')
     if len(system_names) != len(set(system_names)):
         raise ValueError('Public runtime pack contains duplicate wasm32 system libraries')
-    for name in system_names:
-        if not re.fullmatch(r'[A-Za-z0-9_.-]+\.a', name):
+    if not isinstance(system_assets, list) or len(system_assets) != len(system_names):
+        raise ValueError('Public runtime pack has an incomplete wasm32 system-library closure')
+    for name, asset in zip(system_names, system_assets):
+        expected_path = f'wasm32/system-libraries/{name}'
+        if (not isinstance(name, str) or not re.fullmatch(r'[A-Za-z0-9_.-]+\.a', name) or
+                not isinstance(asset, dict) or set(asset) != {'path', 'sha256'} or
+                asset.get('path') != expected_path or
+                not isinstance(asset.get('sha256'), str) or
+                not re.fullmatch(r'[a-f0-9]{64}', asset['sha256'])):
             raise ValueError(f'Invalid public runtime library: {name}')
-    system_directory = stage / 'runtime/wasm32/system'
+    system_directory = runtime_directory / 'system'
     if not system_directory.is_dir():
         raise ValueError('Public base lacks the wasm32 system-library directory')
     for existing in system_directory.iterdir():
@@ -247,9 +280,11 @@ def refresh_public_assets(stage, pins, runtime_plan=None):
             raise ValueError(f'Unexpected public base system-library entry: {existing.name}')
         if existing.name not in system_names:
             existing.unlink()
-    for name in system_names:
-        (system_directory / name).write_bytes(public_member(
-            'netwasm.runtime.pack', core, f'runtime/wasm32/system-libraries/{name}'))
+    for name, asset in zip(system_names, system_assets):
+        payload = public_member('netwasm.runtime.pack', core, f'runtime/{asset["path"]}')
+        if sha256(payload) != asset['sha256']:
+            raise ValueError(f'Public runtime system library changed: {name}')
+        (system_directory / name).write_bytes(payload)
 
     for name, package in ASSEMBLY_PACKAGES.items():
         version = tunit if package.startswith('netwasm.tunit') else libraries
@@ -314,11 +349,16 @@ def refresh_public_assets(stage, pins, runtime_plan=None):
                 raise ValueError('Candidate runtime plan has invalid inputs')
             paths.add(item['path'])
         inputs['expectedRuntimePlan'] = runtime_plan
-    for item in inputs['expectedRuntimePlan']['inputs']:
-        if not item['path'].startswith('/netwasm-link/runtime/'):
-            raise ValueError('Unexpected public runtime plan path')
-        relative = safe_path(item['path'].removeprefix('/netwasm-link/'))
-        item['sha256'] = sha256(stage.joinpath(*relative.parts).read_bytes())
+    else:
+        # This capture belongs to the previous release base. Production plans
+        # each link from the refreshed runtime manifest and application layout.
+        inputs.pop('expectedRuntimePlan', None)
+    if 'expectedRuntimePlan' in inputs:
+        for item in inputs['expectedRuntimePlan']['inputs']:
+            if not item['path'].startswith('/netwasm-link/runtime/'):
+                raise ValueError('Unexpected public runtime plan path')
+            relative = safe_path(item['path'].removeprefix('/netwasm-link/'))
+            item['sha256'] = sha256(stage.joinpath(*relative.parts).read_bytes())
     inputs_path.write_bytes(encoded(inputs))
 
 
