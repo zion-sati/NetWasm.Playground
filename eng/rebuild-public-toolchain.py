@@ -233,11 +233,23 @@ def refresh_public_assets(stage, pins, runtime_plan=None):
     replace('compiler/runtime-pack.json', 'netwasm.runtime.pack', core, 'runtime/runtime-pack.json')
     replace('runtime/wasm32/libnetwasm-runtime.a', 'netwasm.runtime.pack', core,
             'runtime/wasm32/libnetwasm-runtime.a')
-    for name in target['systemLibraries']['names']:
+    system_names = target['systemLibraries']['names']
+    if len(system_names) != len(set(system_names)):
+        raise ValueError('Public runtime pack contains duplicate wasm32 system libraries')
+    for name in system_names:
         if not re.fullmatch(r'[A-Za-z0-9_.-]+\.a', name):
             raise ValueError(f'Invalid public runtime library: {name}')
-        replace(f'runtime/wasm32/system/{name}', 'netwasm.runtime.pack', core,
-                f'runtime/wasm32/system-libraries/{name}')
+    system_directory = stage / 'runtime/wasm32/system'
+    if not system_directory.is_dir():
+        raise ValueError('Public base lacks the wasm32 system-library directory')
+    for existing in system_directory.iterdir():
+        if not existing.is_file() or not re.fullmatch(r'[A-Za-z0-9_.-]+\.a', existing.name):
+            raise ValueError(f'Unexpected public base system-library entry: {existing.name}')
+        if existing.name not in system_names:
+            existing.unlink()
+    for name in system_names:
+        (system_directory / name).write_bytes(public_member(
+            'netwasm.runtime.pack', core, f'runtime/wasm32/system-libraries/{name}'))
 
     for name, package in ASSEMBLY_PACKAGES.items():
         version = tunit if package.startswith('netwasm.tunit') else libraries
