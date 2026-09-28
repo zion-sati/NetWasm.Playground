@@ -44,8 +44,9 @@ try {
       });
     }
   });
-  await page.goto(url);
-  const initialSiteIdentity = await observeSiteIdentity(page, url, expectedIdentity);
+  const initialNavigation = await page.goto(url);
+  if (!initialNavigation?.ok()) throw Error(`Playground navigation failed: ${initialNavigation?.status()}`);
+  const initialSiteIdentity = await observeSiteIdentity(page, url, await initialNavigation.body(), expectedIdentity);
   const toolchainManifest = initialSiteIdentity.toolchainManifest;
   if (toolchainManifest.schemaVersion !== 3 ||
       Object.keys(toolchainManifest.bundles).sort().join(',') !== 'compiler,guest,linker,tools')
@@ -172,12 +173,16 @@ try {
   // The separately bundled Preview 2 guest provider adds one verified module request.
   if (directPayloads.length || toolchainRequests.length > 21)
     throw Error(`Toolchain request graph was not bundled: ${JSON.stringify({ count: toolchainRequests.length, directPayloads })}`);
-  const finalSiteIdentity = await observeSiteIdentity(page, url, expectedIdentity);
+  const finalNavigation = await page.reload();
+  if (!finalNavigation?.ok()) throw Error(`Playground reload failed: ${finalNavigation?.status()}`);
+  const finalSiteIdentity = await observeSiteIdentity(page, url, await finalNavigation.body(), expectedIdentity);
   const bytes = readFileSync(componentPath);
   const result = { passed: true, browser: browser.version(), stdout, status,
     component: { bytes: bytes.length, sha256: createHash('sha256').update(bytes).digest('hex') },
     siteIdentity: { sha256: finalSiteIdentity.siteIdentitySha256,
       sourceCommit: finalSiteIdentity.identity.sourceCommit,
+      indexHtmlSha256: finalSiteIdentity.indexHtmlSha256,
+      edgeTransform: finalSiteIdentity.edgeTransform,
       toolchainId: finalSiteIdentity.index.id,
       toolchainManifestSha256: finalSiteIdentity.toolchainManifestSha256 },
     toolchainRequests: { unique: toolchainRequests.length, bundles: bundleRequests, parallelStartSpreadMs: bundleStartSpreadMs,

@@ -8,6 +8,34 @@ const commitPattern = /^[0-9a-f]{40}$/;
 
 export const sha256 = bytes => createHash('sha256').update(bytes).digest('hex');
 
+export function observedIndexHtml(bytes) {
+  const text = Buffer.from(bytes).toString('utf8');
+  const matches = [...text.matchAll(/<script\b[^>]*><\/script>\r?\n?/g)]
+    .filter(match => match[0].includes('https://static.cloudflareinsights.com/beacon.min.js/'));
+  if (matches.length > 1) throw Error('Browser navigation contains multiple Cloudflare analytics injections');
+  if (matches.length) {
+    const match = matches[0];
+    const tag = match[0].replace(/\r?\n$/, '');
+    const opening = tag.slice('<script'.length, tag.indexOf('>'));
+    const attributes = [...opening.matchAll(/\s+([A-Za-z_:][\w:.-]*)\s*=\s*("[^"]*"|'[^']*')/g)];
+    const values = Object.fromEntries(attributes.map(attribute => [attribute[1], attribute[2].slice(1, -1)]));
+    let beacon;
+    try { beacon = JSON.parse(values['data-cf-beacon']); } catch { beacon = null; }
+    if (attributes.map(attribute => attribute[0]).join('') !== opening ||
+        attributes.length !== Object.keys(values).length ||
+        Object.keys(values).sort().join(',') !== 'crossorigin,data-cf-beacon,integrity,src,type' ||
+        values.type !== 'module' || values.crossorigin !== 'anonymous' ||
+        !/^https:\/\/static\.cloudflareinsights\.com\/beacon\.min\.js\/[A-Za-z0-9]+$/.test(values.src) ||
+        !/^sha512-[A-Za-z0-9+/=]+$/.test(values.integrity) ||
+        !beacon || Array.isArray(beacon) || typeof beacon !== 'object' ||
+        typeof beacon.version !== 'string' || typeof beacon.token !== 'string' ||
+        !text.slice(match.index + match[0].length).startsWith('</body>'))
+      throw Error('Cloudflare analytics injection is malformed');
+  }
+  const normalized = matches.length ? text.replace(matches[0][0], '') : text;
+  return { sha256: sha256(Buffer.from(normalized)), edgeTransform: matches.length ? 'cloudflare-web-analytics' : null };
+}
+
 const publicPath = (root, path) => relative(root, path).split(sep).join('/');
 
 function frontendFiles(root) {
@@ -79,6 +107,8 @@ export function validateObservedSiteIdentity(observed, expected) {
       observed.identity.toolchain?.id !== expected.toolchainId ||
       observed.identity.toolchain?.manifestSha256 !== expected.toolchainManifestSha256)
     throw Error('Browser-observed site identity has unexpected coordinates');
+  if (observed.indexHtmlSha256 !== observed.identity.indexHtmlSha256)
+    throw Error('Browser navigation HTML differs from the built site');
   if (observed.index.id !== expected.toolchainId ||
       observed.index.manifestSha256 !== expected.toolchainManifestSha256 ||
       observed.toolchainManifestSha256 !== expected.toolchainManifestSha256 ||
