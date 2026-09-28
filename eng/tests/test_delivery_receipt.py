@@ -2,6 +2,7 @@ import hashlib
 import importlib.util
 import json
 from pathlib import Path
+import subprocess
 import tempfile
 import unittest
 
@@ -21,6 +22,7 @@ DELIVERY = load("test_delivery_receipt", ROOT / "eng/delivery-receipt.py")
 ACTIONS = load("test_actions_delivery", ROOT / "eng/actions-delivery.py")
 TRAIN = DELIVERY.TRAIN
 COORDINATOR = DELIVERY.COORDINATOR
+RECEIVER = load("test_release_receiver", ROOT / "eng/release-receiver.py")
 
 
 class DeliveryFixture(unittest.TestCase):
@@ -299,7 +301,7 @@ class ActionsDeliveryTests(DeliveryFixture):
         self.jobs = self.root / "jobs.json"
         jobs = [
             self.job(900, "pages / complete-delivery", "in_progress", None),
-            self.job(901, "pages / deploy", "in_progress", None),
+            self.job(901, "pages / deploy"),
         ]
         jobs.extend(
             self.job(910 + index, f"pages / verify-live ({browser})")
@@ -433,6 +435,162 @@ class ActionsDeliveryTests(DeliveryFixture):
                 head_sha=self.head_sha,
                 require_success=False,
             )
+
+    def test_resolves_absent_lightweight_and_annotated_release_tags(self) -> None:
+        repository = self.root / "repository"
+        repository.mkdir()
+
+        def git(*arguments: str) -> str:
+            completed = subprocess.run(
+                ["git", *arguments],
+                cwd=repository,
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+            return completed.stdout.strip()
+
+        git("init", "--initial-branch=main")
+        git("config", "user.name", "Zion Sati")
+        git("config", "user.email", "283163728+zion-sati@users.noreply.github.com")
+        (repository / "fixture.txt").write_text("fixture\n", encoding="utf-8")
+        git("add", "fixture.txt")
+        git("commit", "-m", "Create fixture")
+        commit = git("rev-parse", "HEAD")
+        git("tag", "v0.5.0-lightweight")
+        git("tag", "-a", "v0.5.0-annotated", "-m", "Annotated fixture")
+        blob = git("hash-object", "-w", "fixture.txt")
+        tree = git("rev-parse", "HEAD^{tree}")
+        git("tag", "v0.5.0-blob", blob)
+        git("tag", "v0.5.0-tree", tree)
+
+        self.assertEqual("", ACTIONS.tag_commit(repository, "v0.5.0-absent"))
+        self.assertEqual(
+            commit,
+            ACTIONS.tag_commit(repository, "v0.5.0-lightweight"),
+        )
+        self.assertEqual(
+            commit,
+            ACTIONS.tag_commit(repository, "v0.5.0-annotated"),
+        )
+        for tag in ("v0.5.0-blob", "v0.5.0-tree"):
+            with self.subTest(tag=tag), self.assertRaisesRegex(
+                ValueError,
+                "does not resolve to a commit",
+            ):
+                ACTIONS.tag_commit(repository, tag)
+
+    def test_playground_release_anchor_distinguishes_draft_and_published_tags(self) -> None:
+        stage = TRAIN.preparation_stage(self.preparation_value, "playground")
+        release = {
+            "id": stage["releaseId"],
+            "tag_name": stage["ref"],
+            "target_commitish": stage["sourceCommit"],
+            "draft": True,
+            "prerelease": False,
+        }
+        RECEIVER.validate_delivery_anchor(release, stage, self.preparation_value, "")
+        RECEIVER.validate_delivery_anchor(
+            release,
+            stage,
+            self.preparation_value,
+            str(stage["sourceCommit"]),
+        )
+        with self.assertRaisesRegex(ValueError, "Prepared Playground release"):
+            RECEIVER.validate_delivery_anchor(
+                release,
+                stage,
+                self.preparation_value,
+                "f" * 40,
+            )
+
+        release["draft"] = False
+        RECEIVER.validate_delivery_anchor(
+            release,
+            stage,
+            self.preparation_value,
+            str(stage["sourceCommit"]),
+        )
+        with self.assertRaisesRegex(ValueError, "Prepared Playground release"):
+            RECEIVER.validate_delivery_anchor(
+                release,
+                stage,
+                self.preparation_value,
+                "",
+            )
+
+
+class WorkflowContractTests(unittest.TestCase):
+    def test_production_is_dispatch_only_and_never_cancels_an_active_stage(self) -> None:
+        release = (ROOT / ".github/workflows/release.yml").read_text()
+        self.assertNotIn("push:\n", release)
+        self.assertIn("workflow_dispatch:", release)
+        self.assertIn("cancel-in-progress: false", release)
+        self.assertIn("python3 bootstrap/eng/release-receiver.py", release)
+        self.assertIn("--approved-actor-id \"$APPROVED_ACTOR_ID\"", release)
+        self.assertNotIn("gh release create", release)
+
+    def test_candidate_receipts_are_the_last_fallible_producer_steps(self) -> None:
+        release = (ROOT / ".github/workflows/release.yml").read_text()
+        pages = (ROOT / ".github/workflows/pages.yml").read_text()
+        self.assertGreater(
+            release.index("- name: Retain toolchain candidate receipt"),
+            release.index("- name: Retain resolved toolchain for the site build"),
+        )
+        self.assertGreater(
+            pages.index("- name: Retain site candidate receipt"),
+            pages.index("- name: Retain resolved site for qualification and deployment"),
+        )
+        self.assertTrue(
+            pages.rstrip().endswith("retention-days: 90"),
+            "Completion receipt upload must remain the final completion-job step.",
+        )
+
+    def test_completion_collects_three_exact_lanes_and_deployment(self) -> None:
+        pages = (ROOT / ".github/workflows/pages.yml").read_text()
+        self.assertEqual(2, pages.count("browser: [chromium, firefox, webkit]"))
+        self.assertIn("--job-name 'pages / deploy'", pages)
+        self.assertIn("--producer-job-name 'pages / complete-delivery'", pages)
+        self.assertIn("--live-job-prefix 'pages / verify-live'", pages)
+        self.assertIn("delivery-evidence-playground-${{ matrix.browser }}", pages)
+        self.assertIn("delivery-completion-playground-${{ github.run_id }}", pages)
+        self.assertIn("bind-deployment:", pages)
+        self.assertIn("needs: [prepare-site, deploy, bind-deployment]", pages)
+        self.assertIn(
+            "needs: [prepare-site, deploy, bind-deployment, verify-live]",
+            pages,
+        )
+
+    def test_attempt_bound_artifacts_make_native_reruns_unambiguous(self) -> None:
+        release = (ROOT / ".github/workflows/release.yml").read_text()
+        pages = (ROOT / ".github/workflows/pages.yml").read_text()
+        self.assertIn(
+            "coordinated-inputs-${{ inputs.stage_identity }}-${{ github.run_attempt }}",
+            release,
+        )
+        self.assertIn(
+            "github-pages-${{ github.run_id }}-${{ github.run_attempt }}",
+            pages,
+        )
+        self.assertIn(
+            "artifact_name: ${{ needs.stage-site.outputs.pages_artifact }}",
+            pages,
+        )
+        self.assertIn("Native production reruns are not supported", release)
+        self.assertEqual(
+            7,
+            pages.count("Native production reruns are not supported"),
+        )
+
+    def test_retry_paths_accept_only_the_ordered_candidate_prefix(self) -> None:
+        release = (ROOT / ".github/workflows/release.yml").read_text()
+        pages = (ROOT / ".github/workflows/pages.yml").read_text()
+        self.assertIn("python3 bootstrap/eng/release-receiver.py", release)
+        self.assertIn("delivery-candidate-${kind}.json", release)
+        self.assertIn("--expected-receipt-sha256 \"$expected\"", release)
+        self.assertIn("if: inputs.production && inputs.retained_site", pages)
+        self.assertIn("if: inputs.production && !inputs.retained_site", pages)
+        self.assertIn("--toolchain-receipt artifacts/toolchain/", pages)
 
 
 if __name__ == "__main__":

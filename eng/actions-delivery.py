@@ -8,6 +8,7 @@ import hashlib
 import json
 from pathlib import Path
 import re
+import subprocess
 
 
 COMMIT = re.compile(r"[0-9a-f]{40}")
@@ -39,6 +40,42 @@ def positive_integer(value: object, description: str) -> int:
     if not isinstance(value, int) or isinstance(value, bool) or value < 1:
         raise ValueError(f"{description} must be a positive integer.")
     return value
+
+
+def tag_commit(repository: Path, tag: str) -> str:
+    if not tag:
+        raise ValueError("Release tag is empty.")
+    reference = f"refs/tags/{tag}"
+    checked = subprocess.run(
+        ["git", "check-ref-format", reference],
+        cwd=repository,
+        capture_output=True,
+        text=True,
+    )
+    if checked.returncode != 0:
+        raise ValueError("Release tag is not a valid Git reference.")
+    exists = subprocess.run(
+        ["git", "show-ref", "--verify", "--quiet", reference],
+        cwd=repository,
+        capture_output=True,
+        text=True,
+    )
+    if exists.returncode == 1:
+        return ""
+    if exists.returncode != 0:
+        raise ValueError("Release tag existence could not be checked.")
+    resolved = subprocess.run(
+        ["git", "rev-parse", "--verify", "--quiet", f"{reference}^{{commit}}"],
+        cwd=repository,
+        capture_output=True,
+        text=True,
+    )
+    if resolved.returncode != 0:
+        raise ValueError("Existing release tag does not resolve to a commit.")
+    commit = resolved.stdout.strip()
+    if COMMIT.fullmatch(commit) is None:
+        raise ValueError("Release tag did not resolve to a commit.")
+    return commit
 
 
 def job_rows(document: object) -> list[dict[str, object]]:
@@ -103,7 +140,7 @@ def deployment_record(
         run_id=run_id,
         run_attempt=run_attempt,
         head_sha=head_sha,
-        require_success=False,
+        require_success=True,
     )
     job_id = positive_integer(job.get("id"), "Deployment job ID")
     deployments = read_json(deployments_path)
@@ -294,6 +331,10 @@ def parser() -> argparse.ArgumentParser:
     root = argparse.ArgumentParser(description=__doc__)
     commands = root.add_subparsers(dest="command", required=True)
 
+    tag = commands.add_parser("tag-commit")
+    tag.add_argument("--repository", type=Path, required=True)
+    tag.add_argument("--tag", required=True)
+
     job = commands.add_parser("job-id")
     job.add_argument("--jobs", type=Path, required=True)
     job.add_argument("--name", required=True)
@@ -338,6 +379,9 @@ def parser() -> argparse.ArgumentParser:
 
 def main() -> int:
     arguments = parser().parse_args()
+    if arguments.command == "tag-commit":
+        print(tag_commit(arguments.repository, arguments.tag))
+        return 0
     if arguments.command == "job-id":
         job = resolve_job(
             arguments.jobs,
