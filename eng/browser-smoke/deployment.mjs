@@ -173,7 +173,9 @@ try {
   // The separately bundled Preview 2 guest provider adds one verified module request.
   if (directPayloads.length || toolchainRequests.length > 21)
     throw Error(`Toolchain request graph was not bundled: ${JSON.stringify({ count: toolchainRequests.length, directPayloads })}`);
-  const finalNavigation = await page.reload();
+  const finalUrl = new URL(url);
+  finalUrl.searchParams.set('site-identity', expectedIdentity.siteIdentitySha256);
+  const finalNavigation = await page.goto(finalUrl.href);
   if (!finalNavigation?.ok()) throw Error(`Playground reload failed: ${finalNavigation?.status()}`);
   const finalSiteIdentity = await observeSiteIdentity(page, url, await finalNavigation.body(), expectedIdentity);
   const bytes = readFileSync(componentPath);
