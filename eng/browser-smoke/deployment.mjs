@@ -1,14 +1,17 @@
-import { chromium } from 'playwright';
+import { browserType } from './engine.mjs';
 import { execFileSync } from 'node:child_process';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
+import { expectedSiteIdentity } from '../site-identity.mjs';
+import { observeSiteIdentity } from './site-identity.mjs';
 
 const url = process.env.PLAYGROUND_URL;
 const output = process.env.PLAYGROUND_EVIDENCE;
 if (!url || !output) throw Error('PLAYGROUND_URL and PLAYGROUND_EVIDENCE are required');
+const expectedIdentity = expectedSiteIdentity();
 const playgroundVersion = JSON.parse(readFileSync(new URL('../../package.json', import.meta.url))).version;
 mkdirSync(output, { recursive: true });
-const browser = await chromium.launch({ headless: true });
+const browser = await browserType.launch({ headless: true });
 const errors = [];
 const requests = [];
 const consoleErrors = [];
@@ -41,12 +44,10 @@ try {
       });
     }
   });
-  await page.goto(url);
-  const toolchainManifest = await page.evaluate(async () => {
-    const base = new URL('toolchain/', location.href);
-    const index = await (await fetch(new URL('index.json', base), { cache: 'no-cache' })).json();
-    return (await fetch(new URL(`${index.id}/asset-manifest.json`, base), { cache: 'force-cache' })).json();
-  });
+  const initialNavigation = await page.goto(url);
+  if (!initialNavigation?.ok()) throw Error(`Playground navigation failed: ${initialNavigation?.status()}`);
+  const initialSiteIdentity = await observeSiteIdentity(page, url, await initialNavigation.body(), expectedIdentity);
+  const toolchainManifest = initialSiteIdentity.toolchainManifest;
   if (toolchainManifest.schemaVersion !== 3 ||
       Object.keys(toolchainManifest.bundles).sort().join(',') !== 'compiler,guest,linker,tools')
     throw Error(`Unexpected toolchain manifest: ${JSON.stringify(toolchainManifest.bundles)}`);
@@ -57,6 +58,10 @@ try {
   const inspectToolbar = () => page.evaluate(() => {
     const toolbar = document.querySelector('.toolbar');
     const options = document.querySelector('.options');
+    const optionControls = [...document.querySelectorAll('.options > *:not([hidden])')].map(control => {
+      const box = control.getBoundingClientRect();
+      return { id: control.id, className: control.className, left: box.left, right: box.right, width: box.width };
+    });
     const controls = [...document.querySelectorAll('.actions button')].map(button => {
       const box = button.getBoundingClientRect();
       return { id: button.id, left: box.left, right: box.right, width: box.width };
@@ -64,14 +69,19 @@ try {
     return { viewport: innerWidth, scrollWidth: document.documentElement.scrollWidth,
       toolbar: toolbar ? { left: toolbar.getBoundingClientRect().left, right: toolbar.getBoundingClientRect().right,
         clientWidth: toolbar.clientWidth, scrollWidth: toolbar.scrollWidth } : null,
-      options: options ? { clientWidth: options.clientWidth, scrollWidth: options.scrollWidth } : null, controls };
+      options: options ? { left: options.getBoundingClientRect().left, right: options.getBoundingClientRect().right,
+        clientWidth: options.clientWidth, scrollWidth: options.scrollWidth } : null, optionControls, controls };
   });
   const assertToolbar = toolbarLayout => {
+    const subpixelTolerance = 0.5;
     if (!toolbarLayout.toolbar || !toolbarLayout.options || toolbarLayout.scrollWidth > toolbarLayout.viewport ||
         toolbarLayout.toolbar.scrollWidth > toolbarLayout.toolbar.clientWidth ||
-        toolbarLayout.options.scrollWidth > toolbarLayout.options.clientWidth ||
+        toolbarLayout.optionControls.some(control => control.width <= 0 ||
+          control.left < toolbarLayout.options.left - subpixelTolerance ||
+          control.right > toolbarLayout.options.right + subpixelTolerance) ||
         toolbarLayout.controls.length !== 4 || toolbarLayout.controls.some(control =>
-          control.width <= 0 || control.left < toolbarLayout.toolbar.left || control.right > toolbarLayout.toolbar.right))
+          control.width <= 0 || control.left < toolbarLayout.toolbar.left - subpixelTolerance ||
+          control.right > toolbarLayout.toolbar.right + subpixelTolerance))
       throw Error(`Responsive toolbar overflow: ${JSON.stringify(toolbarLayout)}`);
   };
   await page.setViewportSize({ width: 1440, height: 900 });
@@ -86,8 +96,8 @@ try {
   await page.screenshot({ path: `${output}/responsive-toolbar-intermediate.png`, fullPage: false });
   await page.setViewportSize({ width: 780, height: 900 });
   const toolbarLayout = await inspectToolbar();
-  assertToolbar(toolbarLayout);
   await page.screenshot({ path: `${output}/responsive-toolbar.png`, fullPage: false });
+  assertToolbar(toolbarLayout);
   await page.getByLabel('Example', { exact: true }).selectOption('hello');
   await page.getByLabel('Language', { exact: true }).selectOption('15');
   await page.setViewportSize({ width: 1280, height: 900 });
@@ -163,9 +173,20 @@ try {
   // The separately bundled Preview 2 guest provider adds one verified module request.
   if (directPayloads.length || toolchainRequests.length > 21)
     throw Error(`Toolchain request graph was not bundled: ${JSON.stringify({ count: toolchainRequests.length, directPayloads })}`);
+  const finalUrl = new URL(url);
+  finalUrl.searchParams.set('site-identity', expectedIdentity.siteIdentitySha256);
+  const finalNavigation = await page.goto(finalUrl.href);
+  if (!finalNavigation?.ok()) throw Error(`Playground reload failed: ${finalNavigation?.status()}`);
+  const finalSiteIdentity = await observeSiteIdentity(page, url, await finalNavigation.body(), expectedIdentity);
   const bytes = readFileSync(componentPath);
   const result = { passed: true, browser: browser.version(), stdout, status,
     component: { bytes: bytes.length, sha256: createHash('sha256').update(bytes).digest('hex') },
+    siteIdentity: { sha256: finalSiteIdentity.siteIdentitySha256,
+      sourceCommit: finalSiteIdentity.identity.sourceCommit,
+      indexHtmlSha256: finalSiteIdentity.indexHtmlSha256,
+      edgeTransform: finalSiteIdentity.edgeTransform,
+      toolchainId: finalSiteIdentity.index.id,
+      toolchainManifestSha256: finalSiteIdentity.toolchainManifestSha256 },
     toolchainRequests: { unique: toolchainRequests.length, bundles: bundleRequests, parallelStartSpreadMs: bundleStartSpreadMs,
       responses: Object.fromEntries(bundleResponses) }, toolbarLayout, pageContract, errors, consoleErrors };
   writeFileSync(`${output}/results.json`, JSON.stringify(result, null, 2));

@@ -153,10 +153,11 @@ Trusted compiler/tool binaries have finite linear-memory maxima: .NET 2 GiB,
 LLD 1 GiB, Binaryen 4 GiB and wasm-tools 512 MiB. These are separate from accepted
 input/output bounds and do not establish a browser process RAM quota.
 
-Hello compile/run/download has been tested in Chromium 151, Firefox 153 and
-WebKit 26.5; generated JSON, TUnit timers and failure recovery were tested in
-Chromium. Safari support remains experimental. Unsupported required features
-produce a message before compilation.
+The complete browser qualification runs in current Chromium, Firefox and
+Playwright WebKit, which covers Safari's browser engine. Each lane exercises
+compile, run, download, examples, errors and recovery, persistent cache behavior,
+resource boundaries, back navigation and responsive layout. Unsupported required
+features produce a message before compilation.
 
 Focused development-server checks:
 

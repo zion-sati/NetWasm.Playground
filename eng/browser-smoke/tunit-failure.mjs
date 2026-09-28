@@ -1,22 +1,28 @@
-import { chromium } from 'playwright';
+import { browserName, browserType } from './engine.mjs';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { examples } from '../../src/examples.ts';
 
 const output = process.env.PLAYGROUND_EVIDENCE;
 if (!output) throw new Error('PLAYGROUND_EVIDENCE is required');
 mkdirSync(output, { recursive: true });
-const browser = await chromium.launch({ headless: true });
+const browser = await browserType.launch({ headless: true });
 try {
   const page = await browser.newPage();
   await page.goto(process.env.PLAYGROUND_URL ?? 'http://127.0.0.1:4173/');
   await page.locator('.monaco-editor').waitFor();
   await page.getByLabel('Optimization', { exact: true }).selectOption('none');
   await page.getByLabel('Example', { exact: true }).selectOption('tunit');
-  await page.locator('#editor .view-lines').click({ position: { x: 80, y: 12 } });
-  await page.keyboard.press('ControlOrMeta+A');
   const source = examples.find(example => example.id === 'tunit')?.source;
   if (!source?.includes('IsEqualTo(42)')) throw new Error('TUnit source anchor is missing');
-  await page.keyboard.insertText(source.replace('IsEqualTo(42)', 'IsEqualTo(43)'));
+  await page.waitForFunction(() => document.querySelector('#editor .view-lines')?.textContent?.includes('IsEqualTo(42)'));
+  await page.locator('#editor textarea').focus();
+  await page.keyboard.press(browserName === 'webkit' ? 'Meta+f' : 'ControlOrMeta+f');
+  const find = page.getByLabel('Find', { exact: true });
+  await find.fill('IsEqualTo(42)');
+  await page.waitForFunction(() => document.querySelector('#editor .matchesCount')?.textContent?.includes('1 of 1'));
+  await find.press('Escape');
+  await page.keyboard.insertText('IsEqualTo(43)');
+  await page.waitForFunction(() => document.querySelector('#editor .view-lines')?.textContent?.includes('IsEqualTo(43)'));
   await page.locator('#run').click();
   await page.waitForFunction(() => document.querySelector('#stop').disabled, undefined,
     { timeout: 300_000 });

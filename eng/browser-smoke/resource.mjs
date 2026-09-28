@@ -1,14 +1,145 @@
-import {chromium}from'playwright';import{writeFileSync,mkdirSync}from'node:fs';
-const output=process.env.PLAYGROUND_EVIDENCE; if(!output)throw Error('PLAYGROUND_EVIDENCE is required'); mkdirSync(output,{recursive:true});import{execFileSync}from'node:child_process';
-const server=await chromium.launchServer({headless:true});const browser=await chromium.connect(server.wsEndpoint());const samples=[];let peakRSSKiB=0;
-const sample=()=>{const rows=execFileSync('ps',['-axo','pid=,ppid=,rss='],{encoding:'utf8'}).trim().split('\n').map(s=>s.trim().split(/\s+/).map(Number));const owned=new Set([server.process().pid]);for(let changed=true;changed;){changed=false;for(const[pid,parent]of rows)if(owned.has(parent)&&!owned.has(pid)){owned.add(pid);changed=true}}const rssKiB=rows.filter(([pid])=>owned.has(pid)).reduce((s,[,,rss])=>s+rss,0);peakRSSKiB=Math.max(peakRSSKiB,rssKiB);samples.push({elapsed:Date.now(),rssKiB,processes:owned.size})};const timer=setInterval(sample,1000);const cases=[],errors=[];
-try{const page=await browser.newPage();page.on('pageerror',e=>errors.push(String(e)));await page.goto(process.env.PLAYGROUND_URL ?? 'http://127.0.0.1:5173/playground/');
-for(const[name,source,expected]of[
-['loop','using System; Console.WriteLine("loop started"); while(true){}','Guest execution time limit exceeded'],
-['loop-recovery','using System; Console.WriteLine(43);','43\n'],
-['console-flood','using System; for(int i=0;i<10000;i++)Console.WriteLine("0123456789012345678901234567890123456789012345678901234567890123456789");','Guest console limit exceeded'],
-['flood-recovery','using System; Console.WriteLine(44);','44\n']]){const result=await page.evaluate(async({source})=>{const{PlaygroundPipeline}=await import(new URL('src/pipeline.ts',location.href).href);globalThis.resourcePipeline??=new PlaygroundPipeline(()=>{});const p=globalThis.resourcePipeline;const snapshot={requestId:Date.now(),revision:1,recipeId:'hello',source,language:'15',updatedMemorySafetyRules:false};const c=await p.compile(snapshot);if(!c.success)throw Error(JSON.stringify(c));const r=await p.run(c,snapshot);return{compilation:{...c,component:{bytes:c.component.length}},run:r}},{source});if(!(result.run.stdout===expected||result.run.error?.includes(expected)))throw Error(JSON.stringify({name,result}));if(name==='loop'&&result.run.stdout!=='loop started\n')throw Error('Timeout output lost');if(name==='console-flood'&&result.run.stdout.length>65536)throw Error('Output cap exceeded');cases.push({name,...result});sample();writeFileSync(`${output}/partial.json`,JSON.stringify({cases,errors,peakRSSKiB,samples},null,2));console.log(name,'PASS');}
-const repeated=await page.evaluate(async()=>{const p=globalThis.resourcePipeline;const s={requestId:Date.now(),revision:1,recipeId:'hello',source:'using System; Console.WriteLine(42);',language:'15',updatedMemorySafetyRules:false};const c=await p.compile(s);if(!c.success)throw Error(JSON.stringify(c));const results=[];for(let i=0;i<10;i++){const r=await p.run(c,{...s,requestId:s.requestId+i+1});if(!r.success||r.stdout!=='42\n')throw Error(JSON.stringify(r));results.push({stdout:r.stdout,milliseconds:r.timings.reduce((sum,t)=>sum+t.milliseconds,0),memories:r.loaded.flatMap(x=>x.memories)})}return results});
-const repeatedCompiles=await page.evaluate(async()=>{const p=globalThis.resourcePipeline;const source='using System; Console.WriteLine(42);';const results=[];for(let i=0;i<3;i++){const snapshot={requestId:Date.now()+i,revision:i+1,recipeId:'hello',source,optimization:'none',language:'15',updatedMemorySafetyRules:false};const started=performance.now();const c=await p.compile(snapshot);if(!c.success)throw Error(JSON.stringify(c));results.push({wallMilliseconds:performance.now()-started,timings:c.timings,componentBytes:c.component.length})}return results});sample();
-const storage=await page.evaluate(async()=>({local:Object.keys(localStorage),session:Object.keys(sessionStorage),indexedDB:await indexedDB.databases(),caches:await caches.keys(),serviceWorkers:(await navigator.serviceWorker.getRegistrations()).length,cookies:document.cookie}));sample();writeFileSync(`${output}/results.json`,JSON.stringify({passed:true,cases,repeated,repeatedCompiles,storage,errors,peakRSSKiB,samples},null,2));console.log('PASS loop/output quota/repeated run+compile/storage; peakRSSMiB',peakRSSKiB/1024);
-}finally{clearInterval(timer);await browser.close();await server.close()}
+import { browserType, browserName } from './engine.mjs';
+import { execFileSync } from 'node:child_process';
+import { mkdirSync, writeFileSync } from 'node:fs';
+
+const output = process.env.PLAYGROUND_EVIDENCE;
+if (!output) throw Error('PLAYGROUND_EVIDENCE is required');
+mkdirSync(output, { recursive: true });
+
+const server = await browserType.launchServer({ headless: true });
+const browser = await browserType.connect(server.wsEndpoint());
+const samples = [];
+let peakRSSKiB = 0;
+const sample = () => {
+  const rows = execFileSync('ps', ['-axo', 'pid=,ppid=,rss='], { encoding: 'utf8' }).trim()
+    .split('\n').map(line => line.trim().split(/\s+/).map(Number));
+  const owned = new Set([server.process().pid]);
+  for (let changed = true; changed;) {
+    changed = false;
+    for (const [pid, parent] of rows)
+      if (owned.has(parent) && !owned.has(pid)) { owned.add(pid); changed = true; }
+  }
+  const rssKiB = rows.filter(([pid]) => owned.has(pid))
+    .reduce((total, [, , rss]) => total + rss, 0);
+  peakRSSKiB = Math.max(peakRSSKiB, rssKiB);
+  samples.push({ elapsed: Date.now(), rssKiB, processes: owned.size });
+};
+sample();
+const timer = setInterval(sample, 1_000);
+const cases = [];
+const errors = [];
+
+try {
+  const page = await browser.newPage();
+  page.on('pageerror', error => errors.push(String(error)));
+  await page.goto(process.env.PLAYGROUND_URL ?? 'http://127.0.0.1:4173/');
+  await page.locator('.monaco-editor').waitFor();
+  await page.getByLabel('Optimization', { exact: true }).selectOption('none');
+
+  const setSource = async source => {
+    await page.locator('.monaco-editor').click({ position: { x: 100, y: 40 } });
+    await page.keyboard.press(browserName === 'webkit' ? 'Meta+A' : 'ControlOrMeta+A');
+    await page.keyboard.insertText(source);
+  };
+  const waitForIdle = () => page.waitForFunction(
+    () => document.querySelector('#stop').disabled, undefined, { timeout: 240_000 });
+  const runSource = async (name, source) => {
+    await setSource(source);
+    await page.locator('#run').click();
+    await waitForIdle();
+    sample();
+    const result = {
+      name,
+      status: await page.locator('#status').textContent(),
+      stdout: await page.locator('#output').textContent(),
+      diagnostics: await page.locator('#diagnostics').textContent(),
+      timings: await page.locator('#timings').textContent(),
+    };
+    cases.push(result);
+    writeFileSync(`${output}/partial.json`, JSON.stringify(
+      { browser: browserName, cases, errors, peakRSSKiB, samples }, null, 2));
+    return result;
+  };
+
+  const loop = await runSource('loop',
+    'using System; Console.WriteLine("loop started"); while(true){}');
+  if (loop.stdout !== 'loop started\n' ||
+      !loop.status.includes('Guest execution time limit exceeded'))
+    throw Error(`Infinite-loop boundary failed: ${JSON.stringify(loop)}`);
+
+  const loopRecovery = await runSource('loop-recovery',
+    'using System; Console.WriteLine(43);');
+  if (loopRecovery.status !== 'Run complete' || loopRecovery.stdout !== '43\n')
+    throw Error(`Recovery after timeout failed: ${JSON.stringify(loopRecovery)}`);
+
+  const flood = await runSource('console-flood',
+    'using System; for(int i=0;i<10000;i++)Console.WriteLine("0123456789012345678901234567890123456789012345678901234567890123456789");');
+  if (!flood.status.includes('Guest console limit exceeded') || flood.stdout.length > 65_536)
+    throw Error(`Console boundary failed: ${JSON.stringify({
+      status: flood.status, outputBytes: flood.stdout.length,
+    })}`);
+
+  const floodRecovery = await runSource('flood-recovery',
+    'using System; Console.WriteLine(44);');
+  if (floodRecovery.status !== 'Run complete' || floodRecovery.stdout !== '44\n')
+    throw Error(`Recovery after console limit failed: ${JSON.stringify(floodRecovery)}`);
+
+  const repeatedRuns = [];
+  await setSource('using System; Console.WriteLine(42);');
+  await page.locator('#run').click();
+  await waitForIdle();
+  for (let iteration = 0; iteration < 10; iteration++) {
+    const started = Date.now();
+    await page.locator('#run').click();
+    await waitForIdle();
+    const stdout = await page.locator('#output').textContent();
+    if (await page.locator('#status').textContent() !== 'Run complete' || stdout !== '42\n')
+      throw Error(`Repeated run ${iteration + 1} failed`);
+    repeatedRuns.push({ milliseconds: Date.now() - started, stdout });
+    sample();
+  }
+
+  const repeatedCompiles = [];
+  for (let iteration = 0; iteration < 3; iteration++) {
+    const started = Date.now();
+    await page.locator('#compile').click();
+    await waitForIdle();
+    if (await page.locator('#status').textContent() !== 'Compilation complete')
+      throw Error(`Repeated compilation ${iteration + 1} failed`);
+    repeatedCompiles.push({
+      milliseconds: Date.now() - started,
+      timings: await page.locator('#timings').textContent(),
+      size: await page.locator('#size').textContent(),
+    });
+    sample();
+  }
+
+  const storage = await page.evaluate(async () => ({
+    local: Object.keys(localStorage),
+    session: Object.keys(sessionStorage),
+    indexedDB: (await indexedDB.databases()).map(database => database.name),
+    caches: await caches.keys(),
+    serviceWorkers: (await navigator.serviceWorker.getRegistrations()).length,
+    cookies: document.cookie,
+  }));
+  sample();
+  if (errors.length) throw Error(`Page errors: ${JSON.stringify(errors)}`);
+
+  const result = {
+    passed: true,
+    browser: browserName,
+    cases,
+    repeatedRuns,
+    repeatedCompiles,
+    storage,
+    errors,
+    peakRSSKiB,
+    samples,
+  };
+  writeFileSync(`${output}/results.json`, JSON.stringify(result, null, 2));
+  console.log(`PASS: resource limits and recovery; peak RSS ${(peakRSSKiB / 1024).toFixed(1)} MiB`);
+} finally {
+  clearInterval(timer);
+  await browser.close();
+  await server.close();
+}

@@ -2,7 +2,34 @@ name: Pages
 
 on:
   workflow_dispatch:
+    inputs:
+      deploy:
+        description: Deploy after the three predeploy browser lanes pass
+        required: false
+        default: false
+        type: boolean
   workflow_call:
+    inputs:
+      deploy:
+        description: Deploy after the three predeploy browser lanes pass
+        required: false
+        default: true
+        type: boolean
+      release_artifact:
+        description: Actions artifact containing the exact browser toolchain archive
+        required: false
+        default: ''
+        type: string
+      release_archive:
+        description: Browser toolchain archive filename inside the artifact
+        required: false
+        default: ''
+        type: string
+      release_archive_sha256:
+        description: Expected SHA-256 of the browser toolchain archive
+        required: false
+        default: ''
+        type: string
 
 concurrency:
   group: pages
@@ -12,10 +39,14 @@ permissions:
   contents: read
 
 jobs:
-  build-and-test:
+  build-site:
     runs-on: ubuntu-24.04
     outputs:
+      base_path: ${{ steps.pages.outputs.base_path }}
+      site_artifact: ${{ steps.coordinates.outputs.site_artifact }}
+      site_identity_sha256: ${{ steps.coordinates.outputs.site_identity_sha256 }}
       toolchain_id: ${{ steps.toolchain.outputs.id }}
+      toolchain_manifest_sha256: ${{ steps.toolchain.outputs.manifest_sha256 }}
     steps:
       - name: Check out source
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
@@ -34,17 +65,98 @@ jobs:
         id: pages
         uses: actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d # v6
       - run: npm ci
-      - name: Install verified browser toolchain
+      - name: Download exact browser toolchain archive
+        if: inputs.release_artifact != ''
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
+        with:
+          name: ${{ inputs.release_artifact }}
+          path: .cache/release/input
+      - name: Verify and install supplied browser toolchain archive
+        if: inputs.release_artifact != ''
+        id: supplied-toolchain
+        env:
+          RELEASE_ARCHIVE: ${{ inputs.release_archive }}
+          RELEASE_ARCHIVE_SHA256: ${{ inputs.release_archive_sha256 }}
+        run: |
+          python3 - <<'PY'
+          import hashlib
+          import json
+          import os
+          from pathlib import Path
+
+          archive_name = os.environ['RELEASE_ARCHIVE']
+          expected_sha256 = os.environ['RELEASE_ARCHIVE_SHA256']
+          if not archive_name or Path(archive_name).name != archive_name:
+              raise SystemExit('Invalid supplied release archive name')
+          archive = Path('.cache/release/input') / archive_name
+          receipt = json.loads(Path('.cache/release/input/archive-receipt.json').read_text())
+          actual_sha256 = hashlib.sha256(archive.read_bytes()).hexdigest()
+          if receipt != {'name': archive_name, 'bytes': archive.stat().st_size,
+                          'sha256': actual_sha256}:
+              raise SystemExit('Downloaded archive does not match its release receipt')
+          if actual_sha256 != expected_sha256:
+              raise SystemExit(f'Archive SHA-256 mismatch: expected {expected_sha256}, got {actual_sha256}')
+          PY
+          python3 eng/toolchain-release.py install \
+            --archive ".cache/release/input/$RELEASE_ARCHIVE"
+      - name: Install released browser toolchain for manual deployment
+        if: inputs.release_artifact == ''
+        run: python3 eng/toolchain-release.py install
+      - name: Record deployed coordinates
         id: toolchain
         run: |
-          python3 eng/toolchain-release.py install
-          echo "id=$(python3 -c 'import json; print(json.load(open("public/toolchain/index.json"))["id"])')" >> "$GITHUB_OUTPUT"
-      - name: Build production site
+          python3 - <<'PY' >> "$GITHUB_OUTPUT"
+          import json
+          index = json.load(open('public/toolchain/index.json'))
+          print(f'id={index["id"]}')
+          print(f'manifest_sha256={index["manifestSha256"]}')
+          PY
+      - name: Build production site once
         env:
           PLAYGROUND_BASE: ${{ steps.pages.outputs.base_path }}/
         run: npm run build
-      - name: Install Chromium
-        run: npx playwright install --with-deps chromium
+      - name: Bind production site identity
+        run: node eng/site-identity.mjs dist "$GITHUB_SHA"
+      - name: Record site coordinates
+        id: coordinates
+        run: |
+          echo "site_artifact=pages-site-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" >> "$GITHUB_OUTPUT"
+          echo "site_identity_sha256=$(sha256sum dist/site-identity.json | cut -d ' ' -f 1)" >> "$GITHUB_OUTPUT"
+      - name: Retain exact production site
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: ${{ steps.coordinates.outputs.site_artifact }}
+          path: dist
+          if-no-files-found: error
+          retention-days: 14
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5
+        with:
+          path: dist
+
+  predeploy:
+    needs: build-site
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        browser: [chromium, firefox, webkit]
+    steps:
+      - name: Check out source
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - name: Set up Node.js
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: 26.7.0
+          cache: npm
+      - run: npm ci
+      - name: Download exact production site
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
+        with:
+          name: ${{ needs.build-site.outputs.site_artifact }}
+          path: dist
+      - name: Install ${{ matrix.browser }}
+        run: npx playwright install --with-deps "${{ matrix.browser }}"
       - name: Install pinned Wasmtime
         run: |
           curl --fail --location --retry 3 --output /tmp/wasmtime.tar.xz \
@@ -54,11 +166,14 @@ jobs:
             /tmp/wasmtime.tar.xz | sha256sum --check --strict
           tar -xJf /tmp/wasmtime.tar.xz -C /tmp
           echo "/tmp/wasmtime-v47.0.3-x86_64-linux" >> "$GITHUB_PATH"
-      - name: Smoke-test production build
+      - name: Qualify ${{ matrix.browser }} before deployment
         env:
-          PLAYGROUND_BASE: ${{ steps.pages.outputs.base_path }}/
-          PLAYGROUND_URL: http://127.0.0.1:4173${{ steps.pages.outputs.base_path }}/
-          PLAYGROUND_EVIDENCE: .cache/pages-smoke
+          PLAYGROUND_BROWSER: ${{ matrix.browser }}
+          PLAYGROUND_EVIDENCE: .cache/pages-predeploy-${{ matrix.browser }}
+          PLAYGROUND_URL: http://127.0.0.1:4173${{ needs.build-site.outputs.base_path }}/
+          EXPECTED_SITE_IDENTITY_SHA256: ${{ needs.build-site.outputs.site_identity_sha256 }}
+          EXPECTED_TOOLCHAIN_ID: ${{ needs.build-site.outputs.toolchain_id }}
+          EXPECTED_TOOLCHAIN_MANIFEST_SHA256: ${{ needs.build-site.outputs.toolchain_manifest_sha256 }}
         run: |
           npm run preview -- --host 127.0.0.1 --port 4173 &
           server_pid=$!
@@ -68,22 +183,19 @@ jobs:
             sleep 1
           done
           curl --fail --silent "$PLAYGROUND_URL" >/dev/null
-          node eng/browser-smoke/back-navigation.mjs
-          node eng/browser-smoke/deployment.mjs
-          node eng/browser-smoke/wasi-examples.mjs
-      - name: Upload Pages artifact
-        uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5
-        with:
-          path: dist
-      - name: Retain predeploy smoke evidence
+          bash eng/run-browser-lane.sh
+      - name: Retain predeploy evidence
+        if: always()
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:
-          name: pages-predeploy-${{ github.run_id }}
-          path: .cache/pages-smoke
+          name: pages-predeploy-${{ matrix.browser }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: .cache/pages-predeploy-${{ matrix.browser }}
+          if-no-files-found: warn
           retention-days: 14
 
   deploy:
-    needs: build-and-test
+    if: inputs.deploy
+    needs: [build-site, predeploy]
     runs-on: ubuntu-24.04
     outputs:
       page_url: ${{ steps.deployment.outputs.page_url }}
@@ -99,8 +211,13 @@ jobs:
         uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5
 
   verify-live:
-    needs: [build-and-test, deploy]
+    if: inputs.deploy
+    needs: [build-site, deploy]
     runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        browser: [chromium, firefox, webkit]
     steps:
       - name: Check out source
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
@@ -110,8 +227,8 @@ jobs:
           node-version: 26.7.0
           cache: npm
       - run: npm ci
-      - name: Install Chromium
-        run: npx playwright install --with-deps chromium
+      - name: Install ${{ matrix.browser }}
+        run: npx playwright install --with-deps "${{ matrix.browser }}"
       - name: Install pinned Wasmtime
         run: |
           curl --fail --location --retry 3 --output /tmp/wasmtime.tar.xz \
@@ -124,13 +241,21 @@ jobs:
       - name: Wait for the deployed toolchain
         env:
           PLAYGROUND_URL: ${{ needs.deploy.outputs.page_url }}
-          EXPECTED_TOOLCHAIN_ID: ${{ needs.build-and-test.outputs.toolchain_id }}
+          EXPECTED_SITE_IDENTITY_SHA256: ${{ needs.build-site.outputs.site_identity_sha256 }}
+          EXPECTED_TOOLCHAIN_ID: ${{ needs.build-site.outputs.toolchain_id }}
+          EXPECTED_TOOLCHAIN_MANIFEST_SHA256: ${{ needs.build-site.outputs.toolchain_manifest_sha256 }}
         run: |
           index_url="${PLAYGROUND_URL%/}/toolchain/index.json"
+          identity_url="${PLAYGROUND_URL%/}/site-identity.json"
           for attempt in {1..60}; do
-            if curl --fail --silent --show-error --output /tmp/live-toolchain-index.json "$index_url"; then
+            if curl --fail --silent --show-error --output /tmp/live-toolchain-index.json "$index_url" && \
+               curl --fail --silent --show-error --output /tmp/live-site-identity.json "$identity_url"; then
               actual_id=$(python3 -c 'import json; print(json.load(open("/tmp/live-toolchain-index.json"))["id"])' 2>/dev/null || true)
-              if [ "$actual_id" = "$EXPECTED_TOOLCHAIN_ID" ]; then
+              actual_manifest=$(python3 -c 'import json; print(json.load(open("/tmp/live-toolchain-index.json"))["manifestSha256"])' 2>/dev/null || true)
+              actual_site=$(sha256sum /tmp/live-site-identity.json | cut -d ' ' -f 1)
+              if [ "$actual_id" = "$EXPECTED_TOOLCHAIN_ID" ] && \
+                 [ "$actual_manifest" = "$EXPECTED_TOOLCHAIN_MANIFEST_SHA256" ] && \
+                 [ "$actual_site" = "$EXPECTED_SITE_IDENTITY_SHA256" ]; then
                 exit 0
               fi
             fi
@@ -139,19 +264,20 @@ jobs:
           done
           echo "Expected deployed toolchain $EXPECTED_TOOLCHAIN_ID was not available at $index_url" >&2
           exit 1
-      - name: Smoke-test the public deployment
+      - name: Qualify deployed site with ${{ matrix.browser }}
         env:
+          PLAYGROUND_BROWSER: ${{ matrix.browser }}
+          PLAYGROUND_EVIDENCE: .cache/pages-live-${{ matrix.browser }}
           PLAYGROUND_URL: ${{ needs.deploy.outputs.page_url }}
-          PLAYGROUND_EVIDENCE: .cache/pages-live-smoke
-        run: |
-          node eng/browser-smoke/back-navigation.mjs
-          node eng/browser-smoke/deployment.mjs
-          node eng/browser-smoke/wasi-examples.mjs
-      - name: Retain public deployment evidence
+          EXPECTED_SITE_IDENTITY_SHA256: ${{ needs.build-site.outputs.site_identity_sha256 }}
+          EXPECTED_TOOLCHAIN_ID: ${{ needs.build-site.outputs.toolchain_id }}
+          EXPECTED_TOOLCHAIN_MANIFEST_SHA256: ${{ needs.build-site.outputs.toolchain_manifest_sha256 }}
+        run: bash eng/run-browser-lane.sh
+      - name: Retain live deployment evidence
         if: always()
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:
-          name: pages-live-${{ github.run_id }}
-          path: .cache/pages-live-smoke
+          name: pages-live-${{ matrix.browser }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: .cache/pages-live-${{ matrix.browser }}
           if-no-files-found: warn
           retention-days: 14

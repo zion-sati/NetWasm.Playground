@@ -1,10 +1,10 @@
-import { chromium } from 'playwright';
+import { browserType } from './engine.mjs';
 import { mkdirSync, writeFileSync } from 'node:fs';
 
 const output = process.env.PLAYGROUND_EVIDENCE;
 if (!output) throw Error('PLAYGROUND_EVIDENCE is required');
 mkdirSync(output, { recursive: true });
-const browser = await chromium.launch({ headless: true });
+const browser = await browserType.launch({ headless: true });
 try {
   const page = await browser.newPage();
   await page.addInitScript(() => {

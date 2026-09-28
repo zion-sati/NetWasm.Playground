@@ -1,7 +1,7 @@
-import { chromium } from 'playwright';
+import { browserType } from './engine.mjs';
 
 const base = process.argv[2] ?? process.env.PLAYGROUND_URL ?? 'http://127.0.0.1:4173/';
-const browser = await chromium.launch({ headless: true });
+const browser = await browserType.launch({ headless: true });
 try {
   const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
   const pageErrors = [];
