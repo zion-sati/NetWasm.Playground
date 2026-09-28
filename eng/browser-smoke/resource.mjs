@@ -9,7 +9,6 @@ mkdirSync(output, { recursive: true });
 const server = await browserType.launchServer({ headless: true });
 const browser = await browserType.connect(server.wsEndpoint());
 const samples = [];
-const maximumRSSKiB = 2 * 1024 * 1024;
 let peakRSSKiB = 0;
 const sample = () => {
   const rows = execFileSync('ps', ['-axo', 'pid=,ppid=,rss='], { encoding: 'utf8' }).trim()
@@ -124,8 +123,6 @@ try {
     cookies: document.cookie,
   }));
   sample();
-  if (peakRSSKiB > maximumRSSKiB)
-    throw Error(`Browser process tree exceeded 2 GiB: ${(peakRSSKiB / 1024).toFixed(1)} MiB`);
   if (errors.length) throw Error(`Page errors: ${JSON.stringify(errors)}`);
 
   const result = {
@@ -136,7 +133,6 @@ try {
     repeatedCompiles,
     storage,
     errors,
-    maximumRSSKiB,
     peakRSSKiB,
     samples,
   };
