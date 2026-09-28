@@ -65,7 +65,7 @@ jobs:
       - run: npm ci
       - name: Download exact browser toolchain archive
         if: inputs.release_artifact != ''
-        uses: actions/download-artifact@37930b1c0eb944284dc7e93ce1340a49ac6b8b84 # v7
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
         with:
           name: ${{ inputs.release_artifact }}
           path: .cache/release/input
@@ -140,7 +140,7 @@ jobs:
           cache: npm
       - run: npm ci
       - name: Download exact production site
-        uses: actions/download-artifact@37930b1c0eb944284dc7e93ce1340a49ac6b8b84 # v7
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
         with:
           name: ${{ needs.build-site.outputs.site_artifact }}
           path: dist
