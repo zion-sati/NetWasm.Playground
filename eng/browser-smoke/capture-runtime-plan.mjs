@@ -43,17 +43,23 @@ try {
       });
       if (!result.success) throw new Error(`Candidate compilation failed: ${result.error ?? 'unknown error'}`);
       const actual = result.runtimeLinkPlan;
-      if (!actual || !Array.isArray(actual.Arguments) || !Array.isArray(actual.Inputs))
+      if (!actual || !Array.isArray(actual.Arguments) ||
+          !Array.isArray(actual.OptimizationArguments) || !Array.isArray(actual.Inputs))
         throw new Error('Candidate compiler returned an invalid runtime plan');
       return {
         arguments: actual.Arguments,
+        optimizationArguments: actual.OptimizationArguments,
         inputs: actual.Inputs.map(input => ({ path: input.Path, sha256: input.Sha256 })),
       };
     } finally {
       worker.terminate();
     }
   }, url);
-  writeFileSync(output, `${JSON.stringify({ arguments: plan.arguments, inputs: plan.inputs }, null, 2)}\n`);
+  writeFileSync(output, `${JSON.stringify({
+    arguments: plan.arguments,
+    optimizationArguments: plan.optimizationArguments,
+    inputs: plan.inputs,
+  }, null, 2)}\n`);
   console.log(`PASS: captured candidate runtime plan with ${plan.inputs.length} inputs`);
 } finally {
   await browser.close();

@@ -60,7 +60,8 @@ public static partial class Program
         int Kind, EntryPointAbiInfo? Abi);
     private sealed record RuntimeLinkAssetInfo(string Path, string Sha256);
     private sealed record RuntimeSystemLibrary(string Path, string Sha256);
-    private sealed record RuntimeLinkPlanInfo(string[] Arguments, RuntimeLinkAssetInfo[] Inputs, string RuntimeAbi,
+    private sealed record RuntimeLinkPlanInfo(string[] Arguments, string[] OptimizationArguments,
+        RuntimeLinkAssetInfo[] Inputs, string RuntimeAbi,
         string ToolchainFingerprint, long RuntimeGlobalBase, long HeapBase, long InitialMemorySizeBytes,
         long MaximumMemorySizeBytes);
     private sealed record TextModuleInfo(string OutputPath, string Text);
@@ -185,6 +186,7 @@ public static partial class Program
             (int)entryPoint.Abi.CompletionShape));
 
     private static RuntimeLinkPlanInfo Describe(RuntimeLinkPlan plan) => new(plan.Arguments.ToArray(),
+        plan.OptimizationArguments.ToArray(),
         plan.Inputs.Select(value => new RuntimeLinkAssetInfo(value.Path, value.Sha256)).ToArray(), plan.RuntimeAbi,
         plan.ToolchainFingerprint, plan.RuntimeGlobalBase, plan.HeapBase, plan.InitialMemorySizeBytes,
         plan.MaximumMemorySizeBytes);
