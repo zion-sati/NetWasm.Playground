@@ -69,10 +69,24 @@ class ToolchainReleaseVersionTests(unittest.TestCase):
         self.assertIn("dotnet workload install wasm-tools --skip-manifest-update", release)
         self.assertIn("Build content-addressed browser toolchain manifest", release)
         self.assertIn("python3 eng/rebuild-public-toolchain.py", release)
+        self.assertIn("Retain exact browser toolchain archive", release)
+        self.assertIn("release_archive_sha256: ${{ needs.build-release.outputs.release_archive_sha256 }}", release)
         self.assertIn("uses: ./.github/workflows/pages.yml", release)
         self.assertIn("workflow_call:", pages)
+        self.assertIn("Download exact browser toolchain archive", pages)
+        self.assertIn("actual_sha256 != expected_sha256", pages)
         self.assertIn("toolchain_id: ${{ steps.toolchain.outputs.id }}", pages)
-        self.assertIn("EXPECTED_TOOLCHAIN_ID: ${{ needs.build-and-test.outputs.toolchain_id }}", pages)
+        self.assertIn("EXPECTED_TOOLCHAIN_ID: ${{ needs.build-site.outputs.toolchain_id }}", pages)
+
+    def test_pages_qualifies_one_site_in_three_parallel_browser_lanes(self):
+        pages = (ROOT / ".github/workflows/pages.yml").read_text()
+
+        self.assertEqual(2, pages.count("browser: [chromium, firefox, webkit]"))
+        self.assertIn("name: Retain exact production site", pages)
+        self.assertIn("name: Download exact production site", pages)
+        self.assertIn("needs: [build-site, predeploy]", pages)
+        self.assertEqual(2, pages.count("bash eng/run-browser-lane.sh"))
+        self.assertNotIn("rebuild-public-toolchain.py", pages)
 
 if __name__ == "__main__":
     unittest.main()

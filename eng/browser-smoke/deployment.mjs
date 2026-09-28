@@ -1,4 +1,4 @@
-import { chromium } from 'playwright';
+import { browserType } from './engine.mjs';
 import { execFileSync } from 'node:child_process';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
@@ -8,7 +8,7 @@ const output = process.env.PLAYGROUND_EVIDENCE;
 if (!url || !output) throw Error('PLAYGROUND_URL and PLAYGROUND_EVIDENCE are required');
 const playgroundVersion = JSON.parse(readFileSync(new URL('../../package.json', import.meta.url))).version;
 mkdirSync(output, { recursive: true });
-const browser = await chromium.launch({ headless: true });
+const browser = await browserType.launch({ headless: true });
 const errors = [];
 const requests = [];
 const consoleErrors = [];

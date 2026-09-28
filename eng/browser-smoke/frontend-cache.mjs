@@ -1,7 +1,7 @@
-import { chromium } from 'playwright';
+import { browserType } from './engine.mjs';
 
 const base = process.env.PLAYGROUND_URL ?? 'http://127.0.0.1:5174/playground/';
-const browser = await chromium.launch({ headless: true });
+const browser = await browserType.launch({ headless: true });
 try {
   const page = await browser.newPage();
   await page.goto(base, { waitUntil: 'domcontentloaded' });

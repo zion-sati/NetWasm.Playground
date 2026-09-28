@@ -1,11 +1,11 @@
-import { chromium } from 'playwright';
+import { browserType } from './engine.mjs';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { examples } from '../../src/examples.ts';
 
 const output = process.env.PLAYGROUND_EVIDENCE;
 if (!output) throw new Error('PLAYGROUND_EVIDENCE is required');
 mkdirSync(output, { recursive: true });
-const browser = await chromium.launch({ headless: true });
+const browser = await browserType.launch({ headless: true });
 try {
   const page = await browser.newPage();
   await page.goto(process.env.PLAYGROUND_URL ?? 'http://127.0.0.1:4173/');

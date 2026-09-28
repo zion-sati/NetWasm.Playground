@@ -13,6 +13,10 @@ permissions:
 jobs:
   build-release:
     runs-on: ubuntu-24.04
+    outputs:
+      release_artifact: ${{ steps.release_archive.outputs.artifact }}
+      release_archive: ${{ steps.release_archive.outputs.archive }}
+      release_archive_sha256: ${{ steps.release_archive.outputs.sha256 }}
     steps:
       - name: Check out tagged source
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
@@ -41,8 +45,10 @@ jobs:
       - name: Build content-addressed browser toolchain manifest
         run: python3 eng/rebuild-public-toolchain.py --compiler-framework .cache/release/compiler-framework --output public/toolchain
       - name: Package reproducible release asset
+        id: release_archive
         run: |
           asset=$(python3 -c 'import json; print(json.load(open("eng/toolchain-release.json"))["asset"]["name"])')
+          artifact="browser-toolchain-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
           mkdir -p .cache/release/output
           python3 eng/toolchain-release.py pack --source public/toolchain --output ".cache/release/output/$asset"
           python3 eng/toolchain-release.py install --archive ".cache/release/output/$asset" --output .cache/release/install-check
@@ -53,6 +59,20 @@ jobs:
                      'sha256': hashlib.sha256(path.read_bytes()).hexdigest()}
           pathlib.Path('.cache/release/archive-receipt.json').write_text(json.dumps(receipt, indent=2) + '\n')
           PY
+          cp .cache/release/archive-receipt.json .cache/release/output/archive-receipt.json
+          sha256=$(python3 -c 'import json; print(json.load(open(".cache/release/archive-receipt.json"))["sha256"])')
+          {
+            echo "artifact=$artifact"
+            echo "archive=$asset"
+            echo "sha256=$sha256"
+          } >> "$GITHUB_OUTPUT"
+      - name: Retain exact browser toolchain archive
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: ${{ steps.release_archive.outputs.artifact }}
+          path: .cache/release/output
+          if-no-files-found: error
+          retention-days: 14
       - name: Publish GitHub Release
         if: github.event_name == 'push'
         env:
@@ -77,6 +97,10 @@ jobs:
     if: github.event_name == 'push'
     needs: build-release
     uses: ./.github/workflows/pages.yml
+    with:
+      release_artifact: ${{ needs.build-release.outputs.release_artifact }}
+      release_archive: ${{ needs.build-release.outputs.release_archive }}
+      release_archive_sha256: ${{ needs.build-release.outputs.release_archive_sha256 }}
     permissions:
       contents: read
       pages: write
