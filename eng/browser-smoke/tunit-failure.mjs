@@ -1,4 +1,4 @@
-import { browserType } from './engine.mjs';
+import { browserName, browserType } from './engine.mjs';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { examples } from '../../src/examples.ts';
 
@@ -16,7 +16,7 @@ try {
   if (!source?.includes('IsEqualTo(42)')) throw new Error('TUnit source anchor is missing');
   await page.waitForFunction(() => document.querySelector('#editor .view-lines')?.textContent?.includes('IsEqualTo(42)'));
   await page.locator('#editor textarea').focus();
-  await page.keyboard.press('ControlOrMeta+f');
+  await page.keyboard.press(browserName === 'webkit' ? 'Meta+f' : 'ControlOrMeta+f');
   const find = page.getByLabel('Find', { exact: true });
   await find.fill('IsEqualTo(42)');
   await page.waitForFunction(() => document.querySelector('#editor .matchesCount')?.textContent?.includes('1 of 1'));
