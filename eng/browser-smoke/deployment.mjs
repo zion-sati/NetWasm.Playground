@@ -57,6 +57,10 @@ try {
   const inspectToolbar = () => page.evaluate(() => {
     const toolbar = document.querySelector('.toolbar');
     const options = document.querySelector('.options');
+    const optionControls = [...document.querySelectorAll('.options > *:not([hidden])')].map(control => {
+      const box = control.getBoundingClientRect();
+      return { id: control.id, className: control.className, left: box.left, right: box.right, width: box.width };
+    });
     const controls = [...document.querySelectorAll('.actions button')].map(button => {
       const box = button.getBoundingClientRect();
       return { id: button.id, left: box.left, right: box.right, width: box.width };
@@ -64,14 +68,19 @@ try {
     return { viewport: innerWidth, scrollWidth: document.documentElement.scrollWidth,
       toolbar: toolbar ? { left: toolbar.getBoundingClientRect().left, right: toolbar.getBoundingClientRect().right,
         clientWidth: toolbar.clientWidth, scrollWidth: toolbar.scrollWidth } : null,
-      options: options ? { clientWidth: options.clientWidth, scrollWidth: options.scrollWidth } : null, controls };
+      options: options ? { left: options.getBoundingClientRect().left, right: options.getBoundingClientRect().right,
+        clientWidth: options.clientWidth, scrollWidth: options.scrollWidth } : null, optionControls, controls };
   });
   const assertToolbar = toolbarLayout => {
+    const subpixelTolerance = 0.5;
     if (!toolbarLayout.toolbar || !toolbarLayout.options || toolbarLayout.scrollWidth > toolbarLayout.viewport ||
         toolbarLayout.toolbar.scrollWidth > toolbarLayout.toolbar.clientWidth ||
-        toolbarLayout.options.scrollWidth > toolbarLayout.options.clientWidth ||
+        toolbarLayout.optionControls.some(control => control.width <= 0 ||
+          control.left < toolbarLayout.options.left - subpixelTolerance ||
+          control.right > toolbarLayout.options.right + subpixelTolerance) ||
         toolbarLayout.controls.length !== 4 || toolbarLayout.controls.some(control =>
-          control.width <= 0 || control.left < toolbarLayout.toolbar.left || control.right > toolbarLayout.toolbar.right))
+          control.width <= 0 || control.left < toolbarLayout.toolbar.left - subpixelTolerance ||
+          control.right > toolbarLayout.toolbar.right + subpixelTolerance))
       throw Error(`Responsive toolbar overflow: ${JSON.stringify(toolbarLayout)}`);
   };
   await page.setViewportSize({ width: 1440, height: 900 });
@@ -86,8 +95,8 @@ try {
   await page.screenshot({ path: `${output}/responsive-toolbar-intermediate.png`, fullPage: false });
   await page.setViewportSize({ width: 780, height: 900 });
   const toolbarLayout = await inspectToolbar();
-  assertToolbar(toolbarLayout);
   await page.screenshot({ path: `${output}/responsive-toolbar.png`, fullPage: false });
+  assertToolbar(toolbarLayout);
   await page.getByLabel('Example', { exact: true }).selectOption('hello');
   await page.getByLabel('Language', { exact: true }).selectOption('15');
   await page.setViewportSize({ width: 1280, height: 900 });
