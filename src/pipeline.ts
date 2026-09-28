@@ -2,6 +2,7 @@ import type { CompilationResult, PipelineEvent, RunResult, SourceSnapshot, Stage
 import { WorkerChannel } from './worker-channel';
 import { optimizationArguments, optimizationModes } from './optimization';
 const basename = (path: string) => path.slice(path.lastIndexOf('/') + 1);
+const compilerTimeoutMilliseconds = 300_000;
 type AssetReceipt = { sha256: string; bytes: number; bundle?: string; offset?: number };
 type BundleRole = 'compiler' | 'linker' | 'tools' | 'guest';
 type BundleReceipt = { path: string; sha256: string; bytes: number; rawBytes: number; assets: number };
@@ -245,7 +246,7 @@ export class PlaygroundPipeline {
       const compilation = await this.stage('compile', timings, () => this.channel('compiler').request({
         operation: 'compile', recipe: snapshot.recipeId, source: snapshot.source,
         language: snapshot.language, updatedMemorySafetyRules: snapshot.updatedMemorySafetyRules,
-      }));
+      }, [], compilerTimeoutMilliseconds));
       for (const timing of compilation.timings ?? []) this.emit({ type: 'stage', stage: timing.stage, state: 'complete', milliseconds: timing.milliseconds });
       if (!compilation.success) return { ...result, success: false, diagnostics: compilation.diagnostics ?? [],
         stage: compilation.stage, error: compilation.error, assets: { ...this.assets } };
