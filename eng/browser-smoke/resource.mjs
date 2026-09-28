@@ -39,7 +39,7 @@ try {
 
   const setSource = async source => {
     await page.locator('.monaco-editor').click({ position: { x: 100, y: 40 } });
-    await page.keyboard.press(process.platform === 'darwin' ? 'Meta+A' : 'Control+A');
+    await page.keyboard.press(browserName === 'webkit' ? 'Meta+A' : 'ControlOrMeta+A');
     await page.keyboard.insertText(source);
   };
   const waitForIdle = () => page.waitForFunction(
