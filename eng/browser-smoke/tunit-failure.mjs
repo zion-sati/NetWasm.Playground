@@ -12,11 +12,17 @@ try {
   await page.locator('.monaco-editor').waitFor();
   await page.getByLabel('Optimization', { exact: true }).selectOption('none');
   await page.getByLabel('Example', { exact: true }).selectOption('tunit');
-  await page.locator('#editor .view-lines').click({ position: { x: 80, y: 12 } });
-  await page.keyboard.press('ControlOrMeta+A');
   const source = examples.find(example => example.id === 'tunit')?.source;
   if (!source?.includes('IsEqualTo(42)')) throw new Error('TUnit source anchor is missing');
-  await page.keyboard.insertText(source.replace('IsEqualTo(42)', 'IsEqualTo(43)'));
+  await page.waitForFunction(() => document.querySelector('#editor .view-lines')?.textContent?.includes('IsEqualTo(42)'));
+  await page.locator('#editor textarea').focus();
+  await page.keyboard.press('ControlOrMeta+f');
+  const find = page.getByLabel('Find', { exact: true });
+  await find.fill('IsEqualTo(42)');
+  await page.waitForFunction(() => document.querySelector('#editor .matchesCount')?.textContent?.includes('1 of 1'));
+  await find.press('Escape');
+  await page.keyboard.insertText('IsEqualTo(43)');
+  await page.waitForFunction(() => document.querySelector('#editor .view-lines')?.textContent?.includes('IsEqualTo(43)'));
   await page.locator('#run').click();
   await page.waitForFunction(() => document.querySelector('#stop').disabled, undefined,
     { timeout: 300_000 });
