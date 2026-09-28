@@ -9,12 +9,18 @@ evidence="${PLAYGROUND_EVIDENCE:?PLAYGROUND_EVIDENCE is required}"
 mkdir -p "$evidence"
 cd "$root"
 
+assert_identity() {
+  node eng/browser-smoke/site-identity-check.mjs 2>&1 | tee -a "$evidence/site-identity.log"
+}
+
 run_step() {
   local name="$1"
   shift
   "$@" 2>&1 | tee "$evidence/$name.log"
+  assert_identity
 }
 
+assert_identity
 run_step deployment env PLAYGROUND_EVIDENCE="$evidence/deployment" \
   node eng/browser-smoke/deployment.mjs
 run_step csharp15 env PLAYGROUND_BROWSERS="$browser" PLAYGROUND_CSHARP15_OPTIMIZATION=none \

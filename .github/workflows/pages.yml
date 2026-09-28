@@ -44,7 +44,9 @@ jobs:
     outputs:
       base_path: ${{ steps.pages.outputs.base_path }}
       site_artifact: ${{ steps.coordinates.outputs.site_artifact }}
+      site_identity_sha256: ${{ steps.coordinates.outputs.site_identity_sha256 }}
       toolchain_id: ${{ steps.toolchain.outputs.id }}
+      toolchain_manifest_sha256: ${{ steps.toolchain.outputs.manifest_sha256 }}
     steps:
       - name: Check out source
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
@@ -103,14 +105,23 @@ jobs:
       - name: Record deployed coordinates
         id: toolchain
         run: |
-          echo "id=$(python3 -c 'import json; print(json.load(open("public/toolchain/index.json"))["id"])')" >> "$GITHUB_OUTPUT"
-      - name: Record site artifact name
-        id: coordinates
-        run: echo "site_artifact=pages-site-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" >> "$GITHUB_OUTPUT"
+          python3 - <<'PY' >> "$GITHUB_OUTPUT"
+          import json
+          index = json.load(open('public/toolchain/index.json'))
+          print(f'id={index["id"]}')
+          print(f'manifest_sha256={index["manifestSha256"]}')
+          PY
       - name: Build production site once
         env:
           PLAYGROUND_BASE: ${{ steps.pages.outputs.base_path }}/
         run: npm run build
+      - name: Bind production site identity
+        run: node eng/site-identity.mjs dist "$GITHUB_SHA"
+      - name: Record site coordinates
+        id: coordinates
+        run: |
+          echo "site_artifact=pages-site-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" >> "$GITHUB_OUTPUT"
+          echo "site_identity_sha256=$(sha256sum dist/site-identity.json | cut -d ' ' -f 1)" >> "$GITHUB_OUTPUT"
       - name: Retain exact production site
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:
@@ -160,6 +171,9 @@ jobs:
           PLAYGROUND_BROWSER: ${{ matrix.browser }}
           PLAYGROUND_EVIDENCE: .cache/pages-predeploy-${{ matrix.browser }}
           PLAYGROUND_URL: http://127.0.0.1:4173${{ needs.build-site.outputs.base_path }}/
+          EXPECTED_SITE_IDENTITY_SHA256: ${{ needs.build-site.outputs.site_identity_sha256 }}
+          EXPECTED_TOOLCHAIN_ID: ${{ needs.build-site.outputs.toolchain_id }}
+          EXPECTED_TOOLCHAIN_MANIFEST_SHA256: ${{ needs.build-site.outputs.toolchain_manifest_sha256 }}
         run: |
           npm run preview -- --host 127.0.0.1 --port 4173 &
           server_pid=$!
@@ -227,13 +241,21 @@ jobs:
       - name: Wait for the deployed toolchain
         env:
           PLAYGROUND_URL: ${{ needs.deploy.outputs.page_url }}
+          EXPECTED_SITE_IDENTITY_SHA256: ${{ needs.build-site.outputs.site_identity_sha256 }}
           EXPECTED_TOOLCHAIN_ID: ${{ needs.build-site.outputs.toolchain_id }}
+          EXPECTED_TOOLCHAIN_MANIFEST_SHA256: ${{ needs.build-site.outputs.toolchain_manifest_sha256 }}
         run: |
           index_url="${PLAYGROUND_URL%/}/toolchain/index.json"
+          identity_url="${PLAYGROUND_URL%/}/site-identity.json"
           for attempt in {1..60}; do
-            if curl --fail --silent --show-error --output /tmp/live-toolchain-index.json "$index_url"; then
+            if curl --fail --silent --show-error --output /tmp/live-toolchain-index.json "$index_url" && \
+               curl --fail --silent --show-error --output /tmp/live-site-identity.json "$identity_url"; then
               actual_id=$(python3 -c 'import json; print(json.load(open("/tmp/live-toolchain-index.json"))["id"])' 2>/dev/null || true)
-              if [ "$actual_id" = "$EXPECTED_TOOLCHAIN_ID" ]; then
+              actual_manifest=$(python3 -c 'import json; print(json.load(open("/tmp/live-toolchain-index.json"))["manifestSha256"])' 2>/dev/null || true)
+              actual_site=$(sha256sum /tmp/live-site-identity.json | cut -d ' ' -f 1)
+              if [ "$actual_id" = "$EXPECTED_TOOLCHAIN_ID" ] && \
+                 [ "$actual_manifest" = "$EXPECTED_TOOLCHAIN_MANIFEST_SHA256" ] && \
+                 [ "$actual_site" = "$EXPECTED_SITE_IDENTITY_SHA256" ]; then
                 exit 0
               fi
             fi
@@ -247,6 +269,9 @@ jobs:
           PLAYGROUND_BROWSER: ${{ matrix.browser }}
           PLAYGROUND_EVIDENCE: .cache/pages-live-${{ matrix.browser }}
           PLAYGROUND_URL: ${{ needs.deploy.outputs.page_url }}
+          EXPECTED_SITE_IDENTITY_SHA256: ${{ needs.build-site.outputs.site_identity_sha256 }}
+          EXPECTED_TOOLCHAIN_ID: ${{ needs.build-site.outputs.toolchain_id }}
+          EXPECTED_TOOLCHAIN_MANIFEST_SHA256: ${{ needs.build-site.outputs.toolchain_manifest_sha256 }}
         run: bash eng/run-browser-lane.sh
       - name: Retain live deployment evidence
         if: always()

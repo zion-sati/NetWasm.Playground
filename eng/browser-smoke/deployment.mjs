@@ -2,10 +2,13 @@ import { browserType } from './engine.mjs';
 import { execFileSync } from 'node:child_process';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
+import { expectedSiteIdentity } from '../site-identity.mjs';
+import { observeSiteIdentity } from './site-identity.mjs';
 
 const url = process.env.PLAYGROUND_URL;
 const output = process.env.PLAYGROUND_EVIDENCE;
 if (!url || !output) throw Error('PLAYGROUND_URL and PLAYGROUND_EVIDENCE are required');
+const expectedIdentity = expectedSiteIdentity();
 const playgroundVersion = JSON.parse(readFileSync(new URL('../../package.json', import.meta.url))).version;
 mkdirSync(output, { recursive: true });
 const browser = await browserType.launch({ headless: true });
@@ -42,11 +45,8 @@ try {
     }
   });
   await page.goto(url);
-  const toolchainManifest = await page.evaluate(async () => {
-    const base = new URL('toolchain/', location.href);
-    const index = await (await fetch(new URL('index.json', base), { cache: 'no-cache' })).json();
-    return (await fetch(new URL(`${index.id}/asset-manifest.json`, base), { cache: 'force-cache' })).json();
-  });
+  const initialSiteIdentity = await observeSiteIdentity(page, url, expectedIdentity);
+  const toolchainManifest = initialSiteIdentity.toolchainManifest;
   if (toolchainManifest.schemaVersion !== 3 ||
       Object.keys(toolchainManifest.bundles).sort().join(',') !== 'compiler,guest,linker,tools')
     throw Error(`Unexpected toolchain manifest: ${JSON.stringify(toolchainManifest.bundles)}`);
@@ -172,9 +172,14 @@ try {
   // The separately bundled Preview 2 guest provider adds one verified module request.
   if (directPayloads.length || toolchainRequests.length > 21)
     throw Error(`Toolchain request graph was not bundled: ${JSON.stringify({ count: toolchainRequests.length, directPayloads })}`);
+  const finalSiteIdentity = await observeSiteIdentity(page, url, expectedIdentity);
   const bytes = readFileSync(componentPath);
   const result = { passed: true, browser: browser.version(), stdout, status,
     component: { bytes: bytes.length, sha256: createHash('sha256').update(bytes).digest('hex') },
+    siteIdentity: { sha256: finalSiteIdentity.siteIdentitySha256,
+      sourceCommit: finalSiteIdentity.identity.sourceCommit,
+      toolchainId: finalSiteIdentity.index.id,
+      toolchainManifestSha256: finalSiteIdentity.toolchainManifestSha256 },
     toolchainRequests: { unique: toolchainRequests.length, bundles: bundleRequests, parallelStartSpreadMs: bundleStartSpreadMs,
       responses: Object.fromEntries(bundleResponses) }, toolbarLayout, pageContract, errors, consoleErrors };
   writeFileSync(`${output}/results.json`, JSON.stringify(result, null, 2));

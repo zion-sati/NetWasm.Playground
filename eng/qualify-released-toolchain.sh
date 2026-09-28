@@ -16,6 +16,14 @@ python3 "$root/eng/rebuild-public-toolchain.py" \
 
 cd "$root"
 PLAYGROUND_BASE=/ npm run build
+head=$(git rev-parse HEAD)
+node eng/site-identity.mjs dist "$head"
+export EXPECTED_SITE_IDENTITY_SHA256
+EXPECTED_SITE_IDENTITY_SHA256=$(sha256sum dist/site-identity.json | cut -d ' ' -f 1)
+export EXPECTED_TOOLCHAIN_ID EXPECTED_TOOLCHAIN_MANIFEST_SHA256
+read -r EXPECTED_TOOLCHAIN_ID EXPECTED_TOOLCHAIN_MANIFEST_SHA256 < <(
+  python3 -c 'import json; value=json.load(open("dist/toolchain/index.json")); print(value["id"], value["manifestSha256"])'
+)
 ./node_modules/.bin/vite preview --host 127.0.0.1 --port 4173 --strictPort \
   >"$work/production-server.log" 2>&1 &
 server_pid=$!

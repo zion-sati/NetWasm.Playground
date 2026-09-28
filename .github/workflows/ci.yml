@@ -23,6 +23,8 @@ jobs:
       - run: npm ci
       - name: Verify public package boundaries
         run: PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s eng/tests -p 'test_*.py'
+      - name: Verify site identity contract
+        run: node --test eng/tests/*.test.mjs
       - run: npm run typecheck
       - name: Build application shell
         run: npm run build
