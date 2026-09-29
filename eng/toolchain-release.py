@@ -12,23 +12,37 @@ import tempfile
 import urllib.request
 
 ROOT = Path(__file__).resolve().parents[1]
-METADATA = ROOT / 'eng/toolchain-release.json'
+REPOSITORY = 'zion-sati/NetWasm.Playground'
+LATEST_RELEASE = f'https://api.github.com/repos/{REPOSITORY}/releases/latest'
 
 
-def release_metadata():
-    metadata = json.loads(METADATA.read_text())
-    if metadata.get('status') != 'ready':
-        reason = metadata.get('reason', 'No deployable browser toolchain is configured.')
-        raise ValueError(f'Browser toolchain release is not ready: {reason}')
-    version = metadata.get('version')
-    tag = f'v{version}'
+def release_metadata(tag):
+    if not isinstance(tag, str) or not tag.startswith('v'):
+        raise ValueError('Browser toolchain release tag is invalid')
+    version = tag[1:]
+    import re
+    if re.fullmatch(r'[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z]+(?:[.-][0-9A-Za-z]+)*)?', version) is None:
+        raise ValueError('Browser toolchain release tag is invalid')
     asset_name = f'netwasm-playground-toolchain-{tag}.tar.gz'
-    if metadata.get('tag') != tag or metadata.get('asset', {}).get('name') != asset_name:
-        raise ValueError('Browser toolchain release coordinates do not match its version')
-    expected_url = f'https://github.com/zion-sati/NetWasm.Playground/releases/download/{tag}/{asset_name}'
-    if metadata['asset'].get('url') != expected_url:
-        raise ValueError('Browser toolchain release URL does not match its version')
-    return metadata
+    return {
+        'version': version,
+        'tag': tag,
+        'asset': {
+            'name': asset_name,
+            'url': f'https://github.com/{REPOSITORY}/releases/download/{tag}/{asset_name}',
+        },
+    }
+
+
+def latest_release_metadata(fetch=urllib.request.urlopen):
+    request = urllib.request.Request(
+        LATEST_RELEASE, headers={'Accept': 'application/vnd.github+json',
+                                 'User-Agent': 'NetWasm.Playground-toolchain-installer'})
+    with fetch(request) as response:
+        release = json.load(response)
+    if release.get('draft') or release.get('prerelease'):
+        raise ValueError('GitHub latest release is not a published stable release')
+    return release_metadata(release.get('tag_name'))
 
 
 def sha256(path):
@@ -118,7 +132,6 @@ def verify_staged(folder):
 
 
 def pack(source, output):
-    release_metadata()
     verify_staged(source)
     output.parent.mkdir(parents=True, exist_ok=True)
     with output.open('wb') as raw:
@@ -136,8 +149,10 @@ def pack(source, output):
     print(json.dumps({'archive': str(output), 'bytes': output.stat().st_size, 'sha256': sha256(output)}))
 
 
-def install(output, archive=None):
-    metadata = release_metadata()
+def install(output, archive=None, tag=None):
+    metadata = None if archive else (
+        release_metadata(tag) if tag else latest_release_metadata()
+    )
     output = output.resolve()
     output.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix='toolchain-release-', dir=output.parent) as temporary:
@@ -160,6 +175,7 @@ def install(output, archive=None):
         if output.exists():
             shutil.rmtree(output)
         extracted.rename(output)
+    return metadata
 
 
 def main():
@@ -171,12 +187,20 @@ def main():
     installer = commands.add_parser('install')
     installer.add_argument('--output', type=Path, default=ROOT / 'public/toolchain')
     installer.add_argument('--archive', type=Path)
+    installer.add_argument('--tag')
+    installer.add_argument('--github-output', type=Path)
     args = parser.parse_args()
     try:
         if args.command == 'pack':
             pack(args.source.resolve(), args.output.resolve())
         else:
-            install(args.output, args.archive)
+            metadata = install(args.output, args.archive, args.tag)
+            if args.github_output is not None:
+                if metadata is None:
+                    raise ValueError('--github-output requires a released toolchain download')
+                with args.github_output.open('a', encoding='utf-8') as stream:
+                    stream.write(f"version={metadata['version']}\n")
+                    stream.write(f"tag={metadata['tag']}\n")
     except ValueError as error:
         print(f'ERROR: {error}', file=sys.stderr)
         raise SystemExit(1) from None

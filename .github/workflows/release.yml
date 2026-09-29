@@ -1,512 +1,175 @@
 name: Release
 
 on:
+  release:
+    types: [published]
   workflow_dispatch:
     inputs:
-      coordinated_stage:
+      tag:
+        description: Existing published GitHub Release tag to retry
         required: true
         type: string
-      preparation_sha256:
-        required: true
-        type: string
-      release_id:
-        required: true
-        type: string
-      release_ref:
-        required: true
-        type: string
-      source_commit:
-        required: true
-        type: string
-      infrastructure_commit:
-        required: true
-        type: string
-      coordinator_repository:
-        required: true
-        type: string
-      coordinator_run_id:
-        required: true
-        type: string
-      coordinator_run_attempt:
-        required: true
-        type: string
-      stage_identity:
-        required: true
-        type: string
-      dispatch_attempt_identity:
-        required: true
-        type: string
-      upstream_receipts:
-        required: true
-        type: string
-      retained_candidates:
-        required: true
-        type: string
-
-run-name: Release ${{ inputs.coordinated_stage }} ${{ inputs.stage_identity }}
 
 permissions:
   contents: read
   actions: read
 
 concurrency:
-  group: playground-release-${{ inputs.stage_identity }}
+  group: playground-release-${{ github.event.release.tag_name || inputs.tag }}
   cancel-in-progress: false
 
 jobs:
-  receive:
+  build-release:
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
+    permissions:
+      contents: write
     outputs:
-      dispatch_artifact: coordinated-inputs-${{ inputs.stage_identity }}-${{ github.run_attempt }}
-      infrastructure_commit: ${{ steps.receiver.outputs.infrastructure_commit }}
-      retained_artifact: ${{ steps.retained.outputs.artifact_name }}
-      retained_site: ${{ steps.retained.outputs.site }}
-      retained_toolchain: ${{ steps.retained.outputs.toolchain }}
-      source_commit: ${{ steps.receiver.outputs.source_commit }}
-      version: ${{ steps.receiver.outputs.version }}
+      deploy: ${{ steps.release.outputs.deploy }}
+      release_artifact: ${{ steps.release_archive.outputs.artifact }}
+      release_archive: ${{ steps.release_archive.outputs.archive }}
+      release_archive_sha256: ${{ steps.release_archive.outputs.sha256 }}
+      source_ref: ${{ steps.release.outputs.tag }}
+      version: ${{ steps.release.outputs.version }}
     steps:
-      - name: Reject native production reruns
-        shell: bash
-        run: |
-          if [[ "$GITHUB_RUN_ATTEMPT" != 1 ]]; then
-            echo 'Native production reruns are not supported. Resume through a fresh coordinator dispatch so retained candidates are authenticated.' >&2
-            exit 1
-          fi
-
-      - name: Check out trusted receiver
+      - name: Check out release infrastructure
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
-          ref: ${{ github.sha }}
-          persist-credentials: false
-          path: bootstrap
-
-      - name: Check out prepared source
-        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
-        with:
-          ref: ${{ inputs.source_commit }}
-          fetch-depth: 0
-          persist-credentials: false
-          path: source
-
-      - name: Download coordinated release evidence
+          ref: ${{ github.event.repository.default_branch }}
+          path: infrastructure
+      - name: Resolve published GitHub Release
+        id: release
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
-          RELEASE_ID: ${{ inputs.release_id }}
-          RETAINED_CANDIDATES: ${{ inputs.retained_candidates }}
-          UPSTREAM_RECEIPTS: ${{ inputs.upstream_receipts }}
+          RELEASE_TAG: ${{ github.event.release.tag_name || inputs.tag }}
         run: |
           set -euo pipefail
-          root="$GITHUB_WORKSPACE/artifacts/dispatch"
-          mkdir -p "$root/upstream" "$root/upstream-runs" "$root/retained"
-          gh api "repos/${GITHUB_REPOSITORY}/releases/${RELEASE_ID}" > "$root/release.json"
-
-          download_release_asset() {
-            local name="$1"
-            local output="$2"
-            local asset_id
-            asset_id="$(jq --arg name "$name" \
-              '[.assets[] | select(.name == $name)] | if length == 1 then .[0].id else error("release asset is missing or ambiguous") end' \
-              "$root/release.json")"
-            [[ "$asset_id" =~ ^[1-9][0-9]*$ ]]
-            gh api -H 'Accept: application/octet-stream' \
-              "repos/${GITHUB_REPOSITORY}/releases/assets/${asset_id}" > "$output"
-          }
-
-          download_release_asset release-preparation.json "$root/release-preparation.json"
-          while IFS= read -r coordinate; do
-            stage="$(jq -r '.stage' <<< "$coordinate")"
-            name="$(jq -r '.fileName' <<< "$coordinate")"
-            [[ "$stage" =~ ^[a-z]+(-[a-z]+)*$ ]]
-            [[ "$name" =~ ^[A-Za-z0-9._-]+$ ]]
-            receipt="$root/upstream/$name"
-            download_release_asset "$name" "$receipt"
-            repository="$(jq -r '.repository' "$receipt")"
-            run_id="$(jq -r '.publication.runId // .producer.runId' "$receipt")"
-            run_attempt="$(jq -r '.publication.runAttempt // .producer.runAttempt' "$receipt")"
-            [[ "$repository" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]]
-            [[ "$run_id" =~ ^[1-9][0-9]*$ ]]
-            [[ "$run_attempt" =~ ^[1-9][0-9]*$ ]]
-            gh api "repos/${repository}/actions/runs/${run_id}/attempts/${run_attempt}" \
-              > "$root/upstream-runs/$stage.json"
-            if jq -e '.producer' "$receipt" >/dev/null; then
-              gh api "repos/${repository}/actions/runs/${run_id}/attempts/${run_attempt}/jobs?per_page=100" \
-                > "$root/upstream-runs/$stage-jobs.json"
-            fi
-          done < <(jq -c '.[]' <<< "$UPSTREAM_RECEIPTS")
-
-          while IFS= read -r candidate; do
-            kind="$(jq -r '.kind' <<< "$candidate")"
-            expected="$(jq -r '.receiptSha256' <<< "$candidate")"
-            [[ "$kind" =~ ^playground-(toolchain|site)-candidate$ ]]
-            [[ "$expected" =~ ^[0-9a-f]{64}$ ]]
-            directory="$root/retained/$kind"
-            mkdir -p "$directory"
-            receipt_name="delivery-candidate-${kind}.json"
-            download_release_asset "$receipt_name" "$directory/delivery-candidate-receipt.json"
-            test "$(sha256sum "$directory/delivery-candidate-receipt.json" | cut -d ' ' -f 1)" = "$expected"
-            archive="$(jq -r '.archive.fileName' "$directory/delivery-candidate-receipt.json")"
-            [[ "$archive" =~ ^[A-Za-z0-9._-]+$ ]]
-            download_release_asset "$archive" "$directory/$archive"
-          done < <(jq -c '.[]' <<< "$RETAINED_CANDIDATES")
-          jq -c '.inputs' "$GITHUB_EVENT_PATH" > "$root/inputs.json"
-
-      - name: Resolve prepared release tag
-        id: release-tag
-        shell: bash
-        env:
-          RELEASE_REF: ${{ inputs.release_ref }}
-        run: |
-          set -euo pipefail
-          release_tag="$(jq -r '.tag_name' artifacts/dispatch/release.json)"
-          test "$release_tag" = "$RELEASE_REF"
-          tag_ref="refs/tags/$release_tag"
-          git -C source check-ref-format "$tag_ref"
-          git -C source update-ref -d "$tag_ref"
-          set +e
-          git -C source ls-remote --exit-code --refs origin "$tag_ref" \
-            > artifacts/dispatch/tag-remote.txt \
-            2> artifacts/dispatch/tag-remote-error.txt
-          tag_status=$?
-          set -e
-          case "$tag_status" in
-            0)
-              git -C source fetch --force --no-tags origin "$tag_ref:$tag_ref"
-              ;;
-            2)
-              ;;
-            *)
-              cat artifacts/dispatch/tag-remote-error.txt >&2
-              exit "$tag_status"
-              ;;
-          esac
-          tag_commit="$(python3 bootstrap/eng/actions-delivery.py tag-commit \
-            --repository source \
-            --tag "$release_tag")"
-          echo "commit=$tag_commit" >> "$GITHUB_OUTPUT"
-
-      - name: Verify coordinated receiver identity
-        id: receiver
-        shell: bash
-        env:
-          APPROVED_ACTOR_ID: ${{ vars.RELEASE_APP_ACTOR_ID }}
-        run: |
-          python3 bootstrap/eng/release-receiver.py \
-            --inputs artifacts/dispatch/inputs.json \
-            --preparation artifacts/dispatch/release-preparation.json \
-            --release artifacts/dispatch/release.json \
-            --upstream-directory artifacts/dispatch/upstream \
-            --upstream-run-directory artifacts/dispatch/upstream-runs \
-            --repository "$GITHUB_REPOSITORY" \
-            --event-name "$GITHUB_EVENT_NAME" \
-            --workflow-identity "$GITHUB_WORKFLOW_REF" \
-            --workflow-sha "$GITHUB_SHA" \
-            --workflow-ref "$GITHUB_REF_NAME" \
-            --actor-id "$GITHUB_ACTOR_ID" \
-            --approved-actor-id "$APPROVED_ACTOR_ID" \
-            --tag-commit '${{ steps.release-tag.outputs.commit }}' \
-            --output artifacts/dispatch/receiver.json \
-            --github-output "$GITHUB_OUTPUT"
-
-      - name: Check out approved release infrastructure
+          [[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]
+          gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${RELEASE_TAG}" > release.json
+          test "$(jq -r '.draft' release.json)" = false
+          version="${RELEASE_TAG#v}"
+          deploy=true
+          if [[ "$version" == *-* ]]; then deploy=false; fi
+          {
+            echo "tag=$RELEASE_TAG"
+            echo "version=$version"
+            echo "deploy=$deploy"
+          } >> "$GITHUB_OUTPUT"
+      - name: Check out released source
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
-          ref: ${{ steps.receiver.outputs.infrastructure_commit }}
-          persist-credentials: false
-          path: infrastructure
-
-      - name: Verify prepared source and infrastructure
+          ref: ${{ steps.release.outputs.tag }}
+          fetch-depth: 0
+          path: source
+      - name: Verify released source
         shell: bash
         env:
           DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          RELEASE_TAG: ${{ steps.release.outputs.tag }}
         run: |
-          source_commit="$(git -C source rev-parse HEAD)"
-          infrastructure_commit="$(git -C infrastructure rev-parse HEAD)"
-          test "$source_commit" = '${{ steps.receiver.outputs.source_commit }}'
-          test "$infrastructure_commit" = '${{ steps.receiver.outputs.infrastructure_commit }}'
+          set -euo pipefail
           git -C source fetch --force origin \
+            "refs/tags/${RELEASE_TAG}:refs/tags/${RELEASE_TAG}" \
             "+refs/heads/${DEFAULT_BRANCH}:refs/remotes/origin/${DEFAULT_BRANCH}"
-          git -C source merge-base --is-ancestor \
-            "$source_commit" "refs/remotes/origin/${DEFAULT_BRANCH}"
-
-      - name: Verify retained candidates
-        id: retained
-        shell: bash
-        env:
-          RETAINED_CANDIDATES: ${{ inputs.retained_candidates }}
-        run: |
-          set -euo pipefail
-          root="artifacts/dispatch/retained"
-          toolchain=false
-          site=false
-          toolchain_receipt=""
-          while IFS= read -r candidate; do
-            kind="$(jq -r '.kind' <<< "$candidate")"
-            expected="$(jq -r '.receiptSha256' <<< "$candidate")"
-            directory="$root/$kind"
-            receipt="$directory/delivery-candidate-receipt.json"
-            archive_name="$(jq -r '.archive.fileName' "$receipt")"
-            dependency=()
-            if [[ "$kind" == playground-site-candidate ]]; then
-              dependency=(--toolchain-receipt "$toolchain_receipt")
-              site=true
-            else
-              toolchain=true
-              toolchain_receipt="$receipt"
-            fi
-            python3 infrastructure/eng/delivery-receipt.py verify-candidate \
-              --preparation artifacts/dispatch/release-preparation.json \
-              --inputs artifacts/dispatch/inputs.json \
-              --receipt "$receipt" \
-              --archive "$directory/$archive_name" \
-              --kind "$kind" \
-              --upstream-directory artifacts/dispatch/upstream \
-              --expected-receipt-sha256 "$expected" \
-              "${dependency[@]}"
-          done < <(jq -c '.[]' <<< "$RETAINED_CANDIDATES")
-          count="$(jq 'length' <<< "$RETAINED_CANDIDATES")"
-          artifact_name=""
-          if [[ "$count" != 0 ]]; then
-            artifact_name="retained-delivery-candidates-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
-          fi
-          {
-            echo "artifact_name=$artifact_name"
-            echo "count=$count"
-            echo "toolchain=$toolchain"
-            echo "site=$site"
-          } >> "$GITHUB_OUTPUT"
-
-      - name: Retain coordinated dispatch evidence
-        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
-        with:
-          name: coordinated-inputs-${{ inputs.stage_identity }}-${{ github.run_attempt }}
-          path: |
-            artifacts/dispatch/inputs.json
-            artifacts/dispatch/receiver.json
-            artifacts/dispatch/release-preparation.json
-            artifacts/dispatch/release.json
-            artifacts/dispatch/upstream/
-            artifacts/dispatch/upstream-runs/
-          if-no-files-found: error
-          retention-days: 90
-
-      - name: Retain recovered delivery candidates
-        if: steps.retained.outputs.count != '0'
-        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
-        with:
-          name: ${{ steps.retained.outputs.artifact_name }}
-          path: artifacts/dispatch/retained/
-          if-no-files-found: error
-          retention-days: 90
-
-  toolchain-candidate:
-    needs: receive
-    runs-on: ubuntu-24.04
-    timeout-minutes: 90
-    outputs:
-      archive_name: ${{ steps.verified.outputs.archive_name }}
-      artifact_name: resolved-playground-toolchain-${{ github.run_id }}-${{ github.run_attempt }}
-      receipt_sha256: ${{ steps.verified.outputs.receipt_sha256 }}
-      toolchain_id: ${{ steps.verified.outputs.toolchain_id }}
-      toolchain_manifest_sha256: ${{ steps.verified.outputs.toolchain_manifest_sha256 }}
-    steps:
-      - name: Reject native production reruns
-        shell: bash
-        run: |
-          if [[ "$GITHUB_RUN_ATTEMPT" != 1 ]]; then
-            echo 'Native production reruns are not supported. Resume through a fresh coordinator dispatch so retained candidates are authenticated.' >&2
-            exit 1
-          fi
-
-      - name: Check out prepared source
-        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
-        with:
-          ref: ${{ needs.receive.outputs.source_commit }}
-          persist-credentials: false
-          path: source
-
-      - name: Check out approved release infrastructure
-        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
-        with:
-          ref: ${{ needs.receive.outputs.infrastructure_commit }}
-          persist-credentials: false
-          path: infrastructure
-
-      - name: Download coordinated dispatch evidence
-        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
-        with:
-          name: ${{ needs.receive.outputs.dispatch_artifact }}
-          path: artifacts/dispatch
-
-      - name: Download retained candidates
-        if: needs.receive.outputs.retained_toolchain == 'true'
-        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
-        with:
-          name: ${{ needs.receive.outputs.retained_artifact }}
-          path: artifacts/retained
-
-      - name: Select retained toolchain candidate
-        if: needs.receive.outputs.retained_toolchain == 'true'
-        shell: bash
-        run: |
-          set -euo pipefail
-          directory="artifacts/retained/playground-toolchain-candidate"
-          receipt="$directory/delivery-candidate-receipt.json"
-          archive="$(jq -r '.archive.fileName' "$receipt")"
-          mkdir -p artifacts/toolchain
-          cp "$receipt" artifacts/toolchain/delivery-candidate-receipt.json
-          cp "$directory/$archive" "artifacts/toolchain/$archive"
-
+          source_commit="$(git -C source rev-parse HEAD)"
+          test "$(git -C source rev-parse "refs/tags/${RELEASE_TAG}^{commit}")" = "$source_commit"
+          git -C source merge-base --is-ancestor "$source_commit" "refs/remotes/origin/${DEFAULT_BRANCH}"
       - name: Set up .NET
-        if: needs.receive.outputs.retained_toolchain != 'true'
         uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6
         with:
           dotnet-version: 11.0.100-rc.1.26425.128
-
       - name: Install WebAssembly build workload
-        if: needs.receive.outputs.retained_toolchain != 'true'
         run: dotnet workload install wasm-tools --skip-manifest-update
-
       - name: Set up Node.js
-        if: needs.receive.outputs.retained_toolchain != 'true'
         uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
           node-version: 26.7.0
           cache: npm
           cache-dependency-path: source/package-lock.json
-
-      - name: Install release dependencies
-        if: needs.receive.outputs.retained_toolchain != 'true'
+      - run: npm ci
         working-directory: source
-        run: npm ci
-
-      - name: Build content-addressed browser toolchain
-        if: needs.receive.outputs.retained_toolchain != 'true'
-        working-directory: source
-        run: |
-          python3 eng/build-release-compiler.py --output .cache/release/compiler-framework
-          python3 eng/rebuild-public-toolchain.py \
-            --compiler-framework .cache/release/compiler-framework \
-            --output public/toolchain
-
-      - name: Package toolchain candidate
-        if: needs.receive.outputs.retained_toolchain != 'true'
-        id: package
-        shell: bash
+      - name: Build compiler framework from public packages
+        run: python3 source/eng/build-release-compiler.py --output .cache/release/compiler-framework
+      - name: Build content-addressed browser toolchain manifest
+        run: python3 source/eng/rebuild-public-toolchain.py --compiler-framework .cache/release/compiler-framework --output source/public/toolchain
+      - name: Package reproducible release asset
+        id: release_archive
+        env:
+          RELEASE_TAG: ${{ steps.release.outputs.tag }}
         run: |
           set -euo pipefail
-          asset="$(python3 -c 'import json; print(json.load(open("source/eng/toolchain-release.json"))["asset"]["name"])')"
-          mkdir -p artifacts/toolchain artifacts/toolchain-payload
+          asset="netwasm-playground-toolchain-${RELEASE_TAG}.tar.gz"
+          artifact="browser-toolchain-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          mkdir -p .cache/release/output
           python3 source/eng/toolchain-release.py pack \
             --source source/public/toolchain \
-            --output "artifacts/toolchain/$asset"
+            --output ".cache/release/output/$asset"
           python3 source/eng/toolchain-release.py install \
-            --archive "artifacts/toolchain/$asset" \
-            --output artifacts/toolchain-install-check
-          cp "artifacts/toolchain/$asset" "artifacts/toolchain-payload/$asset"
-          echo "archive=$asset" >> "$GITHUB_OUTPUT"
-
-      - name: Retain toolchain candidate payload
-        if: needs.receive.outputs.retained_toolchain != 'true'
-        id: payload
+            --archive ".cache/release/output/$asset" \
+            --output .cache/release/install-check
+          python3 - "$asset" <<'PY'
+          import hashlib, json, pathlib, sys
+          path = pathlib.Path('.cache/release/output') / sys.argv[1]
+          receipt = {'name': path.name, 'bytes': path.stat().st_size,
+                     'sha256': hashlib.sha256(path.read_bytes()).hexdigest()}
+          pathlib.Path('.cache/release/archive-receipt.json').write_text(json.dumps(receipt, indent=2) + '\n')
+          PY
+          cp .cache/release/archive-receipt.json .cache/release/output/archive-receipt.json
+          sha256="$(jq -r '.sha256' .cache/release/archive-receipt.json)"
+          {
+            echo "artifact=$artifact"
+            echo "archive=$asset"
+            echo "sha256=$sha256"
+          } >> "$GITHUB_OUTPUT"
+      - name: Retain exact browser toolchain archive
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:
-          name: playground-toolchain-payload-${{ github.run_id }}-${{ github.run_attempt }}
-          path: artifacts/toolchain-payload/${{ steps.package.outputs.archive }}
+          name: ${{ steps.release_archive.outputs.artifact }}
+          path: .cache/release/output
           compression-level: 0
           if-no-files-found: error
           retention-days: 90
-
-      - name: Resolve toolchain producer job
-        if: needs.receive.outputs.retained_toolchain != 'true'
-        id: producer
-        shell: bash
+      - name: Attach toolchain to GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ steps.release.outputs.tag }}
+          ASSET: ${{ steps.release_archive.outputs.archive }}
         run: |
-          gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}/attempts/${GITHUB_RUN_ATTEMPT}/jobs?per_page=100" \
-            > artifacts/toolchain-jobs.json
-          python3 infrastructure/eng/actions-delivery.py job-id \
-            --jobs artifacts/toolchain-jobs.json \
-            --name toolchain-candidate \
-            --run-id "$GITHUB_RUN_ID" \
-            --run-attempt "$GITHUB_RUN_ATTEMPT" \
-            --head-sha "$GITHUB_SHA" \
-            --github-output "$GITHUB_OUTPUT"
-
-      - name: Record toolchain candidate receipt
-        if: needs.receive.outputs.retained_toolchain != 'true'
-        id: candidate
-        shell: bash
-        run: |
-          python3 infrastructure/eng/delivery-receipt.py candidate \
-            --preparation artifacts/dispatch/release-preparation.json \
-            --inputs artifacts/dispatch/inputs.json \
-            --kind playground-toolchain-candidate \
-            --archive "artifacts/toolchain/${{ steps.package.outputs.archive }}" \
-            --artifact-id '${{ steps.payload.outputs.artifact-id }}' \
-            --run-id "$GITHUB_RUN_ID" \
-            --run-attempt "$GITHUB_RUN_ATTEMPT" \
-            --job-id '${{ steps.producer.outputs.job_id }}' \
-            --actor-id "$GITHUB_ACTOR_ID" \
-            --toolchain-index source/public/toolchain/index.json \
-            --output artifacts/toolchain/delivery-candidate-receipt.json \
-            --github-output "$GITHUB_OUTPUT"
-
-      - name: Verify resolved toolchain candidate
-        id: verified
-        shell: bash
-        run: |
-          receipt=artifacts/toolchain/delivery-candidate-receipt.json
-          archive="$(jq -r '.archive.fileName' "$receipt")"
-          python3 infrastructure/eng/delivery-receipt.py verify-candidate \
-            --preparation artifacts/dispatch/release-preparation.json \
-            --inputs artifacts/dispatch/inputs.json \
-            --receipt "$receipt" \
-            --archive "artifacts/toolchain/$archive" \
-            --kind playground-toolchain-candidate \
-            --upstream-directory artifacts/dispatch/upstream \
-            --github-output "$GITHUB_OUTPUT"
-
-      - name: Retain resolved toolchain for the site build
+          set -euo pipefail
+          existing="$RUNNER_TEMP/existing-release-asset"
+          mkdir -p "$existing"
+          if gh release download "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" \
+              --pattern "$ASSET" --dir "$existing" >/dev/null 2>&1; then
+            cmp --silent ".cache/release/output/$ASSET" "$existing/$ASSET" || {
+              echo "Published toolchain asset differs from this release build." >&2
+              exit 1
+            }
+          else
+            gh release upload "$RELEASE_TAG" ".cache/release/output/$ASSET#Browser toolchain" \
+              --repo "$GITHUB_REPOSITORY"
+          fi
+      - name: Retain release receipts
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:
-          name: resolved-playground-toolchain-${{ github.run_id }}-${{ github.run_attempt }}
+          name: release-receipts-${{ github.run_id }}
           path: |
-            artifacts/toolchain/${{ steps.verified.outputs.archive_name }}
-            artifacts/toolchain/delivery-candidate-receipt.json
-          compression-level: 0
-          if-no-files-found: error
-          retention-days: 90
-
-      - name: Retain toolchain candidate receipt
-        if: needs.receive.outputs.retained_toolchain != 'true'
-        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
-        with:
-          name: delivery-candidate-receipt-playground-toolchain-candidate-${{ github.run_id }}-${{ github.run_attempt }}
-          path: artifacts/toolchain/delivery-candidate-receipt.json
-          if-no-files-found: error
+            .cache/release/archive-receipt.json
+            .cache/release/compiler-framework-receipt.json
+            source/public/toolchain/index.json
+            source/public/toolchain/*/asset-manifest.json
           retention-days: 90
 
   pages:
-    needs: [receive, toolchain-candidate]
+    needs: build-release
     uses: ./.github/workflows/pages.yml
     with:
-      deploy: true
-      dispatch_attempt_identity: ${{ inputs.dispatch_attempt_identity }}
-      dispatch_artifact: ${{ needs.receive.outputs.dispatch_artifact }}
-      infrastructure_commit: ${{ needs.receive.outputs.infrastructure_commit }}
-      production: true
-      resolved_toolchain_artifact: ${{ needs.toolchain-candidate.outputs.artifact_name }}
-      retained_artifact: ${{ needs.receive.outputs.retained_artifact }}
-      retained_site: ${{ needs.receive.outputs.retained_site == 'true' }}
-      source_commit: ${{ needs.receive.outputs.source_commit }}
-      stage_identity: ${{ inputs.stage_identity }}
-      version: ${{ needs.receive.outputs.version }}
+      deploy: ${{ needs.build-release.outputs.deploy == 'true' }}
+      release_artifact: ${{ needs.build-release.outputs.release_artifact }}
+      release_archive: ${{ needs.build-release.outputs.release_archive }}
+      release_archive_sha256: ${{ needs.build-release.outputs.release_archive_sha256 }}
+      source_ref: ${{ needs.build-release.outputs.source_ref }}
+      version: ${{ needs.build-release.outputs.version }}
     permissions:
-      actions: read
       contents: read
-      deployments: read
-      id-token: write
       pages: write
+      id-token: write

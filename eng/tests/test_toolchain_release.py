@@ -1,5 +1,6 @@
 import importlib.util
 import hashlib
+import io
 import json
 import tempfile
 import unittest
@@ -44,12 +45,11 @@ class ToolchainReleaseVersionTests(unittest.TestCase):
             for role, receipt in bundles.items():
                 self.assertEqual(f'bundles/{role}.{receipt["sha256"]}.bin', receipt['path'])
 
-    def test_release_coordinates_follow_playground_version(self):
-        metadata = MODULE.release_metadata()
-        package = json.loads((ROOT / "package.json").read_text())
+    def test_release_coordinates_follow_the_github_release_tag(self):
+        metadata = MODULE.release_metadata('v0.5.0-preview.1')
 
-        self.assertEqual(package["version"], metadata["version"])
-        self.assertEqual(f'v{metadata["version"]}', metadata["tag"])
+        self.assertEqual('0.5.0-preview.1', metadata["version"])
+        self.assertEqual('v0.5.0-preview.1', metadata["tag"])
         self.assertEqual(
             f'netwasm-playground-toolchain-{metadata["tag"]}.tar.gz',
             metadata["asset"]["name"],
@@ -60,34 +60,35 @@ class ToolchainReleaseVersionTests(unittest.TestCase):
         self.assertNotIn("index", metadata)
         self.assertEqual({"name", "url"}, set(metadata["asset"]))
 
-    def test_coordinator_dispatch_builds_one_authenticated_toolchain_candidate(self):
+    def test_latest_stable_release_is_resolved_from_github(self):
+        payload = io.BytesIO(json.dumps({
+            'tag_name': 'v0.5.0', 'draft': False, 'prerelease': False,
+        }).encode())
+
+        metadata = MODULE.latest_release_metadata(lambda request: payload)
+
+        self.assertEqual('v0.5.0', metadata['tag'])
+
+    def test_github_release_builds_the_toolchain_then_calls_pages(self):
         release = (ROOT / ".github/workflows/release.yml").read_text()
         pages = (ROOT / ".github/workflows/pages.yml").read_text()
 
-        self.assertNotIn("tags: ['v*']", release)
-        for required_input in (
-            "coordinated_stage", "preparation_sha256", "source_commit",
-            "infrastructure_commit", "dispatch_attempt_identity",
-            "upstream_receipts", "retained_candidates",
-        ):
-            self.assertIn(f"      {required_input}:", release)
-        self.assertIn("python3 bootstrap/eng/release-receiver.py", release)
-        self.assertIn("python3 eng/build-release-compiler.py", release)
+        self.assertIn("release:\n    types: [published]", release)
+        self.assertIn("Existing published GitHub Release tag to retry", release)
+        self.assertIn("python3 source/eng/build-release-compiler.py", release)
         self.assertIn("dotnet workload install wasm-tools --skip-manifest-update", release)
-        self.assertIn("Build content-addressed browser toolchain", release)
-        self.assertIn("python3 eng/rebuild-public-toolchain.py", release)
-        self.assertIn("playground-toolchain-payload-${{ github.run_id }}", release)
-        self.assertIn(
-            "delivery-candidate-receipt-playground-toolchain-candidate-",
-            release,
-        )
-        self.assertIn("cancel-in-progress: false", release)
+        self.assertIn("Build content-addressed browser toolchain manifest", release)
+        self.assertIn("python3 source/eng/rebuild-public-toolchain.py", release)
+        self.assertIn("Retain exact browser toolchain archive", release)
+        self.assertIn("release_archive_sha256: ${{ needs.build-release.outputs.release_archive_sha256 }}", release)
         self.assertIn("uses: ./.github/workflows/pages.yml", release)
         self.assertIn("workflow_call:", pages)
-        self.assertIn("production: true", release)
-        self.assertIn("Download resolved toolchain candidate", pages)
-        self.assertIn("playground-site-payload-${{ github.run_id }}", pages)
-        self.assertIn("delivery-completion-playground-${{ github.run_id }}", pages)
+        self.assertIn("source_ref: ${{ needs.build-release.outputs.source_ref }}", release)
+        self.assertIn("PLAYGROUND_VERSION: ${{ inputs.version || steps.released-toolchain.outputs.version }}", pages)
+        self.assertIn("Download exact browser toolchain archive", pages)
+        self.assertIn("actual_sha256 != expected_sha256", pages)
+        self.assertIn("toolchain_id: ${{ steps.toolchain.outputs.id }}", pages)
+        self.assertIn("EXPECTED_TOOLCHAIN_ID: ${{ needs.build-site.outputs.toolchain_id }}", pages)
 
     def test_pages_qualifies_one_site_in_three_parallel_browser_lanes(self):
         pages = (ROOT / ".github/workflows/pages.yml").read_text()
@@ -95,12 +96,9 @@ class ToolchainReleaseVersionTests(unittest.TestCase):
         self.assertEqual(2, pages.count("browser: [chromium, firefox, webkit]"))
         self.assertIn("name: Retain exact production site", pages)
         self.assertIn("name: Download exact production site", pages)
-        self.assertIn("needs: [prepare-site, stage-site, predeploy]", pages)
+        self.assertIn("needs: [build-site, predeploy]", pages)
         self.assertEqual(2, pages.count("bash eng/run-browser-lane.sh"))
         self.assertNotIn("rebuild-public-toolchain.py", pages)
-        self.assertIn("cancel-in-progress: ${{ !inputs.production }}", pages)
-        self.assertIn("name: Record immutable live evidence", pages)
-        self.assertIn("name: Retain immutable delivery completion", pages)
 
 if __name__ == "__main__":
     unittest.main()

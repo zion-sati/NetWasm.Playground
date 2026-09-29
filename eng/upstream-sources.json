@@ -23,5 +23,39 @@
       "tag": "netwasm-v0.4.3",
       "packageVersion": "0.4.3"
     }
+  },
+  "compilerFramework": {
+    "members": {
+      "json": {
+        "source": "libraries",
+        "package": "netwasm.system.text.json",
+        "path": "analyzers/dotnet/cs/System.Text.Json.SourceGeneration.dll",
+        "sha256": "bdef5ce75fa321acf8d2c2a5b2a9f9eb2a30ef4a28b1694fbca978176c8dd6c9"
+      },
+      "tunit-generator": {
+        "source": "tunit",
+        "package": "netwasm.tunit.core",
+        "path": "analyzers/dotnet/roslyn4.14/cs/TUnit.Core.SourceGenerator.dll",
+        "sha256": "1e1a3b8f6367d76c4a85a6f3d000d513e8d85839a02b218c8073035d907e086c"
+      },
+      "di": {
+        "source": "libraries",
+        "package": "netwasm.microsoft.extensions.dependencyinjection",
+        "path": "analyzers/dotnet/cs/NetWasm.Microsoft.Extensions.DependencyInjection.Generator.dll",
+        "sha256": "9b7a7c508aa0d58de363b92c20fabd4840860e16bf908d668c02a4fb8a4bbe7f"
+      },
+      "logging": {
+        "source": "libraries",
+        "package": "netwasm.microsoft.extensions.logging.abstractions",
+        "path": "analyzers/dotnet/cs/NetWasm.Microsoft.Extensions.Logging.Generators.dll",
+        "sha256": "5763df02395ee8f84ec8812e52345477acc73595da7b2462ef9ae0bc78acf866"
+      },
+      "tunit-program": {
+        "source": "tunit",
+        "package": "netwasm.tunit",
+        "path": "build/NetWasm,Version=v0.1/NetWasm.TUnit.Program.cs",
+        "sha256": "c649b3d2f5989b90b4d226095d11628c276134086cf0841727befa2a36ef6636"
+      }
+    }
   }
 }

@@ -37,8 +37,8 @@ It does not rebuild LLVM. Release builds run on a clean GitHub Actions runner:
 they compile the browser compiler host from pinned public NuGet packages,
 rebuild the four phase bundles from the receipt-verified public base, generate
 the manifest that maps each phase to a SHA-256-named `.bin` file, and verify
-every content receipt. Pages then installs the browser bundle published
-under the semantic version in `eng/toolchain-release.json`. Its self-contained
+every content receipt. Pages then installs the browser bundle attached to the
+latest stable GitHub Release. Its self-contained
 content identity, manifest, bundles and every asset slice are verified before
 use. Public releases use tags
 such as `v0.2.6`; the independently computed toolchain ID identifies the exact
@@ -61,10 +61,10 @@ Open `http://127.0.0.1:5174/playground/`. Rebuilding with the default base
 while this preview is running will break its asset URLs.
 
 Pull requests and pushes to `main` run type checking and build the application
-shell without downloading an unpublished toolchain. Pushing the signed semantic
-tag recorded in `eng/toolchain-release.json` runs the release workflow. That
-workflow builds and scans the toolchain on GitHub Actions, publishes the release
-asset, and calls the Pages workflow for the same tag. Pages builds with its
+shell without downloading an unpublished toolchain. Publishing a GitHub Release
+runs the release workflow, and its tag is the Playground version. The workflow
+builds and scans the toolchain on GitHub Actions, attaches the release asset,
+and calls the Pages workflow for the same tag. Pages builds with its
 configured base path, runs an actual Chromium compile/run/download smoke test,
 executes that download with pinned Wasmtime, and deploys the verified `dist/`
 artifact. It repeats that check against the public URL and retains both evidence
@@ -72,8 +72,8 @@ sets for 14 days. A manual Pages dispatch remains available for recovery.
 Configure Pages with **GitHub Actions** as its source; publishing directly from
 the repository root does not build this Vite project.
 
-The `github-pages` environment must allow deployments from the `main` branch
-and `v*` tags. The release workflow calls Pages from the signed release tag.
+The `github-pages` environment must allow deployments from the `main` branch.
+The release workflow checks out the exact GitHub Release tag when it calls Pages.
 
 ```sh
 npm run typecheck
