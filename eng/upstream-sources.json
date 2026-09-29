@@ -3,9 +3,9 @@
   "sources": {
     "netwasm": {
       "repository": "https://github.com/zion-sati/NetWasm",
-      "commit": "400676d82248ba03454c36c176ffcbfda95c1cf0",
-      "tag": "v0.4.3",
-      "packageVersion": "0.4.3",
+      "commit": "e936b0c29c993a398c03a155402e94d4c088352b",
+      "tag": "v0.5.0",
+      "packageVersion": "0.5.0",
       "toolchainManifest": "eng/toolchain.json",
       "browserCompilerCommit": "3b856a0ee73759c78b8dc5511685296cee242a00",
       "browserLinkerCommit": "b89839a8c748c9edd58bce00c30a5a60a2972fbc",
