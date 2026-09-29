@@ -133,6 +133,25 @@ class PublicPackageBoundaryTests(unittest.TestCase):
         self.assertIn("must be supplied together", incomplete.stderr)
         self.assertNotIn("--candidate-feed", release)
 
+    def test_compiler_framework_inputs_are_owned_by_the_upstream_manifest(self):
+        upstream = json.loads((ROOT / "eng/upstream-sources.json").read_text())
+        sources = upstream["sources"]
+        members = upstream["compilerFramework"]["members"]
+
+        self.assertEqual(
+            {"json", "tunit-generator", "di", "logging", "tunit-program"},
+            set(members),
+        )
+        for member in members.values():
+            self.assertIn(member["source"], sources)
+            self.assertRegex(member["package"], r"^[a-z0-9.-]+$")
+            self.assertNotIn("..", Path(member["path"]).parts)
+            self.assertRegex(member["sha256"], r"^[0-9a-f]{64}$")
+
+        release_builder = (ROOT / "eng/build-release-compiler.py").read_text()
+        self.assertNotIn("PACKAGES =", release_builder)
+        self.assertIn("upstream['compilerFramework']['members']", release_builder)
+
     def test_asset_stager_has_no_source_checkout_option(self):
         help_text = subprocess.check_output(
             ["python3", str(ROOT / "eng/prepare-web.py"), "--help"],

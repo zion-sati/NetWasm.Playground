@@ -14,23 +14,6 @@ import zipfile
 
 ROOT = Path(__file__).resolve().parents[1]
 FEED = 'https://api.nuget.org/v3/index.json'
-PACKAGES = {
-    'json': ('netwasm.system.text.json', '0.4.3',
-             'analyzers/dotnet/cs/System.Text.Json.SourceGeneration.dll',
-             'bdef5ce75fa321acf8d2c2a5b2a9f9eb2a30ef4a28b1694fbca978176c8dd6c9'),
-    'tunit-generator': ('netwasm.tunit.core', '0.4.3',
-                        'analyzers/dotnet/roslyn4.14/cs/TUnit.Core.SourceGenerator.dll',
-                        '1e1a3b8f6367d76c4a85a6f3d000d513e8d85839a02b218c8073035d907e086c'),
-    'di': ('netwasm.microsoft.extensions.dependencyinjection', '0.4.3',
-           'analyzers/dotnet/cs/NetWasm.Microsoft.Extensions.DependencyInjection.Generator.dll',
-           '9b7a7c508aa0d58de363b92c20fabd4840860e16bf908d668c02a4fb8a4bbe7f'),
-    'logging': ('netwasm.microsoft.extensions.logging.abstractions', '0.4.3',
-                'analyzers/dotnet/cs/NetWasm.Microsoft.Extensions.Logging.Generators.dll',
-                '5763df02395ee8f84ec8812e52345477acc73595da7b2462ef9ae0bc78acf866'),
-    'tunit-program': ('netwasm.tunit', '0.4.3',
-                      'build/NetWasm,Version=v0.1/NetWasm.TUnit.Program.cs',
-                      'c649b3d2f5989b90b4d226095d11628c276134086cf0841727befa2a36ef6636'),
-}
 
 
 def sha256(payload):
@@ -67,7 +50,9 @@ def main():
         parser.error('--candidate-feed and --candidate-version must be supplied together')
     if args.candidate_tunit_version and not args.candidate_feed:
         parser.error('--candidate-tunit-version requires --candidate-feed')
-    pins = json.loads((ROOT / 'eng/upstream-sources.json').read_text())['sources']
+    upstream = json.loads((ROOT / 'eng/upstream-sources.json').read_text())
+    pins = upstream['sources']
+    members = upstream['compilerFramework']['members']
     version = args.candidate_version or pins['netwasm']['packageVersion']
     candidate_feed = args.candidate_feed.resolve() if args.candidate_feed else None
     if candidate_feed:
@@ -88,8 +73,13 @@ def main():
         generators = work / 'generators'
         generators.mkdir()
         extracted = {}
-        for key, (package, package_version, member, expected) in PACKAGES.items():
-            if args.candidate_tunit_version and key.startswith('tunit-'):
+        for key, item in members.items():
+            package = item['package']
+            member = item['path']
+            expected = item['sha256']
+            source = item['source']
+            package_version = pins[source]['packageVersion']
+            if args.candidate_tunit_version and source == 'tunit':
                 package_version = args.candidate_tunit_version
             payload, from_candidate = package_member(package, package_version, member, candidate_feed)
             if not from_candidate and sha256(payload) != expected:

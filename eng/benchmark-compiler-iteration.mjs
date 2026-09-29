@@ -35,7 +35,7 @@ if (candidateToolchain) {
 const server = await preview({ root, logLevel: 'silent', build: { outDir: benchmarkDist },
   preview: { host: '127.0.0.1', port, strictPort: true } });
 const browser = await chromium.launch({ headless: true });
-const toolchainRelease = JSON.parse(await readFile(resolve(root, 'eng/toolchain-release.json'), 'utf8'));
+const releaseTag = optionalValue('--release-tag');
 let toolchainIndex;
 let cases = [
   { recipe: 'hello', runs: 5, from: 'Console.WriteLine(42);', to: 'Console.WriteLine(43);' },
@@ -90,13 +90,12 @@ const receipt = {
     workerCount: 1,
     optimization: 'none',
     network: 'local Vite; immutable public toolchain assets already present',
-    concurrentHostLoad: 'No agent-owned CPU-heavy build or benchmark; ordinary interactive desktop processes remained.',
+    concurrentHostLoad: 'No concurrent CPU-heavy build or benchmark; ordinary interactive desktop processes remained.',
     unavailableCounters: ['allocations', 'gc', 'retained-memory', 'peak-memory', 'methods-decoded', 'methods-analyzed', 'methods-lowered', 'cache-hits', 'cache-misses', 'cache-evictions', 'key-construction'],
   },
   publicToolchain: {
-    releaseVersion: toolchainRelease.version,
-    releaseTag: toolchainRelease.tag,
-    releaseAsset: toolchainRelease.asset,
+    releaseTag: releaseTag ?? null,
+    source: candidateToolchain ? 'candidate directory' : 'checked-in public toolchain',
   },
   semantics: {
     repetition: 'Each repetition opens a fresh page and creates a fresh PlaygroundPipeline, compiler worker, linker worker, and tools worker. Browser HTTP cache remains available; timings therefore exclude first-visit Internet transfer.',

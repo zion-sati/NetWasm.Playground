@@ -2,376 +2,156 @@ name: Pages
 
 on:
   workflow_dispatch:
+    inputs:
+      deploy:
+        description: Deploy after the three predeploy browser lanes pass
+        required: false
+        default: false
+        type: boolean
   workflow_call:
     inputs:
       deploy:
+        description: Deploy after the three predeploy browser lanes pass
         required: false
-        default: false
+        default: true
         type: boolean
-      dispatch_attempt_identity:
+      release_artifact:
+        description: Actions artifact containing the exact browser toolchain archive
         required: false
         default: ''
         type: string
-      dispatch_artifact:
+      release_archive:
+        description: Browser toolchain archive filename inside the artifact
         required: false
         default: ''
         type: string
-      infrastructure_commit:
+      release_archive_sha256:
+        description: Expected SHA-256 of the browser toolchain archive
         required: false
         default: ''
         type: string
-      production:
-        required: false
-        default: false
-        type: boolean
-      resolved_toolchain_artifact:
-        required: false
-        default: ''
-        type: string
-      retained_artifact:
-        required: false
-        default: ''
-        type: string
-      retained_site:
-        required: false
-        default: false
-        type: boolean
-      source_commit:
-        required: false
-        default: ''
-        type: string
-      stage_identity:
+      source_ref:
+        description: Git ref whose source is deployed
         required: false
         default: ''
         type: string
       version:
+        description: Playground version derived from the GitHub Release tag
         required: false
         default: ''
         type: string
 
 concurrency:
-  group: ${{ inputs.production && format('playground-release-pages-{0}', inputs.stage_identity) || 'playground-pages-qualification' }}
-  cancel-in-progress: ${{ !inputs.production }}
+  group: pages
+  cancel-in-progress: false
 
 permissions:
   contents: read
-  actions: read
 
 jobs:
-  prepare-site:
+  build-site:
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
     outputs:
-      archive_name: ${{ steps.verified.outputs.archive_name }}
       base_path: ${{ steps.pages.outputs.base_path }}
-      index_html_sha256: ${{ steps.verified.outputs.index_html_sha256 }}
-      resolved_site_artifact: resolved-playground-site-${{ github.run_id }}-${{ github.run_attempt }}
-      site_identity_sha256: ${{ steps.verified.outputs.site_identity_sha256 }}
-      site_receipt_sha256: ${{ steps.verified.outputs.receipt_sha256 }}
-      toolchain_id: ${{ steps.verified.outputs.toolchain_id }}
-      toolchain_manifest_sha256: ${{ steps.verified.outputs.toolchain_manifest_sha256 }}
+      site_artifact: ${{ steps.coordinates.outputs.site_artifact }}
+      site_identity_sha256: ${{ steps.coordinates.outputs.site_identity_sha256 }}
+      toolchain_id: ${{ steps.toolchain.outputs.id }}
+      toolchain_manifest_sha256: ${{ steps.toolchain.outputs.manifest_sha256 }}
     steps:
-      - name: Reject native production reruns
-        shell: bash
-        env:
-          PRODUCTION: ${{ inputs.production }}
-        run: |
-          if [[ "$PRODUCTION" == true && "$GITHUB_RUN_ATTEMPT" != 1 ]]; then
-            echo 'Native production reruns are not supported. Resume through a fresh coordinator dispatch so retained candidates are authenticated.' >&2
-            exit 1
-          fi
-
       - name: Check out source
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
-          ref: ${{ inputs.source_commit || github.sha }}
-          persist-credentials: false
-          path: source
-
-      - name: Check out approved release infrastructure
-        if: inputs.production
-        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
-        with:
-          ref: ${{ inputs.infrastructure_commit }}
-          persist-credentials: false
-          path: infrastructure
-
-      - name: Select local qualification infrastructure
-        if: ${{ !inputs.production }}
-        shell: bash
-        run: ln -s "$GITHUB_WORKSPACE/source" infrastructure
-
-      - name: Download coordinated dispatch evidence
-        if: inputs.production
-        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
-        with:
-          name: ${{ inputs.dispatch_artifact }}
-          path: artifacts/dispatch
-
-      - name: Download resolved toolchain candidate
-        if: inputs.production
-        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
-        with:
-          name: ${{ inputs.resolved_toolchain_artifact }}
-          path: artifacts/toolchain
-
-      - name: Download retained site candidate
-        if: inputs.production && inputs.retained_site
-        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
-        with:
-          name: ${{ inputs.retained_artifact }}
-          path: artifacts/retained
-
-      - name: Configure Pages
-        id: pages
-        uses: actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d # v6
-
+          ref: ${{ inputs.source_ref || github.sha }}
       - name: Set up Node.js
-        if: ${{ !inputs.retained_site }}
         uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
           node-version: 26.7.0
           cache: npm
-          cache-dependency-path: source/package-lock.json
-
-      - name: Install site dependencies
-        if: ${{ !inputs.retained_site }}
-        working-directory: source
-        run: npm ci
-
-      - name: Install coordinated toolchain candidate
-        if: inputs.production && !inputs.retained_site
-        shell: bash
-        run: |
-          receipt=artifacts/toolchain/delivery-candidate-receipt.json
-          archive="$(jq -r '.archive.fileName' "$receipt")"
-          python3 source/eng/toolchain-release.py install \
-            --archive "artifacts/toolchain/$archive" \
-            --output source/public/toolchain
-
-      - name: Install released toolchain for qualification
-        if: ${{ !inputs.production }}
-        working-directory: source
-        run: python3 eng/toolchain-release.py install
-
-      - name: Build production site candidate
-        if: ${{ !inputs.retained_site }}
-        shell: bash
-        env:
-          PLAYGROUND_BASE: ${{ steps.pages.outputs.base_path }}/
-          PRODUCTION: ${{ inputs.production }}
-          VERSION: ${{ inputs.version }}
-        run: |
-          set -euo pipefail
-          npm --prefix source run build
-          source_commit="$(git -C source rev-parse HEAD)"
-          node source/eng/site-identity.mjs source/dist "$source_commit"
-          archive="playground-site-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}.zip"
-          if [[ "$PRODUCTION" == true ]]; then
-            archive="netwasm-playground-site-v${VERSION}.zip"
-          fi
-          mkdir -p artifacts/site artifacts/site-payload
-          python3 infrastructure/eng/delivery-receipt.py pack-site \
-            --source source/dist \
-            --output "artifacts/site/$archive"
-          cp "artifacts/site/$archive" "artifacts/site-payload/$archive"
-
-      - name: Select retained site candidate
-        if: inputs.retained_site
-        shell: bash
-        run: |
-          set -euo pipefail
-          directory="artifacts/retained/playground-site-candidate"
-          receipt="$directory/delivery-candidate-receipt.json"
-          archive="$(jq -r '.archive.fileName' "$receipt")"
-          mkdir -p artifacts/site
-          cp "$receipt" artifacts/site/delivery-candidate-receipt.json
-          cp "$directory/$archive" "artifacts/site/$archive"
-
-      - name: Retain site candidate payload
-        if: inputs.production && !inputs.retained_site
-        id: payload
-        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
-        with:
-          name: playground-site-payload-${{ github.run_id }}-${{ github.run_attempt }}
-          path: artifacts/site-payload/
-          compression-level: 0
-          if-no-files-found: error
-          retention-days: 90
-
-      - name: Resolve site producer job
-        if: inputs.production && !inputs.retained_site
-        id: producer
-        shell: bash
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}/attempts/${GITHUB_RUN_ATTEMPT}/jobs?per_page=100" \
-            > artifacts/site-jobs.json
-          python3 infrastructure/eng/actions-delivery.py job-id \
-            --jobs artifacts/site-jobs.json \
-            --name 'pages / prepare-site' \
-            --run-id "$GITHUB_RUN_ID" \
-            --run-attempt "$GITHUB_RUN_ATTEMPT" \
-            --head-sha "$GITHUB_SHA" \
-            --github-output "$GITHUB_OUTPUT"
-
-      - name: Record site candidate receipt
-        if: inputs.production && !inputs.retained_site
-        shell: bash
-        run: |
-          archive="$(find artifacts/site -maxdepth 1 -type f -name '*.zip' -printf '%f\n')"
-          test -n "$archive"
-          python3 infrastructure/eng/delivery-receipt.py candidate \
-            --preparation artifacts/dispatch/release-preparation.json \
-            --inputs artifacts/dispatch/inputs.json \
-            --kind playground-site-candidate \
-            --archive "artifacts/site/$archive" \
-            --artifact-id '${{ steps.payload.outputs.artifact-id }}' \
-            --run-id "$GITHUB_RUN_ID" \
-            --run-attempt "$GITHUB_RUN_ATTEMPT" \
-            --job-id '${{ steps.producer.outputs.job_id }}' \
-            --actor-id "$GITHUB_ACTOR_ID" \
-            --toolchain-index source/public/toolchain/index.json \
-            --site-identity source/dist/site-identity.json \
-            --toolchain-receipt artifacts/toolchain/delivery-candidate-receipt.json \
-            --output artifacts/site/delivery-candidate-receipt.json
-
-      - name: Verify resolved production site candidate
-        if: inputs.production
-        id: verified-production
-        shell: bash
-        run: |
-          receipt=artifacts/site/delivery-candidate-receipt.json
-          archive="$(jq -r '.archive.fileName' "$receipt")"
-          python3 infrastructure/eng/delivery-receipt.py verify-candidate \
-            --preparation artifacts/dispatch/release-preparation.json \
-            --inputs artifacts/dispatch/inputs.json \
-            --receipt "$receipt" \
-            --archive "artifacts/site/$archive" \
-            --kind playground-site-candidate \
-            --upstream-directory artifacts/dispatch/upstream \
-            --toolchain-receipt artifacts/toolchain/delivery-candidate-receipt.json \
-            --github-output artifacts/site-outputs
-
-      - name: Record qualification site coordinates
-        if: ${{ !inputs.production }}
-        shell: bash
-        run: |
-          archive="$(find artifacts/site -maxdepth 1 -type f -name '*.zip' -printf '%f\n')"
-          python3 - "$archive" <<'PY' > artifacts/site-outputs
-          import hashlib
-          import json
-          from pathlib import Path
-          import sys
-
-          identity_path = Path('source/dist/site-identity.json')
-          identity = json.loads(identity_path.read_text())
-          print(f'archive_name={sys.argv[1]}')
-          print('receipt_sha256=')
-          print(f'site_identity_sha256={hashlib.sha256(identity_path.read_bytes()).hexdigest()}')
-          print(f'index_html_sha256={identity["indexHtmlSha256"]}')
-          print(f'toolchain_id={identity["toolchain"]["id"]}')
-          print(f'toolchain_manifest_sha256={identity["toolchain"]["manifestSha256"]}')
-          PY
-
-      - name: Publish site coordinates
-        id: verified
-        shell: bash
-        run: cat artifacts/site-outputs >> "$GITHUB_OUTPUT"
-
-      - name: Retain resolved site for qualification and deployment
-        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
-        with:
-          name: resolved-playground-site-${{ github.run_id }}-${{ github.run_attempt }}
-          path: artifacts/site/
-          compression-level: 0
-          if-no-files-found: error
-          retention-days: 90
-
-      - name: Retain site candidate receipt
-        if: inputs.production && !inputs.retained_site
-        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
-        with:
-          name: delivery-candidate-receipt-playground-site-candidate-${{ github.run_id }}-${{ github.run_attempt }}
-          path: artifacts/site/delivery-candidate-receipt.json
-          if-no-files-found: error
-          retention-days: 90
-
-  stage-site:
-    needs: prepare-site
-    runs-on: ubuntu-24.04
-    timeout-minutes: 15
-    outputs:
-      pages_artifact: github-pages-${{ github.run_id }}-${{ github.run_attempt }}
-      site_artifact: pages-site-${{ github.run_id }}-${{ github.run_attempt }}
-    steps:
-      - name: Reject native production reruns
-        shell: bash
-        env:
-          PRODUCTION: ${{ inputs.production }}
-        run: |
-          if [[ "$PRODUCTION" == true && "$GITHUB_RUN_ATTEMPT" != 1 ]]; then
-            echo 'Native production reruns are not supported. Resume through a fresh coordinator dispatch so retained candidates are authenticated.' >&2
-            exit 1
-          fi
-
-      - name: Check out source
-        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
-        with:
-          ref: ${{ inputs.source_commit || github.sha }}
-          persist-credentials: false
-
-      - name: Download resolved production site
+      - name: Configure Pages
+        id: pages
+        uses: actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d # v6
+      - run: npm ci
+      - name: Download exact browser toolchain archive
+        if: inputs.release_artifact != ''
         uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
         with:
-          name: ${{ needs.prepare-site.outputs.resolved_site_artifact }}
-          path: artifacts/site
-
-      - name: Materialize exact production site
+          name: ${{ inputs.release_artifact }}
+          path: .cache/release/input
+      - name: Verify and install supplied browser toolchain archive
+        if: inputs.release_artifact != ''
+        id: supplied-toolchain
+        env:
+          RELEASE_ARCHIVE: ${{ inputs.release_archive }}
+          RELEASE_ARCHIVE_SHA256: ${{ inputs.release_archive_sha256 }}
         run: |
-          python3 eng/delivery-receipt.py extract-site \
-            --archive "artifacts/site/${{ needs.prepare-site.outputs.archive_name }}" \
-            --output dist
-          test "$(sha256sum dist/site-identity.json | cut -d ' ' -f 1)" = '${{ needs.prepare-site.outputs.site_identity_sha256 }}'
+          python3 - <<'PY'
+          import hashlib
+          import json
+          import os
+          from pathlib import Path
 
+          archive_name = os.environ['RELEASE_ARCHIVE']
+          expected_sha256 = os.environ['RELEASE_ARCHIVE_SHA256']
+          if not archive_name or Path(archive_name).name != archive_name:
+              raise SystemExit('Invalid supplied release archive name')
+          archive = Path('.cache/release/input') / archive_name
+          receipt = json.loads(Path('.cache/release/input/archive-receipt.json').read_text())
+          actual_sha256 = hashlib.sha256(archive.read_bytes()).hexdigest()
+          if receipt != {'name': archive_name, 'bytes': archive.stat().st_size,
+                          'sha256': actual_sha256}:
+              raise SystemExit('Downloaded archive does not match its release receipt')
+          if actual_sha256 != expected_sha256:
+              raise SystemExit(f'Archive SHA-256 mismatch: expected {expected_sha256}, got {actual_sha256}')
+          PY
+          python3 eng/toolchain-release.py install \
+            --archive ".cache/release/input/$RELEASE_ARCHIVE"
+      - name: Install released browser toolchain for manual deployment
+        if: inputs.release_artifact == ''
+        id: released-toolchain
+        run: python3 eng/toolchain-release.py install --github-output "$GITHUB_OUTPUT"
+      - name: Record deployed coordinates
+        id: toolchain
+        run: |
+          python3 - <<'PY' >> "$GITHUB_OUTPUT"
+          import json
+          index = json.load(open('public/toolchain/index.json'))
+          print(f'id={index["id"]}')
+          print(f'manifest_sha256={index["manifestSha256"]}')
+          PY
+      - name: Build production site once
+        env:
+          PLAYGROUND_BASE: ${{ steps.pages.outputs.base_path }}/
+          PLAYGROUND_VERSION: ${{ inputs.version || steps.released-toolchain.outputs.version }}
+        run: npm run build
+      - name: Bind production site identity
+        run: node eng/site-identity.mjs dist "$(git rev-parse HEAD)"
+      - name: Record site coordinates
+        id: coordinates
+        run: |
+          echo "site_artifact=pages-site-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" >> "$GITHUB_OUTPUT"
+          echo "site_identity_sha256=$(sha256sum dist/site-identity.json | cut -d ' ' -f 1)" >> "$GITHUB_OUTPUT"
       - name: Retain exact production site
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:
-          name: pages-site-${{ github.run_id }}-${{ github.run_attempt }}
+          name: ${{ steps.coordinates.outputs.site_artifact }}
           path: dist
           if-no-files-found: error
-          retention-days: 90
-
+          retention-days: 14
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5
         with:
-          name: github-pages-${{ github.run_id }}-${{ github.run_attempt }}
           path: dist
 
   predeploy:
-    needs: [prepare-site, stage-site]
+    needs: build-site
     runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
       matrix:
         browser: [chromium, firefox, webkit]
     steps:
-      - name: Reject native production reruns
-        shell: bash
-        env:
-          PRODUCTION: ${{ inputs.production }}
-        run: |
-          if [[ "$PRODUCTION" == true && "$GITHUB_RUN_ATTEMPT" != 1 ]]; then
-            echo 'Native production reruns are not supported. Resume through a fresh coordinator dispatch so retained candidates are authenticated.' >&2
-            exit 1
-          fi
-
       - name: Check out source
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
-        with:
-          ref: ${{ inputs.source_commit || github.sha }}
-          persist-credentials: false
       - name: Set up Node.js
         uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
@@ -381,7 +161,7 @@ jobs:
       - name: Download exact production site
         uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
         with:
-          name: ${{ needs.stage-site.outputs.site_artifact }}
+          name: ${{ needs.build-site.outputs.site_artifact }}
           path: dist
       - name: Install ${{ matrix.browser }}
         run: npx playwright install --with-deps "${{ matrix.browser }}"
@@ -398,10 +178,10 @@ jobs:
         env:
           PLAYGROUND_BROWSER: ${{ matrix.browser }}
           PLAYGROUND_EVIDENCE: .cache/pages-predeploy-${{ matrix.browser }}
-          PLAYGROUND_URL: http://127.0.0.1:4173${{ needs.prepare-site.outputs.base_path }}/
-          EXPECTED_SITE_IDENTITY_SHA256: ${{ needs.prepare-site.outputs.site_identity_sha256 }}
-          EXPECTED_TOOLCHAIN_ID: ${{ needs.prepare-site.outputs.toolchain_id }}
-          EXPECTED_TOOLCHAIN_MANIFEST_SHA256: ${{ needs.prepare-site.outputs.toolchain_manifest_sha256 }}
+          PLAYGROUND_URL: http://127.0.0.1:4173${{ needs.build-site.outputs.base_path }}/
+          EXPECTED_SITE_IDENTITY_SHA256: ${{ needs.build-site.outputs.site_identity_sha256 }}
+          EXPECTED_TOOLCHAIN_ID: ${{ needs.build-site.outputs.toolchain_id }}
+          EXPECTED_TOOLCHAIN_MANIFEST_SHA256: ${{ needs.build-site.outputs.toolchain_manifest_sha256 }}
         run: |
           npm run preview -- --host 127.0.0.1 --port 4173 &
           server_pid=$!
@@ -423,147 +203,32 @@ jobs:
 
   deploy:
     if: inputs.deploy
-    needs: [prepare-site, stage-site, predeploy]
+    needs: [build-site, predeploy]
     runs-on: ubuntu-24.04
     outputs:
       page_url: ${{ steps.deployment.outputs.page_url }}
     permissions:
-      contents: read
-      id-token: write
       pages: write
+      id-token: write
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
-      - name: Reject native production reruns
-        shell: bash
-        env:
-          PRODUCTION: ${{ inputs.production }}
-        run: |
-          if [[ "$PRODUCTION" == true && "$GITHUB_RUN_ATTEMPT" != 1 ]]; then
-            echo 'Native production reruns are not supported. Resume through a fresh coordinator dispatch so retained candidates are authenticated.' >&2
-            exit 1
-          fi
-
       - name: Deploy Pages artifact
         id: deployment
         uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5
-        with:
-          artifact_name: ${{ needs.stage-site.outputs.pages_artifact }}
-
-  bind-deployment:
-    if: inputs.deploy
-    needs: [prepare-site, deploy]
-    runs-on: ubuntu-24.04
-    timeout-minutes: 15
-    outputs:
-      deployment_artifact: playground-deployment-${{ github.run_id }}-${{ github.run_attempt }}
-    permissions:
-      actions: read
-      contents: read
-      deployments: read
-    steps:
-      - name: Reject native production reruns
-        shell: bash
-        env:
-          PRODUCTION: ${{ inputs.production }}
-        run: |
-          if [[ "$PRODUCTION" == true && "$GITHUB_RUN_ATTEMPT" != 1 ]]; then
-            echo 'Native production reruns are not supported. Resume through a fresh coordinator dispatch so retained candidates are authenticated.' >&2
-            exit 1
-          fi
-
-      - name: Check out approved release infrastructure
-        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
-        with:
-          ref: ${{ inputs.infrastructure_commit }}
-          persist-credentials: false
-          path: infrastructure
-      - name: Bind exact Pages deployment
-        shell: bash
-        env:
-          GH_TOKEN: ${{ github.token }}
-          PAGE_URL: ${{ needs.deploy.outputs.page_url }}
-        run: |
-          set -euo pipefail
-          mkdir -p artifacts/deployment/statuses
-          for attempt in {1..12}; do
-            echo "Resolving exact Pages deployment (attempt $attempt of 12)"
-            gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}/attempts/${GITHUB_RUN_ATTEMPT}/jobs?per_page=100" \
-              > artifacts/deployment/jobs.json
-            gh api "repos/${GITHUB_REPOSITORY}/deployments?environment=github-pages&per_page=100" \
-              > artifacts/deployment/deployments.json
-            while IFS= read -r deployment_id; do
-              gh api "repos/${GITHUB_REPOSITORY}/deployments/${deployment_id}/statuses?per_page=100" \
-                > "artifacts/deployment/statuses/${deployment_id}.json"
-            done < <(jq -r '.[].id' artifacts/deployment/deployments.json)
-            if python3 infrastructure/eng/actions-delivery.py deployment \
-              --jobs artifacts/deployment/jobs.json \
-              --deployments artifacts/deployment/deployments.json \
-              --statuses-directory artifacts/deployment/statuses \
-              --repository "$GITHUB_REPOSITORY" \
-              --run-id "$GITHUB_RUN_ID" \
-              --run-attempt "$GITHUB_RUN_ATTEMPT" \
-              --job-name 'pages / deploy' \
-              --head-sha "$GITHUB_SHA" \
-              --workflow-ref "$GITHUB_REF_NAME" \
-              --actor-id "$GITHUB_ACTOR_ID" \
-              --expected-url "$PAGE_URL" \
-              --output artifacts/deployment/deployment.json; then
-              exit 0
-            fi
-            sleep 5
-          done
-          echo 'Exact Pages deployment did not become visible.' >&2
-          exit 1
-      - name: Retain exact deployment coordinates
-        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
-        with:
-          name: playground-deployment-${{ github.run_id }}-${{ github.run_attempt }}
-          path: artifacts/deployment/deployment.json
-          if-no-files-found: error
-          retention-days: 90
 
   verify-live:
     if: inputs.deploy
-    needs: [prepare-site, deploy, bind-deployment]
+    needs: [build-site, deploy]
     runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
       matrix:
         browser: [chromium, firefox, webkit]
     steps:
-      - name: Reject native production reruns
-        shell: bash
-        env:
-          PRODUCTION: ${{ inputs.production }}
-        run: |
-          if [[ "$PRODUCTION" == true && "$GITHUB_RUN_ATTEMPT" != 1 ]]; then
-            echo 'Native production reruns are not supported. Resume through a fresh coordinator dispatch so retained candidates are authenticated.' >&2
-            exit 1
-          fi
-
       - name: Check out source
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
-        with:
-          ref: ${{ inputs.source_commit }}
-          persist-credentials: false
-      - name: Check out approved release infrastructure
-        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
-        with:
-          ref: ${{ inputs.infrastructure_commit }}
-          persist-credentials: false
-          path: infrastructure
-      - name: Download exact deployment coordinates
-        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
-        with:
-          name: ${{ needs.bind-deployment.outputs.deployment_artifact }}
-          path: artifacts/deployment
-      - name: Download coordinated dispatch evidence
-        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
-        with:
-          name: ${{ inputs.dispatch_artifact }}
-          path: artifacts/dispatch
       - name: Set up Node.js
         uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
@@ -584,21 +249,21 @@ jobs:
       - name: Wait for the deployed toolchain
         env:
           PLAYGROUND_URL: ${{ needs.deploy.outputs.page_url }}
-          EXPECTED_SITE_IDENTITY_SHA256: ${{ needs.prepare-site.outputs.site_identity_sha256 }}
-          EXPECTED_TOOLCHAIN_ID: ${{ needs.prepare-site.outputs.toolchain_id }}
-          EXPECTED_TOOLCHAIN_MANIFEST_SHA256: ${{ needs.prepare-site.outputs.toolchain_manifest_sha256 }}
+          EXPECTED_SITE_IDENTITY_SHA256: ${{ needs.build-site.outputs.site_identity_sha256 }}
+          EXPECTED_TOOLCHAIN_ID: ${{ needs.build-site.outputs.toolchain_id }}
+          EXPECTED_TOOLCHAIN_MANIFEST_SHA256: ${{ needs.build-site.outputs.toolchain_manifest_sha256 }}
         run: |
           index_url="${PLAYGROUND_URL%/}/toolchain/index.json"
           identity_url="${PLAYGROUND_URL%/}/site-identity.json"
           for attempt in {1..60}; do
             if curl --fail --silent --show-error --output /tmp/live-toolchain-index.json "$index_url" && \
                curl --fail --silent --show-error --output /tmp/live-site-identity.json "$identity_url"; then
-              actual_id="$(jq -r '.id // empty' /tmp/live-toolchain-index.json)"
-              actual_manifest="$(jq -r '.manifestSha256 // empty' /tmp/live-toolchain-index.json)"
-              actual_site="$(sha256sum /tmp/live-site-identity.json | cut -d ' ' -f 1)"
-              if [[ "$actual_id" == "$EXPECTED_TOOLCHAIN_ID" && \
-                    "$actual_manifest" == "$EXPECTED_TOOLCHAIN_MANIFEST_SHA256" && \
-                    "$actual_site" == "$EXPECTED_SITE_IDENTITY_SHA256" ]]; then
+              actual_id=$(python3 -c 'import json; print(json.load(open("/tmp/live-toolchain-index.json"))["id"])' 2>/dev/null || true)
+              actual_manifest=$(python3 -c 'import json; print(json.load(open("/tmp/live-toolchain-index.json"))["manifestSha256"])' 2>/dev/null || true)
+              actual_site=$(sha256sum /tmp/live-site-identity.json | cut -d ' ' -f 1)
+              if [ "$actual_id" = "$EXPECTED_TOOLCHAIN_ID" ] && \
+                 [ "$actual_manifest" = "$EXPECTED_TOOLCHAIN_MANIFEST_SHA256" ] && \
+                 [ "$actual_site" = "$EXPECTED_SITE_IDENTITY_SHA256" ]; then
                 exit 0
               fi
             fi
@@ -612,49 +277,11 @@ jobs:
           PLAYGROUND_BROWSER: ${{ matrix.browser }}
           PLAYGROUND_EVIDENCE: .cache/pages-live-${{ matrix.browser }}
           PLAYGROUND_URL: ${{ needs.deploy.outputs.page_url }}
-          EXPECTED_SITE_IDENTITY_SHA256: ${{ needs.prepare-site.outputs.site_identity_sha256 }}
-          EXPECTED_TOOLCHAIN_ID: ${{ needs.prepare-site.outputs.toolchain_id }}
-          EXPECTED_TOOLCHAIN_MANIFEST_SHA256: ${{ needs.prepare-site.outputs.toolchain_manifest_sha256 }}
+          EXPECTED_SITE_IDENTITY_SHA256: ${{ needs.build-site.outputs.site_identity_sha256 }}
+          EXPECTED_TOOLCHAIN_ID: ${{ needs.build-site.outputs.toolchain_id }}
+          EXPECTED_TOOLCHAIN_MANIFEST_SHA256: ${{ needs.build-site.outputs.toolchain_manifest_sha256 }}
         run: bash eng/run-browser-lane.sh
-      - name: Resolve live browser job
-        id: live-job
-        shell: bash
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}/attempts/${GITHUB_RUN_ATTEMPT}/jobs?per_page=100" \
-            > artifacts/live-jobs.json
-          python3 infrastructure/eng/actions-delivery.py job-id \
-            --jobs artifacts/live-jobs.json \
-            --name 'pages / verify-live (${{ matrix.browser }})' \
-            --run-id "$GITHUB_RUN_ID" \
-            --run-attempt "$GITHUB_RUN_ATTEMPT" \
-            --head-sha "$GITHUB_SHA" \
-            --github-output "$GITHUB_OUTPUT"
-      - name: Record immutable live evidence
-        shell: bash
-        run: |
-          mkdir -p artifacts/live-evidence
-          python3 infrastructure/eng/delivery-receipt.py live-evidence \
-            --preparation artifacts/dispatch/release-preparation.json \
-            --inputs artifacts/dispatch/inputs.json \
-            --deployment artifacts/deployment/deployment.json \
-            --browser '${{ matrix.browser }}' \
-            --run-id "$GITHUB_RUN_ID" \
-            --run-attempt "$GITHUB_RUN_ATTEMPT" \
-            --job-id '${{ steps.live-job.outputs.job_id }}' \
-            --site-identity-sha256 '${{ needs.prepare-site.outputs.site_identity_sha256 }}' \
-            --toolchain-id '${{ needs.prepare-site.outputs.toolchain_id }}' \
-            --toolchain-manifest-sha256 '${{ needs.prepare-site.outputs.toolchain_manifest_sha256 }}' \
-            --output artifacts/live-evidence/delivery-evidence.json
-      - name: Retain immutable live evidence
-        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
-        with:
-          name: delivery-evidence-playground-${{ matrix.browser }}-${{ github.run_id }}-${{ github.run_attempt }}-${{ steps.live-job.outputs.job_id }}
-          path: artifacts/live-evidence/delivery-evidence.json
-          if-no-files-found: error
-          retention-days: 90
-      - name: Retain live diagnostics
+      - name: Retain live deployment evidence
         if: always()
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:
@@ -662,106 +289,3 @@ jobs:
           path: .cache/pages-live-${{ matrix.browser }}
           if-no-files-found: warn
           retention-days: 14
-
-  complete-delivery:
-    if: inputs.production
-    needs: [prepare-site, deploy, bind-deployment, verify-live]
-    runs-on: ubuntu-24.04
-    timeout-minutes: 15
-    steps:
-      - name: Reject native production reruns
-        shell: bash
-        env:
-          PRODUCTION: ${{ inputs.production }}
-        run: |
-          if [[ "$PRODUCTION" == true && "$GITHUB_RUN_ATTEMPT" != 1 ]]; then
-            echo 'Native production reruns are not supported. Resume through a fresh coordinator dispatch so retained candidates are authenticated.' >&2
-            exit 1
-          fi
-
-      - name: Check out approved release infrastructure
-        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
-        with:
-          ref: ${{ inputs.infrastructure_commit }}
-          persist-credentials: false
-          path: infrastructure
-      - name: Download coordinated dispatch evidence
-        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
-        with:
-          name: ${{ inputs.dispatch_artifact }}
-          path: artifacts/dispatch
-      - name: Download resolved toolchain candidate
-        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
-        with:
-          name: ${{ inputs.resolved_toolchain_artifact }}
-          path: artifacts/toolchain
-      - name: Download resolved site candidate
-        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
-        with:
-          name: ${{ needs.prepare-site.outputs.resolved_site_artifact }}
-          path: artifacts/site
-      - name: Download exact deployment coordinates
-        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
-        with:
-          name: ${{ needs.bind-deployment.outputs.deployment_artifact }}
-          path: artifacts/deployment
-      - name: Collect live evidence coordinates
-        shell: bash
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}/attempts/${GITHUB_RUN_ATTEMPT}/jobs?per_page=100" \
-            > artifacts/completion-jobs.json
-          gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}/artifacts?per_page=100" \
-            > artifacts/completion-artifacts.json
-          for browser in chromium firefox webkit; do
-            job_id="$(python3 infrastructure/eng/actions-delivery.py job-id \
-              --jobs artifacts/completion-jobs.json \
-              --name "pages / verify-live ($browser)" \
-              --run-id "$GITHUB_RUN_ID" \
-              --run-attempt "$GITHUB_RUN_ATTEMPT" \
-              --head-sha "$GITHUB_SHA")"
-            name="delivery-evidence-playground-${browser}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-${job_id}"
-            gh run download "$GITHUB_RUN_ID" \
-              --repo "$GITHUB_REPOSITORY" \
-              --name "$name" \
-              --dir "artifacts/evidence/$browser"
-          done
-          python3 infrastructure/eng/actions-delivery.py completion-metadata \
-            --jobs artifacts/completion-jobs.json \
-            --artifacts artifacts/completion-artifacts.json \
-            --evidence-directory artifacts/evidence \
-            --deployment artifacts/deployment/deployment.json \
-            --repository "$GITHUB_REPOSITORY" \
-            --run-id "$GITHUB_RUN_ID" \
-            --run-attempt "$GITHUB_RUN_ATTEMPT" \
-            --producer-job-name 'pages / complete-delivery' \
-            --live-job-prefix 'pages / verify-live' \
-            --head-sha "$GITHUB_SHA" \
-            --dispatch-attempt-identity '${{ inputs.dispatch_attempt_identity }}' \
-            --site-identity-sha256 '${{ needs.prepare-site.outputs.site_identity_sha256 }}' \
-            --toolchain-id '${{ needs.prepare-site.outputs.toolchain_id }}' \
-            --toolchain-manifest-sha256 '${{ needs.prepare-site.outputs.toolchain_manifest_sha256 }}' \
-            --output artifacts/completion-metadata.json
-      - name: Record immutable delivery completion
-        shell: bash
-        run: |
-          mkdir -p artifacts/completion
-          python3 infrastructure/eng/delivery-receipt.py completion \
-            --preparation artifacts/dispatch/release-preparation.json \
-            --inputs artifacts/dispatch/inputs.json \
-            --metadata artifacts/completion-metadata.json \
-            --toolchain-receipt artifacts/toolchain/delivery-candidate-receipt.json \
-            --site-receipt artifacts/site/delivery-candidate-receipt.json \
-            --run-id "$GITHUB_RUN_ID" \
-            --run-attempt "$GITHUB_RUN_ATTEMPT" \
-            --actor-id "$GITHUB_ACTOR_ID" \
-            --output artifacts/completion/delivery-completion-receipt.json
-      - name: Retain immutable delivery completion
-        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
-        with:
-          name: delivery-completion-playground-${{ github.run_id }}-${{ github.run_attempt }}
-          path: artifacts/completion/delivery-completion-receipt.json
-          if-no-files-found: error
-          retention-days: 90
