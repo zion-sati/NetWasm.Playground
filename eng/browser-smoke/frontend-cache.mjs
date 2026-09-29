@@ -53,19 +53,52 @@ try {
     if (!loaded.available || loaded.entries.length !== 3 || loaded.totalBytes !== 6)
       throw Error('reload/merge failed');
 
+    const runtimeDescriptor = {
+      schema: 'runtime-materialization-cache-v1',
+      namespace: 'f'.repeat(64),
+      slot: '1'.repeat(64),
+      key: '2'.repeat(64),
+    };
+    const runtimePayload = new Uint8Array([10, 20, 30, 40]);
+    const digest = async payload => new Uint8Array(
+      await crypto.subtle.digest('SHA-256', payload));
+    if (!await reopened.writeRuntime(runtimeDescriptor, runtimePayload,
+      await digest(runtimePayload))) throw Error('runtime write failed');
+    let runtime = await reopened.loadRuntime(runtimeDescriptor);
+    if (!runtime.hit || runtime.payload.join(',') !== '10,20,30,40')
+      throw Error('runtime hit failed');
+    const replacementDescriptor = { ...runtimeDescriptor, key: '3'.repeat(64) };
+    if ((await reopened.loadRuntime(replacementDescriptor)).hit)
+      throw Error('stale runtime key produced a hit');
+    const replacementPayload = new Uint8Array([50, 60]);
+    if (!await reopened.writeRuntime(replacementDescriptor, replacementPayload,
+      await digest(replacementPayload))) throw Error('runtime replacement failed');
+    runtime = await reopened.loadRuntime(replacementDescriptor);
+    if (!runtime.hit || runtime.payload.join(',') !== '50,60')
+      throw Error('runtime replacement did not become authoritative');
+
     const database = await new Promise((resolve, reject) => {
       const request = indexedDB.open(databaseName, 2);
       request.onsuccess = () => resolve(request.result);
       request.onerror = () => reject(request.error);
     });
     const transaction = database.transaction('artifacts', 'readwrite');
-    transaction.objectStore('artifacts').put({
+    const artifacts = transaction.objectStore('artifacts');
+    artifacts.put({
       id: 'invalid',
       partition: `${toolchain}/frontend-artifact-cache-v4/${namespace}`,
       key: 'not-a-hash',
       payload: new Uint8Array([9]).buffer,
       checksum: new Uint8Array(1).buffer,
     });
+    const runtimeId = `${toolchain}/${replacementDescriptor.schema}/${replacementDescriptor.namespace}/runtime/${replacementDescriptor.slot}`;
+    const storedRuntime = await new Promise((resolve, reject) => {
+      const request = artifacts.get(runtimeId);
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
+    storedRuntime.payload = new Uint8Array([99, 60]).buffer;
+    artifacts.put(storedRuntime);
     await new Promise((resolve, reject) => {
       transaction.oncomplete = resolve;
       transaction.onerror = () => reject(transaction.error);
@@ -74,6 +107,8 @@ try {
     database.close();
     loaded = await reopened.load(descriptor);
     if (loaded.entries.length !== 3) throw Error('corruption fallback failed');
+    runtime = await reopened.loadRuntime(replacementDescriptor);
+    if (runtime.hit || !runtime.available) throw Error('corrupt runtime did not become a miss');
     reopened.close();
 
     const pressure = createFrontendCache(toolchain, {
@@ -119,7 +154,8 @@ try {
     });
     upgraded.close();
     lifecycle.close();
-    return { mergedEntries: 3, pressureBytes: loaded.totalBytes, blockedFallback: true };
+    return { mergedEntries: 3, runtimeReplacement: true,
+      runtimeCorruptionMiss: true, pressureBytes: loaded.totalBytes, blockedFallback: true };
   });
   await page.locator('#clear-cache').click();
   await page.locator('#status').filter({ hasText: 'Compilation cache cleared' })

@@ -55,6 +55,21 @@ function partition(toolchainId, descriptor) {
   return `${toolchainId}/${descriptor.schema}/${descriptor.namespace}`;
 }
 
+function runtimeLocation(toolchainId, descriptor) {
+  const selectedPartition = partition(toolchainId, descriptor);
+  if (!validHash(descriptor?.slot) || !validHash(descriptor?.key))
+    throw Error('Invalid runtime cache identity');
+  return {
+    partition: selectedPartition,
+    id: `${selectedPartition}/runtime/${descriptor.slot}`,
+  };
+}
+
+async function sha256(value) {
+  if (!globalThis.crypto?.subtle) throw Error('SHA-256 is unavailable');
+  return new Uint8Array(await crypto.subtle.digest('SHA-256', value));
+}
+
 function validRecord(record, expectedPartition, payloadLimit) {
   const payload = bytes(record?.payload), checksum = bytes(record?.checksum);
   return record?.partition === expectedPartition && validHash(record?.key) &&
@@ -201,6 +216,35 @@ export function createFrontendCache(toolchainId, policyOverrides) {
       .then(value => database = value)
       .catch(error => { reset(); throw error; });
     return opening;
+  };
+  const deleteRuntimeRecord = async (location, observed) => {
+    try {
+      const db = await open();
+      const transaction = db.transaction(
+        [artifactStoreName, accessStoreName, accountingStoreName],
+        'readwrite', { durability: 'relaxed' });
+      const completed = transactionComplete(transaction);
+      const artifacts = transaction.objectStore(artifactStoreName);
+      const current = await requestResult(artifacts.get(location.id));
+      if (current && current.key === observed?.key &&
+          equalBytes(current.payload, observed?.payload) &&
+          equalBytes(current.checksum, observed?.checksum)) {
+        artifacts.delete(location.id);
+        transaction.objectStore(accessStoreName).delete(location.id);
+        const accounting = transaction.objectStore(accountingStoreName);
+        const totals = await requestResult(accounting.get(totalsKey)) ??
+          { id: totalsKey, count: 0, totalBytes: 0 };
+        const payload = bytes(current.payload);
+        accounting.put({
+          id: totalsKey,
+          count: Math.max(0, totals.count - 1),
+          totalBytes: Math.max(0, totals.totalBytes - (payload?.byteLength ?? 0)),
+        });
+      }
+      await completed;
+    } catch {
+      // A corrupt cache entry is an optional miss. Compilation remains authoritative.
+    }
   };
   return {
     async load(descriptor) {
@@ -352,6 +396,117 @@ export function createFrontendCache(toolchainId, policyOverrides) {
           count: requiredCount,
           totalBytes: requiredBytes,
         });
+        await completed;
+        return true;
+      } catch {
+        return false;
+      }
+    },
+
+    async loadRuntime(descriptor) {
+      const location = runtimeLocation(toolchainId, descriptor);
+      try {
+        const db = await open();
+        const transaction = db.transaction(artifactStoreName, 'readonly');
+        const completed = transactionComplete(transaction);
+        const record = await requestResult(
+          transaction.objectStore(artifactStoreName).get(location.id));
+        await completed;
+        if (!record) return { hit: false, available: true };
+        if (record.key !== descriptor.key) return { hit: false, available: true };
+        const payload = bytes(record.payload), checksum = bytes(record.checksum);
+        if (record.id !== location.id || record.partition !== location.partition ||
+            record.slot !== descriptor.slot || !payload ||
+            payload.byteLength > policy.maximumPayloadBytes ||
+            checksum?.byteLength !== 32 ||
+            !equalBytes(await sha256(payload), checksum)) {
+          await deleteRuntimeRecord(location, record);
+          return { hit: false, available: true };
+        }
+        const accessTransaction = db.transaction(accessStoreName, 'readwrite',
+          { durability: 'relaxed' });
+        accessTransaction.objectStore(accessStoreName)
+          .put({ id: location.id, accessedAt: Date.now() });
+        await transactionComplete(accessTransaction);
+        return {
+          hit: true,
+          available: true,
+          payload: payload.slice(),
+          checksum: checksum.slice(),
+        };
+      } catch {
+        reset(database);
+        return { hit: false, available: false };
+      }
+    },
+
+    async writeRuntime(descriptor, payloadValue, checksumValue) {
+      const location = runtimeLocation(toolchainId, descriptor);
+      const payload = bytes(payloadValue), checksum = bytes(checksumValue);
+      if (!payload || payload.byteLength > policy.maximumPayloadBytes ||
+          checksum?.byteLength !== 32 ||
+          !equalBytes(await sha256(payload), checksum)) return false;
+      const record = {
+        id: location.id,
+        partition: location.partition,
+        slot: descriptor.slot,
+        key: descriptor.key,
+        payload: payload.slice().buffer,
+        checksum: checksum.slice().buffer,
+      };
+      try {
+        const db = await open();
+        const transaction = db.transaction(
+          [artifactStoreName, accessStoreName, accountingStoreName],
+          'readwrite', { durability: 'relaxed' });
+        const completed = transactionComplete(transaction);
+        const artifacts = transaction.objectStore(artifactStoreName);
+        const access = transaction.objectStore(accessStoreName);
+        const accounting = transaction.objectStore(accountingStoreName);
+        const totals = await requestResult(accounting.get(totalsKey)) ??
+          { id: totalsKey, count: 0, totalBytes: 0 };
+        const existing = await requestResult(artifacts.get(location.id));
+        const existingPayload = bytes(existing?.payload);
+        let requiredCount = totals.count + (existing ? 0 : 1);
+        let requiredBytes = totals.totalBytes - (existingPayload?.byteLength ?? 0) +
+          payload.byteLength;
+        if (requiredCount > policy.maximumEntries || requiredBytes > policy.maximumBytes) {
+          const cursorRequest = access.index(accessedAtIndex).openCursor();
+          await new Promise((resolve, reject) => {
+            cursorRequest.onerror = () =>
+              reject(cursorRequest.error ?? Error('Runtime cache eviction failed'));
+            cursorRequest.onsuccess = () => {
+              const cursor = cursorRequest.result;
+              if (!cursor || requiredCount <= policy.maximumEntries &&
+                  requiredBytes <= policy.maximumBytes) {
+                resolve();
+                return;
+              }
+              if (cursor.value.id === location.id) { cursor.continue(); return; }
+              const get = artifacts.get(cursor.value.id);
+              get.onerror = () =>
+                reject(get.error ?? Error('Runtime cache eviction read failed'));
+              get.onsuccess = () => {
+                const oldPayload = bytes(get.result?.payload);
+                if (get.result) artifacts.delete(cursor.value.id);
+                cursor.delete();
+                if (oldPayload) {
+                  requiredCount--;
+                  requiredBytes -= oldPayload.byteLength;
+                }
+                cursor.continue();
+              };
+            };
+          });
+        }
+        if (requiredCount > policy.maximumEntries || requiredBytes > policy.maximumBytes) {
+          transaction.abort();
+          await completed.catch(() => {});
+          return false;
+        }
+        artifacts.put(record);
+        access.put({ id: location.id, accessedAt: Date.now() });
+        accounting.put({ id: totalsKey, count: requiredCount, totalBytes: requiredBytes });
         await completed;
         return true;
       } catch {
