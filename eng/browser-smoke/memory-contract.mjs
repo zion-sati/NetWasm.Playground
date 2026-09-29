@@ -12,6 +12,7 @@ const browser = await browserType.launch({ headless: true });
 try {
   const page = await browser.newPage();
   await page.goto(url);
+  await page.locator('[data-toolchain-preload="complete"]').waitFor({ timeout: 240_000 });
   const result = await page.evaluate(async ({ root, sources }) => {
     const index = await (await fetch(new URL('toolchain/index.json', root))).json();
     const assetRoot = new URL(`toolchain/${index.id}/`, root);
