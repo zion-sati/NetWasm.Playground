@@ -73,6 +73,9 @@ try {
   await (await download).saveAs(componentPath);
   const component = readFileSync(componentPath);
   const afterCold = await runtimeStorage();
+  await page.reload();
+  await page.locator('.monaco-editor').waitFor();
+  await page.getByLabel('Optimization', { exact: true }).selectOption(optimization);
   const warm = await compile(43);
   const afterWarm = await runtimeStorage();
   const results = {

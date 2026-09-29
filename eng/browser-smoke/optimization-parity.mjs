@@ -7,6 +7,7 @@ if (!output) throw Error('PLAYGROUND_EVIDENCE is required');
 mkdirSync(output, { recursive: true });
 
 const modes = ['none', 'O0', 'O1', 'O2', 'O3', 'Os', 'Oz'];
+const example = process.env.PLAYGROUND_EXAMPLE ?? 'hello';
 const browser = await browserType.launch({ headless: true });
 try {
   const page = await browser.newPage({ acceptDownloads: true });
@@ -16,9 +17,7 @@ try {
   await page.locator('.monaco-editor').waitFor();
   await page.locator('#clear-cache').click();
   await page.locator('#status').filter({ hasText: 'Compilation cache cleared' }).waitFor();
-  await page.locator('#editor .view-lines').click({ position: { x: 80, y: 12 } });
-  await page.keyboard.press('ControlOrMeta+A');
-  await page.keyboard.insertText('using System;\nConsole.WriteLine(42);\n');
+  await page.getByLabel('Example', { exact: true }).selectOption(example);
 
   const results = [];
   for (const mode of modes) {
@@ -44,7 +43,7 @@ try {
     console.log(`PASS: ${mode} ${result.bytes} bytes ${result.sha256}`);
   }
   if (errors.length) throw Error(`Page errors: ${JSON.stringify(errors)}`);
-  writeFileSync(`${output}/results.json`, JSON.stringify({ passed: true, results, errors }, null, 2));
+  writeFileSync(`${output}/results.json`, JSON.stringify({ passed: true, example, results, errors }, null, 2));
 } finally {
   await browser.close();
 }
