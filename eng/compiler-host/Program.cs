@@ -60,10 +60,11 @@ public static partial class Program
         int Kind, EntryPointAbiInfo? Abi);
     private sealed record RuntimeLinkAssetInfo(string Path, string Sha256);
     private sealed record RuntimeSystemLibrary(string Path, string Sha256);
+    private sealed record RuntimeCacheInfo(string schema, string @namespace, string slot, string key);
     private sealed record RuntimeLinkPlanInfo(string[] Arguments, string[] OptimizationArguments,
         RuntimeLinkAssetInfo[] Inputs, string RuntimeAbi,
         string ToolchainFingerprint, long RuntimeGlobalBase, long HeapBase, long InitialMemorySizeBytes,
-        long MaximumMemorySizeBytes);
+        long MaximumMemorySizeBytes, RuntimeCacheInfo Cache);
     private sealed record TextModuleInfo(string OutputPath, string Text);
     private sealed record ToolInvocationInfo(string ToolId, string[] Arguments);
     private sealed record ExportPruningInfo(string InputPath, string OutputPath, string Prefix);
@@ -134,7 +135,8 @@ public static partial class Program
         int CatalogCaseCount,
         string ComponentContract,
         string RuntimeManifest,
-        string RuntimeSystemLibrariesJson);
+        string RuntimeSystemLibrariesJson,
+        RuntimeWasmOptimization Optimization);
     private static PendingFrontendCompilation? pendingFrontendCompilation;
     private static FrontendArtifactCachePublication? pendingFrontendPublication;
     private static FrontendArtifactCacheBatch? pendingFrontendBatch;
@@ -189,7 +191,20 @@ public static partial class Program
         plan.OptimizationArguments.ToArray(),
         plan.Inputs.Select(value => new RuntimeLinkAssetInfo(value.Path, value.Sha256)).ToArray(), plan.RuntimeAbi,
         plan.ToolchainFingerprint, plan.RuntimeGlobalBase, plan.HeapBase, plan.InitialMemorySizeBytes,
-        plan.MaximumMemorySizeBytes);
+        plan.MaximumMemorySizeBytes, new(plan.Cache.Schema, plan.Cache.Namespace,
+            plan.Cache.Slot, plan.Cache.Key));
+
+    private static RuntimeWasmOptimization ParseOptimization(string optimization) => optimization switch
+    {
+        "none" => RuntimeWasmOptimization.None,
+        "O0" => RuntimeWasmOptimization.O0,
+        "O1" => RuntimeWasmOptimization.O1,
+        "O2" => RuntimeWasmOptimization.O2,
+        "O3" => RuntimeWasmOptimization.O3,
+        "Os" => RuntimeWasmOptimization.Os,
+        "Oz" => RuntimeWasmOptimization.Oz,
+        _ => throw new ArgumentOutOfRangeException(nameof(optimization), "Unsupported optimization mode."),
+    };
 
     private static CoreLinkPlanInfo Describe(BrowserComponentCoreModuleLinkPlan plan) => new(
         plan.TextModules.Select(value => new TextModuleInfo(value.OutputPath, value.Text)).ToArray(),
@@ -200,63 +215,63 @@ public static partial class Program
 
     [JSExport]
     public static string Compile(string source, string reference, string supportJson, string implementation, string witJson, string witBytes, string runtimeManifest,
-        string runtimeSystemLibrariesJson, string languageVersion, bool updatedMemorySafetyRules)
+        string runtimeSystemLibrariesJson, string languageVersion, bool updatedMemorySafetyRules, string optimization)
         => CompileRecipe(source, reference, supportJson, implementation, witJson, witBytes, runtimeManifest,
-            runtimeSystemLibrariesJson, "{}", "{}", languageVersion, updatedMemorySafetyRules);
+            runtimeSystemLibrariesJson, "{}", "{}", languageVersion, updatedMemorySafetyRules, optimization);
 
     [JSExport]
     public static string CompileRecipe(string source, string reference, string supportJson, string implementation, string witJson, string witBytes, string runtimeManifest,
         string runtimeSystemLibrariesJson, string additionalReferencesJson, string additionalImplementationsJson,
-        string languageVersion, bool updatedMemorySafetyRules)
+        string languageVersion, bool updatedMemorySafetyRules, string optimization)
         => CompileCore(source, reference, supportJson, implementation, witJson, witBytes, runtimeManifest,
             runtimeSystemLibrariesJson, additionalReferencesJson, additionalImplementationsJson, null, false,
-            languageVersion, updatedMemorySafetyRules);
+            languageVersion, updatedMemorySafetyRules, optimization);
 
     [JSExport]
     public static string CompileHttpRecipe(string source, string reference, string supportJson, string implementation, string witJson, string witBytes, string runtimeManifest,
         string runtimeSystemLibrariesJson, string additionalReferencesJson, string additionalImplementationsJson,
-        string languageVersion, bool updatedMemorySafetyRules)
+        string languageVersion, bool updatedMemorySafetyRules, string optimization)
         => CompileCore(source, reference, supportJson, implementation, witJson, witBytes, runtimeManifest,
             runtimeSystemLibrariesJson, additionalReferencesJson, additionalImplementationsJson, null, false,
-            languageVersion, updatedMemorySafetyRules, useAsyncPlatform: true);
+            languageVersion, updatedMemorySafetyRules, optimization, useAsyncPlatform: true);
 
     [JSExport]
     public static string CompileGeneratedRecipe(string source, string reference, string supportJson, string implementation, string witJson, string witBytes, string runtimeManifest,
         string runtimeSystemLibrariesJson, string additionalReferencesJson, string additionalImplementationsJson, string trustedRecipe, bool includeGeneratedSourceText,
-        string languageVersion, bool updatedMemorySafetyRules)
+        string languageVersion, bool updatedMemorySafetyRules, string optimization)
         => CompileCore(source, reference, supportJson, implementation, witJson, witBytes, runtimeManifest,
             runtimeSystemLibrariesJson, additionalReferencesJson, additionalImplementationsJson, trustedRecipe, includeGeneratedSourceText,
-            languageVersion, updatedMemorySafetyRules);
+            languageVersion, updatedMemorySafetyRules, optimization);
 
 #if FRONTEND_CACHE_TRANSPORT
     [JSExport]
     public static string PrepareRecipe(string source, string reference, string supportJson, string implementation, string witJson, string witBytes, string runtimeManifest,
         string runtimeSystemLibrariesJson, string additionalReferencesJson, string additionalImplementationsJson,
-        string languageVersion, bool updatedMemorySafetyRules)
+        string languageVersion, bool updatedMemorySafetyRules, string optimization)
         => CompileCore(source, reference, supportJson, implementation, witJson, witBytes, runtimeManifest,
             runtimeSystemLibrariesJson, additionalReferencesJson, additionalImplementationsJson, null, false,
-            languageVersion, updatedMemorySafetyRules, prepareFrontendCache: true);
+            languageVersion, updatedMemorySafetyRules, optimization, prepareFrontendCache: true);
 
     [JSExport]
     public static string PrepareHttpRecipe(string source, string reference, string supportJson, string implementation, string witJson, string witBytes, string runtimeManifest,
         string runtimeSystemLibrariesJson, string additionalReferencesJson, string additionalImplementationsJson,
-        string languageVersion, bool updatedMemorySafetyRules)
+        string languageVersion, bool updatedMemorySafetyRules, string optimization)
         => CompileCore(source, reference, supportJson, implementation, witJson, witBytes, runtimeManifest,
             runtimeSystemLibrariesJson, additionalReferencesJson, additionalImplementationsJson, null, false,
-            languageVersion, updatedMemorySafetyRules, useAsyncPlatform: true, prepareFrontendCache: true);
+            languageVersion, updatedMemorySafetyRules, optimization, useAsyncPlatform: true, prepareFrontendCache: true);
 
     [JSExport]
     public static string PrepareGeneratedRecipe(string source, string reference, string supportJson, string implementation, string witJson, string witBytes, string runtimeManifest,
         string runtimeSystemLibrariesJson, string additionalReferencesJson, string additionalImplementationsJson, string trustedRecipe,
-        string languageVersion, bool updatedMemorySafetyRules)
+        string languageVersion, bool updatedMemorySafetyRules, string optimization)
         => CompileCore(source, reference, supportJson, implementation, witJson, witBytes, runtimeManifest,
             runtimeSystemLibrariesJson, additionalReferencesJson, additionalImplementationsJson, trustedRecipe, false,
-            languageVersion, updatedMemorySafetyRules, prepareFrontendCache: true);
+            languageVersion, updatedMemorySafetyRules, optimization, prepareFrontendCache: true);
 #endif
 
     private static string CompileCore(string source, string reference, string supportJson, string implementation, string witJson, string witBytes, string runtimeManifest,
         string runtimeSystemLibrariesJson, string additionalReferencesJson, string additionalImplementationsJson, string? trustedRecipe, bool includeGeneratedSourceText,
-        string languageVersion, bool updatedMemorySafetyRules,
+        string languageVersion, bool updatedMemorySafetyRules, string optimization,
         bool useAsyncPlatform = false
 #if FRONTEND_CACHE_TRANSPORT
         , bool prepareFrontendCache = false
@@ -275,6 +290,7 @@ public static partial class Program
             if (languageVersion is not ("15" or "preview") ||
                 (updatedMemorySafetyRules && languageVersion != "preview"))
                 return Serialize(new(1, false, "request", "unsupported-language-settings", true, []));
+            var runtimeOptimization = ParseOptimization(optimization);
             var tunit = trustedRecipe == "tunit";
             Stage("roslyn");
             var started = Stopwatch.GetTimestamp();
@@ -370,7 +386,7 @@ public static partial class Program
                     pendingFrontendCompilation = new(session, preparation, [], pe.ToArray(), timings.ToArray(),
                         generatedSources, generatorDiagnostics.Take(128).Select(Describe).ToArray(), trustedRecipe,
                         tunit ? CountCatalogCases(generatedCompilation) : 0, componentContract, runtimeManifest,
-                        runtimeSystemLibrariesJson);
+                        runtimeSystemLibrariesJson, runtimeOptimization);
                     return Serialize(new(1, true, timings: timings.ToArray(), generatedSources: generatedSources,
                         generatorDiagnostics: generatorDiagnostics.Take(128).Select(Describe).ToArray(),
                         trustedRecipe: trustedRecipe, catalogCaseCount: tunit ? CountCatalogCases(generatedCompilation) : 0,
@@ -392,7 +408,8 @@ public static partial class Program
                 .Select(asset => new RuntimeLinkPlanAsset(asset.Path, asset.Sha256)).ToImmutableArray();
             var runtimeLinkPlan = RuntimeLinkPlanner.Plan(new(runtimeManifest, "wasm32", compiled.StaticDataEnd,
                 AssetRoot: "/netwasm-link/runtime", OutputPath: "/netwasm-link/runtime.wasm",
-                MaximumMemorySizeBytes: guestMemoryMaximum, SystemLibraries: systemLibraries));
+                MaximumMemorySizeBytes: guestMemoryMaximum, SystemLibraries: systemLibraries,
+                Optimization: runtimeOptimization));
             var coreLinkPlan = BrowserComponentCoreModules.CreateLinkPlan(
                 new("/netwasm-link/application.wasm", "/netwasm-link/runtime.wasm", "/netwasm-link/linked.wasm",
                     ComponentTarget.Wasm32Wasi02, compiled.EntryPoint.Abi),
@@ -449,7 +466,8 @@ public static partial class Program
                 .Select(asset => new RuntimeLinkPlanAsset(asset.Path, asset.Sha256)).ToImmutableArray();
             var runtimeLinkPlan = RuntimeLinkPlanner.Plan(new(pending.RuntimeManifest, "wasm32", compiled.StaticDataEnd,
                 AssetRoot: "/netwasm-link/runtime", OutputPath: "/netwasm-link/runtime.wasm",
-                MaximumMemorySizeBytes: guestMemoryMaximum, SystemLibraries: systemLibraries));
+                MaximumMemorySizeBytes: guestMemoryMaximum, SystemLibraries: systemLibraries,
+                Optimization: pending.Optimization));
             var coreLinkPlan = BrowserComponentCoreModules.CreateLinkPlan(
                 new("/netwasm-link/application.wasm", "/netwasm-link/runtime.wasm", "/netwasm-link/linked.wasm",
                     ComponentTarget.Wasm32Wasi02, compiled.EntryPoint.Abi),

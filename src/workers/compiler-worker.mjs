@@ -7,15 +7,24 @@ const recipes = new Map();
 const coreRecipes = new Set(['hello', 'datetime', 'csharp15-tour']);
 const validStringArray = (value, maximumLength = 256) => Array.isArray(value) &&
   value.length <= maximumLength && value.every(item => typeof item === 'string' && item.length <= 4096);
-function validateRuntimeLinkPlan(plan) {
+function validateRuntimeLinkPlan(plan, optimization) {
+  const cache = plan?.Cache;
   if (!plan || !validStringArray(plan.Arguments) || !validStringArray(plan.OptimizationArguments) ||
       !Array.isArray(plan.Inputs) || plan.Inputs.length > 128 ||
       !Number.isSafeInteger(plan.MaximumMemorySizeBytes) || plan.MaximumMemorySizeBytes <= 0 ||
-      plan.MaximumMemorySizeBytes % 65536 !== 0)
+      plan.MaximumMemorySizeBytes % 65536 !== 0 ||
+      cache?.schema !== 'runtime-materialization-cache-v1' ||
+      ![cache.namespace, cache.slot, cache.key]
+        .every(value => typeof value === 'string' && /^[a-f0-9]{64}$/.test(value)))
     throw Error('Invalid runtime link plan');
   if (!plan.Inputs.every(input => input && typeof input.Path === 'string' && input.Path.length <= 4096 &&
       typeof input.Sha256 === 'string' && /^[a-f0-9]{64}$/i.test(input.Sha256)))
     throw Error('Invalid runtime link plan');
+  const optimizationFlags = plan.OptimizationArguments
+    .filter(argument => /^-O(?:[0-3]|s|z)$/.test(argument));
+  if (optimization === 'none' ? plan.OptimizationArguments.length !== 0 :
+      optimizationFlags.length !== 1 || optimizationFlags[0] !== `-${optimization}`)
+    throw Error('Runtime optimization plan does not match the request');
   return plan;
 }
 async function recipeInputs(id) {
@@ -95,7 +104,7 @@ async function initialize() {
 serveWorker(async (data, emit) => {
   report = emit;
   if (data.operation !== 'compile' && data.operation !== 'prune' && data.operation !== 'initialize') throw Error('Unsupported compiler operation');
-  if (data.operation === 'compile' && (![...coreRecipes, 'http', 'allocation', 'linq', 'async-linq', 'pipelines', 'web-encoding', 'xml', 'json-dom', 'json-generated', 'tunit', 'regex', 'di', 'logging', 'hashing'].includes(data.recipe) || typeof data.source !== 'string' || data.source.length > 65536 || new TextEncoder().encode(data.source).length > 65536 || !['15', 'preview'].includes(data.language) || typeof data.updatedMemorySafetyRules !== 'boolean' || (data.updatedMemorySafetyRules && data.language !== 'preview'))) throw Error('Invalid compiler source, recipe, or language settings');
+  if (data.operation === 'compile' && (![...coreRecipes, 'http', 'allocation', 'linq', 'async-linq', 'pipelines', 'web-encoding', 'xml', 'json-dom', 'json-generated', 'tunit', 'regex', 'di', 'logging', 'hashing'].includes(data.recipe) || typeof data.source !== 'string' || data.source.length > 65536 || new TextEncoder().encode(data.source).length > 65536 || !['15', 'preview'].includes(data.language) || !['none', 'O0', 'O1', 'O2', 'O3', 'Os', 'Oz'].includes(data.optimization) || typeof data.updatedMemorySafetyRules !== 'boolean' || (data.updatedMemorySafetyRules && data.language !== 'preview'))) throw Error('Invalid compiler source, recipe, language, or optimization settings');
   const module = data.operation === 'prune' ? (() => {
     if (!(data.module instanceof Uint8Array) || data.module.length > 5 * 1048576 || typeof data.prefix !== 'string' || data.prefix.length > 255) throw Error('Invalid export pruning request');
     return data.module.slice();
@@ -119,15 +128,15 @@ serveWorker(async (data, emit) => {
   if (['json-generated', 'tunit', 'di', 'logging'].includes(data.recipe) && typeof program.CompileGeneratedRecipe !== 'function') throw Error('Rebuild the compiler host for source generation');
   const generated = ['json-generated', 'tunit', 'di', 'logging'].includes(data.recipe);
   const trustedRecipe = data.recipe === 'tunit' ? 'tunit' : data.recipe === 'di' ? 'di' : data.recipe === 'logging' ? 'logging' : 'json';
-  const languageInputs = [data.language, data.updatedMemorySafetyRules];
+  const compilationSettings = [data.language, data.updatedMemorySafetyRules, data.optimization];
   const supportsFrontendCache = data.frontendCache !== false && frontendCache && typeof program.PrepareRecipe === 'function' &&
     typeof program.PrepareGeneratedRecipe === 'function' && typeof program.ImportFrontendArtifact === 'function' &&
     typeof program.CompilePreparedRecipe === 'function';
   let result;
   if (supportsFrontendCache) {
     const prepared = JSON.parse(generated
-      ? program.PrepareGeneratedRecipe(data.source, ...recipeCompilerInputs, ...additional, trustedRecipe, ...languageInputs)
-      : program.PrepareRecipe(data.source, ...recipeCompilerInputs, ...additional, ...languageInputs));
+      ? program.PrepareGeneratedRecipe(data.source, ...recipeCompilerInputs, ...additional, trustedRecipe, ...compilationSettings)
+      : program.PrepareRecipe(data.source, ...recipeCompilerInputs, ...additional, ...compilationSettings));
     if (!prepared.frontendCache) result = prepared;
     else {
       report({ stage: 'cache-read', state: 'running' });
@@ -178,12 +187,12 @@ serveWorker(async (data, emit) => {
       };
     }
   } else result = JSON.parse(generated
-    ? program.CompileGeneratedRecipe(data.source, ...recipeCompilerInputs, ...additional, trustedRecipe, false, ...languageInputs)
-    : typeof program.CompileRecipe === 'function' ? program.CompileRecipe(data.source, ...recipeCompilerInputs, ...additional, ...languageInputs)
-        : program.Compile(data.source, ...recipeCompilerInputs, ...languageInputs));
+    ? program.CompileGeneratedRecipe(data.source, ...recipeCompilerInputs, ...additional, trustedRecipe, false, ...compilationSettings)
+    : typeof program.CompileRecipe === 'function' ? program.CompileRecipe(data.source, ...recipeCompilerInputs, ...additional, ...compilationSettings)
+        : program.Compile(data.source, ...recipeCompilerInputs, ...compilationSettings));
   if (typeof result.application === 'string') result.application = fromBase64(result.application);
   if (typeof result.pe === 'string') result.pe = fromBase64(result.pe);
-  if (result.success) validateRuntimeLinkPlan(result.runtimeLinkPlan);
+  if (result.success) validateRuntimeLinkPlan(result.runtimeLinkPlan, data.optimization);
   result.hostLinearMemoryBytes = runtime.Module?.HEAPU8?.buffer?.byteLength ?? null;
   return result;
 });

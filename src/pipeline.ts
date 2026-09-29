@@ -1,6 +1,7 @@
 import type { CompilationResult, PipelineEvent, RunResult, SourceSnapshot, StageTiming, ToolchainPreloadProgress } from './contracts';
 import { WorkerChannel } from './worker-channel';
 import { optimizationArguments, optimizationModes } from './optimization';
+import { createFrontendCache } from './workers/frontend-cache.mjs';
 const basename = (path: string) => path.slice(path.lastIndexOf('/') + 1);
 const compilerTimeoutMilliseconds = 300_000;
 type AssetReceipt = { sha256: string; bytes: number; bundle?: string; offset?: number };
@@ -14,6 +15,7 @@ export class PlaygroundPipeline {
   private rootInitialization?: Promise<void>;
   private manifest?: ToolchainManifest;
   private toolchainId?: string;
+  private runtimeCache?: ReturnType<typeof createFrontendCache>;
   private channelInitializations = new Map<string, Promise<void>>();
   private abort?: AbortController;
   private epoch = 0;
@@ -67,6 +69,7 @@ export class PlaygroundPipeline {
       const index = await response.json();
       if (!/^[a-f0-9]{64}$/.test(index.id)) throw new Error('Invalid toolchain version');
       this.toolchainId = index.id;
+      this.runtimeCache ??= createFrontendCache(index.id);
       const root = new URL(`${index.id}/`, base);
       const manifestResponse = await fetch(new URL('asset-manifest.json', root), { signal, cache: 'force-cache' });
       if (!manifestResponse.ok) throw new Error('Toolchain manifest unavailable');
@@ -246,18 +249,49 @@ export class PlaygroundPipeline {
       const compilation = await this.stage('compile', timings, () => this.channel('compiler').request({
         operation: 'compile', recipe: snapshot.recipeId, source: snapshot.source,
         language: snapshot.language, updatedMemorySafetyRules: snapshot.updatedMemorySafetyRules,
+        optimization,
       }, [], compilerTimeoutMilliseconds));
       for (const timing of compilation.timings ?? []) this.emit({ type: 'stage', stage: timing.stage, state: 'complete', milliseconds: timing.milliseconds });
       if (!compilation.success) return { ...result, success: false, diagnostics: compilation.diagnostics ?? [],
         stage: compilation.stage, error: compilation.error, assets: { ...this.assets } };
       if (compilation.timings) timings.push(...compilation.timings);
-      await this.stage('linker-initialize', timings, () => this.initializeChannel('lld'));
-      await this.stage('tools-initialize', timings, () => this.initializeChannel('tools'));
-      const runtime = await this.stage('link', timings, () => this.channel('lld').request({ operation: 'link', plan: compilation.runtimeLinkPlan }));
-      if (!runtime.success) throw new Error(runtime.error || runtime.stderr || 'Runtime link failed');
-      const plan = compilation.coreLinkPlan;
-      const files: Record<string, Uint8Array> = { 'application.wasm': compilation.application, 'runtime.wasm': runtime.bytes };
       const args = (invocation: any) => invocation.Arguments.map((arg: string) => arg.startsWith('/netwasm-link/') ? basename(arg) : arg);
+      const runtimePlan = compilation.runtimeLinkPlan;
+      const runtimeLookup = await this.stage('runtime-cache-read', timings,
+        () => this.runtimeCache!.loadRuntime(runtimePlan.Cache));
+      let runtimeBytes: Uint8Array;
+      let runtimeCacheWritten = false;
+      if (runtimeLookup.hit) runtimeBytes = runtimeLookup.payload;
+      else {
+        await this.stage('linker-initialize', timings, () => this.initializeChannel('lld'));
+        await this.stage('tools-initialize', timings, () => this.initializeChannel('tools'));
+        const runtime = await this.stage('link', timings,
+          () => this.channel('lld').request({ operation: 'link', plan: runtimePlan }));
+        if (!runtime.success) throw new Error(runtime.error || runtime.stderr || 'Runtime link failed');
+        runtimeBytes = runtime.bytes;
+        if (optimization !== 'none') {
+          const runtimeOptimizationArguments = args({ Arguments: runtimePlan.OptimizationArguments });
+          const outputIndex = runtimeOptimizationArguments.lastIndexOf('-o') + 1;
+          if (outputIndex <= 0 || outputIndex >= runtimeOptimizationArguments.length)
+            throw new Error('Runtime optimization plan has no output');
+          // The native CLI can replace its input in place. The browser tool host
+          // keeps inputs immutable, so give the equivalent output a distinct name.
+          runtimeOptimizationArguments[outputIndex] = 'runtime-optimized.wasm';
+          runtimeBytes = (await this.stage('runtime-optimize', timings, () =>
+            this.tool('wasm-opt', runtimeOptimizationArguments,
+              { 'runtime.wasm': runtimeBytes }, ['runtime-optimized.wasm'], 300_000)))['runtime-optimized.wasm'];
+        }
+        await this.stage('runtime-validate', timings, () => this.tool('wasm-tools',
+          ['validate', 'runtime.wasm', '--features', 'all'], { 'runtime.wasm': runtimeBytes }, []));
+        const checksum = new Uint8Array(await crypto.subtle.digest(
+          'SHA-256', runtimeBytes.slice().buffer));
+        runtimeCacheWritten = await this.stage('runtime-cache-write', timings,
+          () => this.runtimeCache!.writeRuntime(runtimePlan.Cache, runtimeBytes, checksum));
+      }
+      if (runtimeLookup.hit)
+        await this.stage('tools-initialize', timings, () => this.initializeChannel('tools'));
+      const plan = compilation.coreLinkPlan;
+      const files: Record<string, Uint8Array> = { 'application.wasm': compilation.application, 'runtime.wasm': runtimeBytes };
       for (const module of plan.TextModules) {
         const output = basename(module.OutputPath), input = `${output}.wat`;
         Object.assign(files, await this.stage('parse', timings, () => this.tool('wasm-tools', ['parse', input, '--output', output], { [input]: new TextEncoder().encode(module.Text) }, [output])));
@@ -286,7 +320,13 @@ export class PlaygroundPipeline {
       });
       if (epoch !== this.epoch) throw new Error('Stopped');
       return { ...result, success: true, component, componentContract: compilation.componentContract,
-        frontendCacheMetrics: compilation.frontendCacheMetrics, assets: { ...this.assets } };
+        frontendCacheMetrics: compilation.frontendCacheMetrics,
+        runtimeCacheMetrics: {
+          outcome: runtimeLookup.hit ? 'hit' : runtimeLookup.available ? 'miss' : 'unavailable',
+          readBytes: runtimeLookup.payload?.byteLength ?? 0,
+          written: runtimeCacheWritten,
+        },
+        assets: { ...this.assets } };
     } catch (error) { return { ...result, success: false, cancelled: epoch !== this.epoch, stage: this.currentStage, error: String(error) }; }
     finally {
       // A managed compiler's WebAssembly memory can grow but cannot shrink.
@@ -323,5 +363,5 @@ export class PlaygroundPipeline {
     finally { this.channels.get('guest')?.reset(); this.channels.delete('guest'); this.runOutput = undefined; this.context = undefined; }
   }
   stop() { this.epoch++; this.abort?.abort(); for (const channel of this.channels.values()) channel.reset(); this.channelInitializations.clear(); }
-  dispose() { this.stop(); this.channels.clear(); }
+  dispose() { this.stop(); this.channels.clear(); this.runtimeCache?.close(); this.runtimeCache = undefined; }
 }

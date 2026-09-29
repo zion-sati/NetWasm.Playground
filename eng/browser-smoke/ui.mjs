@@ -34,7 +34,7 @@ try {
   const downloadEvent = page.waitForEvent('download'); await page.locator('#download').click();
   await (await downloadEvent).saveAs(`${output}/hello.wasm`);
   const component = readFileSync(`${output}/hello.wasm`);
-  assert(hash(component) === 'dc433ef969973d37b0ff8a3a9acf66bba4fa071b78f09359d4dc0836021baa17', 'Configured component equality');
+  assert(hash(component) === 'a6cb6172a1527df4ec137ff732893fc4e740f008d8e37562f99efffacb68736d', 'Configured component equality');
   await source('using System; Console.WriteLine(11);'); await page.locator('#compile').click();
   await source('using System; Console.WriteLine(12);'); await page.locator('#run').click();
   await source('using System; Console.WriteLine(13);'); await page.locator('#run').click();
@@ -58,16 +58,19 @@ try {
     const workerUrl = new URL(`./toolchain/${index.id}/workers/compiler-worker.mjs`, location.href);
     const entered = [];
     const channel = new WorkerChannel(workerUrl, data => { if(data.stage) entered.push(data.stage); });
+    const compileRequest = { operation: 'compile', recipe: 'hello',
+      source: 'using System; Console.WriteLine(42);', language: '15',
+      updatedMemorySafetyRules: false, optimization: 'Oz' };
     let timedOut = false;
-    try { await channel.request({ operation: 'compile', recipe: 'hello', source: 'using System; Console.WriteLine(42);' }, [], 1); }
+    try { await channel.request(compileRequest, [], 1); }
     catch (error) { timedOut = String(error).includes('timeout'); }
     try {
       await channel.request({ operation: 'initialize' }); entered.length = 0;
       let compileTimedOut = false;
-      try { await channel.request({ operation: 'compile', recipe: 'hello', source: 'using System; Console.WriteLine(42);' }, [], 50); }
+      try { await channel.request(compileRequest, [], 50); }
       catch(error) { compileTimedOut = String(error).includes('timeout'); }
       const compileEntered = entered.includes('roslyn');
-      const result = await channel.request({ operation: 'compile', recipe: 'hello', source: 'using System; Console.WriteLine(42);' });
+      const result = await channel.request(compileRequest);
       return { timedOut, compileTimedOut, compileEntered, success: result.success, bytes: result.application?.length };
     }
     finally { channel.reset(); }

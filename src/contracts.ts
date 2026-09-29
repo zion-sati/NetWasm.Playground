@@ -44,6 +44,12 @@ export interface FrontendCacheMetrics {
   cacheWriteMilliseconds: number;
 }
 
+export interface RuntimeCacheMetrics {
+  outcome: 'hit' | 'miss' | 'unavailable';
+  readBytes: number;
+  written: boolean;
+}
+
 export type PipelineEvent = { requestId: number; revision: number } & (
   | { type: 'stage'; stage: string; state: 'running' | 'complete'; milliseconds?: number }
   | { type: 'console'; stream: 'stdout' | 'stderr'; text: string }
@@ -63,6 +69,7 @@ export interface CompilationResult {
   diagnostics: Diagnostic[];
   timings: StageTiming[];
   frontendCacheMetrics?: FrontendCacheMetrics;
+  runtimeCacheMetrics?: RuntimeCacheMetrics;
   assets?: AssetMeasurement;
   error?: string;
   stage?: string;
