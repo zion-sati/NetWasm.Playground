@@ -50,7 +50,11 @@ def verify(run):
         inputs = json.loads((run / "inputs.json").read_text())
         if inputs.get("expectedRuntimePlan"):
             plan = camel_case(first["runtimeLinkPlan"])
-            if plan["arguments"] != inputs["expectedRuntimePlan"]["arguments"] or plan["inputs"] != inputs["expectedRuntimePlan"]["inputs"]:
+            if plan["arguments"] != inputs["expectedRuntimePlan"]["arguments"] or plan["inputs"] != inputs["expectedRuntimePlan"]["inputs"] or \
+                    ("optimizationArguments" in inputs["expectedRuntimePlan"] and
+                     plan["optimizationArguments"] != inputs["expectedRuntimePlan"]["optimizationArguments"]) or \
+                    ("maximumMemorySizeBytes" in inputs["expectedRuntimePlan"] and
+                     plan["maximumMemorySizeBytes"] != inputs["expectedRuntimePlan"]["maximumMemorySizeBytes"]):
                 raise RuntimeError("Browser runtime plan differs from captured desktop linker policy")
     if (run / "trusted-worker-test.json").exists():
         trusted = json.loads((run / "trusted-worker-test.json").read_text())
@@ -60,10 +64,10 @@ def verify(run):
         memory = json.loads((run / "memory-test.json").read_text())
         compilations = [item for item in memory["results"] if item["kind"] == "compile"]
         invalid = [item for item in memory["results"] if item["kind"] == "invalid-setting"]
-        if not memory["passed"] or memory["configuredMaximumBytes"] != 268435456 or \
+        if not memory["passed"] or memory["configuredMaximumBytes"] != 2147483648 or \
                 [item["success"] for item in compilations] != [True, False, True] or \
                 len(invalid) != 4 or not all(item["rejected"] for item in invalid) or \
-                any(item["runtimeMemory"]["maximumPages"] != 4096 for item in compilations if item["success"]):
+                any(item["runtimeMemory"]["maximumPages"] != 32768 for item in compilations if item["success"]):
             raise RuntimeError("Configured guest memory and recovery evidence changed")
     if (run / "di-test.json").exists():
         di = json.loads((run / "di-test.json").read_text())

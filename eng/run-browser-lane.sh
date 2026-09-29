@@ -32,4 +32,6 @@ run_step lifecycle env PLAYGROUND_EVIDENCE="$evidence/lifecycle" \
   node eng/browser-smoke/compiler-lifecycle.mjs
 run_step frontend-cache node eng/browser-smoke/frontend-cache-persistence.mjs
 run_step back-navigation node eng/browser-smoke/back-navigation.mjs
+run_step memory-contract env PLAYGROUND_EVIDENCE="$evidence/memory-contract" \
+  node eng/browser-smoke/memory-contract.mjs
 run_step resource env PLAYGROUND_EVIDENCE="$evidence/resource" node eng/browser-smoke/resource.mjs

@@ -5,6 +5,19 @@ let frontendCache, compilerToolchainId;
 const loader = createAssetLoader(assets => report({ assets }));
 const recipes = new Map();
 const coreRecipes = new Set(['hello', 'datetime', 'csharp15-tour']);
+const validStringArray = (value, maximumLength = 256) => Array.isArray(value) &&
+  value.length <= maximumLength && value.every(item => typeof item === 'string' && item.length <= 4096);
+function validateRuntimeLinkPlan(plan) {
+  if (!plan || !validStringArray(plan.Arguments) || !validStringArray(plan.OptimizationArguments) ||
+      !Array.isArray(plan.Inputs) || plan.Inputs.length > 128 ||
+      !Number.isSafeInteger(plan.MaximumMemorySizeBytes) || plan.MaximumMemorySizeBytes <= 0 ||
+      plan.MaximumMemorySizeBytes % 65536 !== 0)
+    throw Error('Invalid runtime link plan');
+  if (!plan.Inputs.every(input => input && typeof input.Path === 'string' && input.Path.length <= 4096 &&
+      typeof input.Sha256 === 'string' && /^[a-f0-9]{64}$/i.test(input.Sha256)))
+    throw Error('Invalid runtime link plan');
+  return plan;
+}
 async function recipeInputs(id) {
   if (!recipes.has(id)) recipes.set(id, (async () => {
     if (coreRecipes.has(id) && !(await loader.manifest())[`recipes/${id}.json`])
@@ -53,8 +66,6 @@ async function initialize() {
     const exports = await runtime.getAssemblyExports(runtime.getConfig().mainAssemblyName);
     const program = exports.NetWasm.Playground.CompilerProbe.Program;
     program.EnableProgress();
-    if (typeof program.ConfigureGuestMemoryMaximum !== 'function') throw Error('Rebuild the compiler host for guest memory limits');
-    program.ConfigureGuestMemoryMaximum(256 * 1048576);
     const runtimeManifestPromise = loader.load('compiler/runtime-pack.json').then(bytes => new TextDecoder().decode(bytes));
     const loaded = await Promise.allSettled([
       loader.load('compiler/target-reference.dll').then(toBase64),
@@ -172,6 +183,7 @@ serveWorker(async (data, emit) => {
         : program.Compile(data.source, ...recipeCompilerInputs, ...languageInputs));
   if (typeof result.application === 'string') result.application = fromBase64(result.application);
   if (typeof result.pe === 'string') result.pe = fromBase64(result.pe);
+  if (result.success) validateRuntimeLinkPlan(result.runtimeLinkPlan);
   result.hostLinearMemoryBytes = runtime.Module?.HEAPU8?.buffer?.byteLength ?? null;
   return result;
 });

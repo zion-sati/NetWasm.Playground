@@ -1,5 +1,7 @@
 // Called only after WebAssembly.compile has validated the core module.
-export function checkGuestMemory(bytes, maximumBytes = 256 * 1048576) {
+export function checkGuestMemory(bytes, maximumBytes) {
+  if (!Number.isSafeInteger(maximumBytes) || maximumBytes <= 0 || maximumBytes % 65536 !== 0)
+    throw Error('Invalid guest memory policy');
   let cursor = 8;
   const read = end => {
     let value = 0, shift = 0;
@@ -20,7 +22,7 @@ export function checkGuestMemory(bytes, maximumBytes = 256 * 1048576) {
         const flags = read(end);
         if (flags !== 1) throw Error('Guest memory requires an explicit unshared wasm32 maximum');
         const initialPages = read(end), maximumPages = read(end);
-        if (maximumPages * 65536 > maximumBytes) throw Error('Guest memory limit exceeded (256 MiB)');
+        if (maximumPages * 65536 > maximumBytes) throw Error('Guest memory limit exceeded');
         memories.push({ initialPages, maximumPages });
       }
       if (cursor !== end) throw Error('Invalid guest memory section');

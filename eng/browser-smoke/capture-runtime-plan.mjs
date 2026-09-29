@@ -50,6 +50,7 @@ try {
         arguments: actual.Arguments,
         optimizationArguments: actual.OptimizationArguments,
         inputs: actual.Inputs.map(input => ({ path: input.Path, sha256: input.Sha256 })),
+        maximumMemorySizeBytes: actual.MaximumMemorySizeBytes,
       };
     } finally {
       worker.terminate();
@@ -59,6 +60,7 @@ try {
     arguments: plan.arguments,
     optimizationArguments: plan.optimizationArguments,
     inputs: plan.inputs,
+    maximumMemorySizeBytes: plan.maximumMemorySizeBytes,
   }, null, 2)}\n`);
   console.log(`PASS: captured candidate runtime plan with ${plan.inputs.length} inputs`);
 } finally {

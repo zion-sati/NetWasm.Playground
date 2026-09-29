@@ -15,7 +15,8 @@ serveWorker(async (data, emit) => {
   if (data.operation !== 'link' && data.operation !== 'initialize') throw Error('Unsupported linker operation');
   if (data.operation === 'initialize') { await initialize(); return { success: true }; }
   const plan = structuredClone(data.plan);
-  if (!Array.isArray(plan?.Inputs) || plan.Inputs.length > 128 || !Array.isArray(plan.Arguments)) throw Error('Invalid runtime link plan');
+  if (!Array.isArray(plan?.Inputs) || plan.Inputs.length > 128 || !Array.isArray(plan.Arguments) ||
+      !Array.isArray(plan.OptimizationArguments)) throw Error('Invalid runtime link plan');
   const files = {};
   for (const input of plan.Inputs) {
     if (typeof input.Path !== 'string' || !input.Path.startsWith('/netwasm-link/runtime/')) throw Error('Invalid runtime input path');

@@ -120,7 +120,7 @@ public static partial class Program
     private const int MaximumGeneratedSources = 128;
     private const int MaximumGeneratedBytes = 512 * 1024;
     private static bool progressEnabled;
-    private static long guestMemoryMaximum = 2147483648;
+    private static long? guestMemoryMaximum;
 #if FRONTEND_CACHE_TRANSPORT
     private sealed record PendingFrontendCompilation(
         BrowserCompilerSession Session,

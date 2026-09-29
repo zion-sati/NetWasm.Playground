@@ -116,8 +116,8 @@ The JSON generator smoke is `eng/browser-smoke/json-generated.mjs`. The TUnit
 smoke is `eng/browser-smoke/tunit.mjs`, with `PLAYGROUND_TUNIT_EXAMPLE` pointing
 to its verified native template workspace. Set `PLAYGROUND_COMPARE_DESKTOP_BYTES=1`
 for exact ordinary/JSON download comparison when the desktop build uses the same
-memory policy; Playground caps guest memory at 256 MiB. TUnit downloads use NetWasm's
-asynchronous component contract and require its host.
+memory policy; Playground uses NetWasm's 2 GiB wasm32 guest-memory policy. TUnit
+downloads use NetWasm's asynchronous component contract and require its host.
 
 Build the compiler host with `eng/roslyn-worker.py`, supplying the verified
 baseline, an output directory, `--compiler-package-version`, `--json-example`
@@ -137,7 +137,7 @@ focused compiler-only check while retaining verification of generator inputs.
 | Diagnostics | 128, with a visible limit label |
 | Guest console | 64 KiB across stdout and stderr |
 | Component / generated execution graph | 4 MiB / 8 MiB |
-| Guest defined memories | 256 MiB combined, counted per instance |
+| Guest defined memories | 2 GiB combined, counted per instance |
 | Guest execution, including core start functions | 5 seconds |
 | Guest transpilation / compiler and tool stages | 60 / 120 seconds |
 | Completed compiler job recycling | At least 512 MiB retained linear memory |

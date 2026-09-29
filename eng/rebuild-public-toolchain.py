@@ -332,12 +332,18 @@ def refresh_public_assets(stage, pins, runtime_plan=None):
         128 * 1024))
     inputs.pop('desktopReceiptSha256', None)
     if runtime_plan is not None:
-        if (not isinstance(runtime_plan, dict) or set(runtime_plan) != {'arguments', 'inputs'} or
-                not isinstance(runtime_plan['arguments'], list) or not isinstance(runtime_plan['inputs'], list)):
+        if (not isinstance(runtime_plan, dict) or
+                set(runtime_plan) != {'arguments', 'optimizationArguments', 'inputs', 'maximumMemorySizeBytes'} or
+                not isinstance(runtime_plan['arguments'], list) or
+                not isinstance(runtime_plan['optimizationArguments'], list) or
+                not isinstance(runtime_plan['inputs'], list) or
+                not isinstance(runtime_plan['maximumMemorySizeBytes'], int) or
+                runtime_plan['maximumMemorySizeBytes'] <= 0 or
+                runtime_plan['maximumMemorySizeBytes'] % 65536 != 0):
             raise ValueError('Candidate runtime plan has an unexpected shape')
-        if (len(runtime_plan['arguments']) > 256 or
+        if (len(runtime_plan['arguments']) > 256 or len(runtime_plan['optimizationArguments']) > 256 or
                 any(not isinstance(argument, str) or len(argument) > 4096
-                    for argument in runtime_plan['arguments'])):
+                    for argument in runtime_plan['arguments'] + runtime_plan['optimizationArguments'])):
             raise ValueError('Candidate runtime plan has invalid arguments')
         paths = set()
         for item in runtime_plan['inputs']:

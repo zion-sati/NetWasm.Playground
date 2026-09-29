@@ -54,6 +54,14 @@ serveWorker(async (data, report) => {
     if (data.sha256 !== undefined && componentSha256 !== data.sha256) throw Error('Component digest mismatch');
     begin('transpile');
     const loader = createAssetLoader(assets => report({ assets }));
+    const runtimeManifest = JSON.parse(new TextDecoder().decode(
+      await loader.load('compiler/runtime-pack.json')));
+    const runtimeTarget = runtimeManifest.targets?.find(target => target.target === 'wasm32');
+    const maximumMemorySizeBytes = runtimeTarget?.defaultMaximumMemorySizeBytes;
+    if (!Number.isSafeInteger(maximumMemorySizeBytes) || maximumMemorySizeBytes <= 0 ||
+        maximumMemorySizeBytes % 65536 !== 0)
+      throw Error('Invalid guest memory policy');
+    const maximumMemoryPages = maximumMemorySizeBytes / 65536;
     // jco's bootstrap fetches its own Wasm files; verify the complete raw
     // asset graph before imports so those fetches reuse verified cache entries.
     const jcoAssets = Object.keys(await loader.manifest()).filter(name => name.startsWith('jco/'));
@@ -127,7 +135,7 @@ serveWorker(async (data, report) => {
     const loadCoreModule = async name => {
       if (!Object.hasOwn(files, name) || !name.endsWith('.wasm')) throw Error(`Missing generated core: ${name}`);
       const module = await WebAssembly.compile(files[name]);
-      const memories = checkGuestMemory(files[name]);
+      const memories = checkGuestMemory(files[name], maximumMemorySizeBytes);
       const coreImports = WebAssembly.Module.imports(module);
       if (coreImports.some(item => item.module === 'wasi_snapshot_preview1')) throw Error('Guest Preview 1 imports are unsupported');
       moduleMemories.set(module, memories);
@@ -138,7 +146,7 @@ serveWorker(async (data, report) => {
       const memories = moduleMemories.get(module);
       if (!memories) throw Error('Unverified guest core module');
       const pages = memories.reduce((total, memory) => total + memory.maximumPages, 0);
-      if (allocatedMemoryPages + pages > 4096) throw Error('Guest memory limit exceeded (256 MiB total)');
+      if (allocatedMemoryPages + pages > maximumMemoryPages) throw Error('Guest memory limit exceeded (aggregate)');
       allocatedMemoryPages += pages; coreInstances++;
       // Core start functions can execute during instantiation. Start the outer
       // execution deadline before allowing any guest core code to run.

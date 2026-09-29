@@ -1,5 +1,5 @@
 (component
-  (core module $m (memory 1 4096) (func (export "run")))
+  (core module $m (memory 1 16385) (func (export "run")))
   (core instance $first (instantiate $m))
   (core instance $second (instantiate $m))
   (func $run (canon lift (core func $second "run")))
