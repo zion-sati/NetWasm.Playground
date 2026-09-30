@@ -33,6 +33,8 @@ try {
   if (await success.isVisible()) throw Error('Compilation callout is visible before compilation');
   for (let iteration = 0; iteration < 2; iteration++) {
     await page.locator('#compile').click();
+    await page.waitForFunction(() => !document.querySelector('#stop').disabled, undefined,
+      { timeout: 10000 });
     if (await success.isVisible()) throw Error('Compilation callout remains visible while compiling');
     await page.waitForFunction(() => document.querySelector('#stop').disabled, undefined,
       { timeout: 240000 });
@@ -64,6 +66,8 @@ try {
     throw Error('Page reload retained compilation callout');
   await page.getByLabel('Optimization', { exact: true }).selectOption('none');
   await page.locator('#compile').click();
+  await page.waitForFunction(() => !document.querySelector('#stop').disabled, undefined,
+    { timeout: 10000 });
   await page.waitForFunction(() => document.querySelector('#stop').disabled, undefined,
     { timeout: 240000 });
   const afterReload = await page.evaluate(() => globalThis.compilerLifecycle());
