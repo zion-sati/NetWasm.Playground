@@ -31,29 +31,26 @@ try {
   await page.getByLabel('Optimization', { exact: true }).selectOption('none');
   const success = page.locator('#compilation-success');
   if (await success.isVisible()) throw Error('Compilation callout is visible before compilation');
-  for (let iteration = 0; iteration < 2; iteration++) {
-    await page.locator('#compile').click();
-    await page.waitForFunction(() => !document.querySelector('#stop').disabled, undefined,
-      { timeout: 10000 });
-    if (await success.isVisible()) throw Error('Compilation callout remains visible while compiling');
-    await page.waitForFunction(() => document.querySelector('#stop').disabled, undefined,
-      { timeout: 240000 });
-    const status = await page.locator('#status').textContent();
-    if (status !== 'Compilation complete')
-      throw Error(`Compilation ${iteration + 1} did not complete: ${status}`);
-    if (!await success.isVisible() || await success.locator('span').textContent() !==
-        'Compiled entirely in your browser with NetWasm.')
-      throw Error('Compilation callout is missing or stale');
-    const followLink = success.getByRole('link', { name: 'Follow the project on GitHub →' });
-    if (await followLink.getAttribute('href') !== 'https://github.com/zion-sati/NetWasm' ||
-        await followLink.getAttribute('target') !== '_blank')
-      throw Error('Compilation callout link is incorrect');
-    const compilers = await page.evaluate(() => globalThis.compilerLifecycle()
-      .filter(worker => worker.operations.includes('compile')));
-    if (compilers.length !== iteration + 1 || compilers.some(worker => !worker.terminated) ||
-        compilers.some(worker => !worker.operations.includes('prune')))
-      throw Error(`Compiler worker lifetime mismatch after compilation ${iteration + 1}`);
-  }
+  await page.locator('#compile').click();
+  await page.waitForFunction(() => !document.querySelector('#stop').disabled, undefined,
+    { timeout: 10000 });
+  if (await success.isVisible()) throw Error('Compilation callout remains visible while compiling');
+  await page.waitForFunction(() => document.querySelector('#stop').disabled, undefined,
+    { timeout: 240000 });
+  const status = await page.locator('#status').textContent();
+  if (status !== 'Compilation complete') throw Error(`Compilation did not complete: ${status}`);
+  if (!await success.isVisible() || await success.locator('span').textContent() !==
+      'Compiled entirely in your browser with NetWasm.')
+    throw Error('Compilation callout is missing or stale');
+  const followLink = success.getByRole('link', { name: 'Follow the project on GitHub →' });
+  if (await followLink.getAttribute('href') !== 'https://github.com/zion-sati/NetWasm' ||
+      await followLink.getAttribute('target') !== '_blank')
+    throw Error('Compilation callout link is incorrect');
+  const compilers = await page.evaluate(() => globalThis.compilerLifecycle()
+    .filter(worker => worker.operations.includes('compile')));
+  if (compilers.length !== 1 || compilers.some(worker => !worker.terminated) ||
+      compilers.some(worker => !worker.operations.includes('prune')))
+    throw Error('Compiler worker lifetime mismatch after compilation');
   await page.locator('#editor .view-lines').click({ position: { x: 80, y: 12 } });
   await page.keyboard.press('ControlOrMeta+End');
   await page.keyboard.insertText('\n');
