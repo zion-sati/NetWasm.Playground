@@ -38,8 +38,9 @@ try {
     if (await success.isVisible()) throw Error('Compilation callout remains visible while compiling');
     await page.waitForFunction(() => document.querySelector('#stop').disabled, undefined,
       { timeout: 240000 });
-    if (await page.locator('#status').textContent() !== 'Compilation complete')
-      throw Error(`Compilation ${iteration + 1} did not complete`);
+    const status = await page.locator('#status').textContent();
+    if (status !== 'Compilation complete')
+      throw Error(`Compilation ${iteration + 1} did not complete: ${status}`);
     if (!await success.isVisible() || await success.locator('span').textContent() !==
         'Compiled entirely in your browser with NetWasm.')
       throw Error('Compilation callout is missing or stale');
@@ -52,13 +53,11 @@ try {
     if (compilers.length !== iteration + 1 || compilers.some(worker => !worker.terminated) ||
         compilers.some(worker => !worker.operations.includes('prune')))
       throw Error(`Compiler worker lifetime mismatch after compilation ${iteration + 1}`);
-    if (iteration === 0) {
-      await page.locator('#editor .view-lines').click({ position: { x: 80, y: 12 } });
-      await page.keyboard.press('ControlOrMeta+End');
-      await page.keyboard.insertText('\n');
-      if (await success.isVisible()) throw Error('Source edit did not hide compilation callout');
-    }
   }
+  await page.locator('#editor .view-lines').click({ position: { x: 80, y: 12 } });
+  await page.keyboard.press('ControlOrMeta+End');
+  await page.keyboard.insertText('\n');
+  if (await success.isVisible()) throw Error('Source edit did not hide compilation callout');
   const beforeReload = await page.evaluate(() => globalThis.compilerLifecycle());
   await page.reload();
   await page.locator('.monaco-editor').waitFor();
