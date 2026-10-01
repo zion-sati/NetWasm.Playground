@@ -95,6 +95,10 @@ use. Compile and Run remain available while this is happening; an early click jo
 initialization instead of starting duplicate downloads. The progress bar reports
 completed bundles and encoded transfer bytes. The hosting edge can negotiate
 Brotli or Gzip for the `.bin` responses through standard HTTP content encoding.
+Production builds also write Brotli quality 11 `.br` sidecars for every `.wasm`
+and `.bin` file. Originals and their manifest hashes are preserved. Follow the
+[Cloudflare Worker setup](docs/cloudflare-brotli.md) to serve those sidecars
+through standard HTTP content encoding without changing the loaders.
 The content-addressed filenames are safe to retain in a CDN cache indefinitely;
 `toolchain/index.json` remains the short-lived pointer to the current manifest.
 
