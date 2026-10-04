@@ -10,6 +10,7 @@ const examples = new Map([
   ['pipelines', 'Buffered bytes: 3\nFirst byte: 13\n'],
   ['web-encoding', '\\u003CNetWasm \\u0026 C#\\u003E\n'],
   ['xml', 'Runtime: NetWasm\nAnswer: 42\n'],
+  ['fluentvalidation', 'Valid: False\nName: Name is required.\nAge: Age must be 42.\n'],
 ]);
 
 const browser = await chromium.launch({ headless: true });

@@ -21,6 +21,24 @@ def encoded(value):
 
 
 BUNDLE_ROLES = {'compiler', 'linker', 'tools', 'guest'}
+HOSTING_MODULES = (
+    'canonical-component-binder.mjs',
+    'command-executor.mjs',
+    'component-execution-preparation.mjs',
+    'component-executor.mjs',
+    'component-managed-exception-host.mjs',
+    'diagnostic-command-export.mjs',
+    'execution-contracts.mjs',
+    'execution-result.mjs',
+    'execution-scope-closer.mjs',
+    'guest-wake-notifier.mjs',
+    'managed-errors.mjs',
+    'managed-exception-details.mjs',
+    'managed-exception-reporter.mjs',
+    'managed-process-observer.mjs',
+    'pollable-reactor.mjs',
+    'terminal-managed-export.mjs',
+)
 
 
 def bundle_role(relative):
@@ -273,9 +291,7 @@ def main():
                 'implementations': implementations, 'support': 'recipes/tunit-support.json', 'version': pins['tunit']['packageVersion']}))
             copy(args.tunit / recipe['componentWitBinary'], 'async-command.wit.wasm')
             # Exact browser-safe closure used by the async guest proof.
-            for name in ['canonical-component-binder.mjs', 'command-executor.mjs', 'component-execution-preparation.mjs',
-                         'component-executor.mjs', 'execution-contracts.mjs', 'execution-result.mjs', 'execution-scope-closer.mjs',
-                         'guest-wake-notifier.mjs', 'managed-process-observer.mjs', 'pollable-reactor.mjs']:
+            for name in HOSTING_MODULES:
                 (stage / 'hosting').mkdir(exist_ok=True)
                 copy(hosting_package / 'tools/netwasm/hosting' / name, Path('hosting') / name)
         for name in ['binaryen-host.mjs', 'tool-inputs.mjs', 'wasm-tools-host.mjs', 'wasm32-memory-ceiling.mjs']:

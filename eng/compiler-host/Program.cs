@@ -214,62 +214,77 @@ public static partial class Program
         plan.CleanupPaths.ToArray());
 
     [JSExport]
-    public static string Compile(string source, string reference, string supportJson, string implementation, string witJson, string witBytes, string runtimeManifest,
+    public static string Compile(string source, string reference, string supportJson, string implementation, string witJson, string witBytes,
+        string syncWitInventory, string asyncWitInventory, string runtimeManifest,
         string runtimeSystemLibrariesJson, string languageVersion, bool updatedMemorySafetyRules, string optimization)
-        => CompileRecipe(source, reference, supportJson, implementation, witJson, witBytes, runtimeManifest,
+        => CompileRecipe(source, reference, supportJson, implementation, witJson, witBytes,
+            syncWitInventory, asyncWitInventory, runtimeManifest,
             runtimeSystemLibrariesJson, "{}", "{}", languageVersion, updatedMemorySafetyRules, optimization);
 
     [JSExport]
-    public static string CompileRecipe(string source, string reference, string supportJson, string implementation, string witJson, string witBytes, string runtimeManifest,
+    public static string CompileRecipe(string source, string reference, string supportJson, string implementation, string witJson, string witBytes,
+        string syncWitInventory, string asyncWitInventory, string runtimeManifest,
         string runtimeSystemLibrariesJson, string additionalReferencesJson, string additionalImplementationsJson,
         string languageVersion, bool updatedMemorySafetyRules, string optimization)
-        => CompileCore(source, reference, supportJson, implementation, witJson, witBytes, runtimeManifest,
+        => CompileCore(source, reference, supportJson, implementation, witJson, witBytes,
+            syncWitInventory, asyncWitInventory, runtimeManifest,
             runtimeSystemLibrariesJson, additionalReferencesJson, additionalImplementationsJson, null, false,
             languageVersion, updatedMemorySafetyRules, optimization);
 
     [JSExport]
-    public static string CompileHttpRecipe(string source, string reference, string supportJson, string implementation, string witJson, string witBytes, string runtimeManifest,
+    public static string CompileHttpRecipe(string source, string reference, string supportJson, string implementation, string witJson, string witBytes,
+        string syncWitInventory, string asyncWitInventory, string runtimeManifest,
         string runtimeSystemLibrariesJson, string additionalReferencesJson, string additionalImplementationsJson,
         string languageVersion, bool updatedMemorySafetyRules, string optimization)
-        => CompileCore(source, reference, supportJson, implementation, witJson, witBytes, runtimeManifest,
+        => CompileCore(source, reference, supportJson, implementation, witJson, witBytes,
+            syncWitInventory, asyncWitInventory, runtimeManifest,
             runtimeSystemLibrariesJson, additionalReferencesJson, additionalImplementationsJson, null, false,
             languageVersion, updatedMemorySafetyRules, optimization, useAsyncPlatform: true);
 
     [JSExport]
-    public static string CompileGeneratedRecipe(string source, string reference, string supportJson, string implementation, string witJson, string witBytes, string runtimeManifest,
+    public static string CompileGeneratedRecipe(string source, string reference, string supportJson, string implementation, string witJson, string witBytes,
+        string syncWitInventory, string asyncWitInventory, string runtimeManifest,
         string runtimeSystemLibrariesJson, string additionalReferencesJson, string additionalImplementationsJson, string trustedRecipe, bool includeGeneratedSourceText,
         string languageVersion, bool updatedMemorySafetyRules, string optimization)
-        => CompileCore(source, reference, supportJson, implementation, witJson, witBytes, runtimeManifest,
+        => CompileCore(source, reference, supportJson, implementation, witJson, witBytes,
+            syncWitInventory, asyncWitInventory, runtimeManifest,
             runtimeSystemLibrariesJson, additionalReferencesJson, additionalImplementationsJson, trustedRecipe, includeGeneratedSourceText,
             languageVersion, updatedMemorySafetyRules, optimization);
 
 #if FRONTEND_CACHE_TRANSPORT
     [JSExport]
-    public static string PrepareRecipe(string source, string reference, string supportJson, string implementation, string witJson, string witBytes, string runtimeManifest,
+    public static string PrepareRecipe(string source, string reference, string supportJson, string implementation, string witJson, string witBytes,
+        string syncWitInventory, string asyncWitInventory, string runtimeManifest,
         string runtimeSystemLibrariesJson, string additionalReferencesJson, string additionalImplementationsJson,
         string languageVersion, bool updatedMemorySafetyRules, string optimization)
-        => CompileCore(source, reference, supportJson, implementation, witJson, witBytes, runtimeManifest,
+        => CompileCore(source, reference, supportJson, implementation, witJson, witBytes,
+            syncWitInventory, asyncWitInventory, runtimeManifest,
             runtimeSystemLibrariesJson, additionalReferencesJson, additionalImplementationsJson, null, false,
             languageVersion, updatedMemorySafetyRules, optimization, prepareFrontendCache: true);
 
     [JSExport]
-    public static string PrepareHttpRecipe(string source, string reference, string supportJson, string implementation, string witJson, string witBytes, string runtimeManifest,
+    public static string PrepareHttpRecipe(string source, string reference, string supportJson, string implementation, string witJson, string witBytes,
+        string syncWitInventory, string asyncWitInventory, string runtimeManifest,
         string runtimeSystemLibrariesJson, string additionalReferencesJson, string additionalImplementationsJson,
         string languageVersion, bool updatedMemorySafetyRules, string optimization)
-        => CompileCore(source, reference, supportJson, implementation, witJson, witBytes, runtimeManifest,
+        => CompileCore(source, reference, supportJson, implementation, witJson, witBytes,
+            syncWitInventory, asyncWitInventory, runtimeManifest,
             runtimeSystemLibrariesJson, additionalReferencesJson, additionalImplementationsJson, null, false,
             languageVersion, updatedMemorySafetyRules, optimization, useAsyncPlatform: true, prepareFrontendCache: true);
 
     [JSExport]
-    public static string PrepareGeneratedRecipe(string source, string reference, string supportJson, string implementation, string witJson, string witBytes, string runtimeManifest,
+    public static string PrepareGeneratedRecipe(string source, string reference, string supportJson, string implementation, string witJson, string witBytes,
+        string syncWitInventory, string asyncWitInventory, string runtimeManifest,
         string runtimeSystemLibrariesJson, string additionalReferencesJson, string additionalImplementationsJson, string trustedRecipe,
         string languageVersion, bool updatedMemorySafetyRules, string optimization)
-        => CompileCore(source, reference, supportJson, implementation, witJson, witBytes, runtimeManifest,
+        => CompileCore(source, reference, supportJson, implementation, witJson, witBytes,
+            syncWitInventory, asyncWitInventory, runtimeManifest,
             runtimeSystemLibrariesJson, additionalReferencesJson, additionalImplementationsJson, trustedRecipe, false,
             languageVersion, updatedMemorySafetyRules, optimization, prepareFrontendCache: true);
 #endif
 
-    private static string CompileCore(string source, string reference, string supportJson, string implementation, string witJson, string witBytes, string runtimeManifest,
+    private static string CompileCore(string source, string reference, string supportJson, string implementation, string witJson, string witBytes,
+        string syncWitInventory, string asyncWitInventory, string runtimeManifest,
         string runtimeSystemLibrariesJson, string additionalReferencesJson, string additionalImplementationsJson, string? trustedRecipe, bool includeGeneratedSourceText,
         string languageVersion, bool updatedMemorySafetyRules, string optimization,
         bool useAsyncPlatform = false
@@ -370,7 +385,12 @@ public static partial class Program
                 WitPath: "compiler.wit.wasm", WitWorld: asynchronous ? "netwasm:platform@1.0.0/async-platform" : "netwasm:platform@1.0.0/platform",
                 EntryPointKind: CompilerEntryPointKind.ManagedExecutable);
             var request = new BrowserCompilationRequest(options, images,
-                new Dictionary<string,string> { ["compiler.wit.wasm"] = witJson }, selectManagedExecutableEntryPoint: true);
+                new Dictionary<string,string> { ["compiler.wit.wasm"] = witJson },
+                new Dictionary<string,string>
+                {
+                    ["compiler.wit.wasm"] = asynchronous ? asyncWitInventory : syncWitInventory,
+                },
+                selectManagedExecutableEntryPoint: true);
 #if FRONTEND_CACHE_TRANSPORT
             if (prepareFrontendCache)
             {

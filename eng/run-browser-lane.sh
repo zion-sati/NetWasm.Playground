@@ -26,6 +26,9 @@ run_step deployment env PLAYGROUND_EVIDENCE="$evidence/deployment" \
 run_step csharp15 env PLAYGROUND_BROWSERS="$browser" PLAYGROUND_CSHARP15_OPTIMIZATION=none \
   node eng/browser-smoke/csharp15-runtime.mjs
 run_step wasi env PLAYGROUND_BROWSERS="$browser" node eng/browser-smoke/wasi-examples.mjs
+if [[ "$browser" == chromium ]]; then
+  run_step library-catalog node eng/browser-smoke/library-catalog.mjs
+fi
 run_step tunit-failure env PLAYGROUND_EVIDENCE="$evidence/tunit-failure" \
   node eng/browser-smoke/tunit-failure.mjs
 run_step lifecycle env PLAYGROUND_EVIDENCE="$evidence/lifecycle" \

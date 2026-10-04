@@ -297,6 +297,39 @@ Console.WriteLine(pattern.Replace(input, "\${name} scored \${score}"));
 `,
   },
   {
+    id: 'fluentvalidation',
+    name: 'FluentValidation expression trees',
+    source: `using System;
+using FluentValidation;
+
+var validator = new PersonValidator();
+var result = validator.Validate(new Person { Name = "", Age = 41 });
+
+Console.WriteLine($"Valid: {result.IsValid}");
+foreach (var error in result.Errors)
+    Console.WriteLine($"{error.PropertyName}: {error.ErrorMessage}");
+
+public sealed class Person
+{
+    public string Name { get; set; } = "";
+    public int Age { get; set; }
+}
+
+public sealed class PersonValidator : AbstractValidator<Person>
+{
+    public PersonValidator()
+    {
+        RuleFor(person => person.Name)
+            .NotEmpty()
+            .WithMessage("Name is required.");
+        RuleFor(person => person.Age)
+            .Equal(42)
+            .WithMessage("Age must be 42.");
+    }
+}
+`,
+  },
+  {
     id: 'di',
     name: 'Dependency injection',
     source: `using System;

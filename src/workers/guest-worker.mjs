@@ -70,7 +70,8 @@ serveWorker(async (data, report) => {
     const failed = verified.find(result => result.status === 'rejected');
     if (failed) throw failed.reason;
     loader.installFetchAdapter();
-    const { jco, executeComponent } = await import(loader.url('jco/guest-runtime.mjs'));
+    const { jco } = await import(loader.url('jco/guest-runtime.mjs'));
+    const { executeComponent } = await import(loader.url('jco/component-host.mjs'));
     const { cliModule, io, clockModule, filesystemModule, httpModule, randomModule } =
       await import(loader.url('jco/guest-providers.mjs'));
     restoreHttpBudget = installGuestHttpBudget(httpModule, message => { httpBudgetFailure = message; });
@@ -126,7 +127,12 @@ serveWorker(async (data, report) => {
       'wasi:random/insecure-seed': randomModule.insecureSeed,
       'wasi:random/insecure': randomModule.insecure,
       'wasi:random/random': randomModule.random };
-    const permittedImports = managedProcess ? [...Object.keys(imports), 'netwasm:runtime/reactor-host']
+    // The component executor supplies these reserved imports. Keep them out of
+    // the caller import map while allowing the generated process adapter to
+    // declare them.
+    const permittedImports = managedProcess ? [...Object.keys(imports),
+      'netwasm:runtime/reactor-host', 'netwasm:runtime/reactor-host@1.0.0',
+      'netwasm:diagnostics/terminal', 'netwasm:diagnostics/terminal@1.0.0']
       : Object.keys(imports);
     const unsupported = generatedImports.filter(name => !permittedImports.includes(name));
     if (unsupported.length) throw Error(`Unsupported guest import: ${unsupported.join(', ')}`);

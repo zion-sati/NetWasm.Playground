@@ -7,6 +7,8 @@ try {
  const witArray = new Uint8Array(await (await fetch("./compiler.wit.wasm")).arrayBuffer());
  const witBytes = btoa(Array.from(witArray, b => String.fromCharCode(b)).join(""));
  const witJson = await (await fetch("./compiler-wit.json")).text();
+ const syncWitInventory = await (await fetch("./compiler-wit-platform.wat")).text();
+ const asyncWitInventory = await (await fetch("./compiler-wit-async-platform.wat")).text();
  const implBytes = new Uint8Array(await (await fetch('./target-implementation.dll')).arrayBuffer());
  const implementation = btoa(Array.from(implBytes, b => String.fromCharCode(b)).join(''));
  const support = await (await fetch('./support.json')).text();
@@ -23,7 +25,8 @@ try {
       return;
     }
     const result = JSON.parse(exports.NetWasm.Playground.CompilerProbe.Program.Compile(
-      data.source, reference, support, implementation, witJson, witBytes, runtimeManifest, '[]', '15', false));
+      data.source, reference, support, implementation, witJson, witBytes,
+      syncWitInventory, asyncWitInventory, runtimeManifest, '[]', '15', false, 'Oz'));
     result.hostLinearMemoryBytes = runtime.Module?.HEAPU8?.buffer?.byteLength ?? null;
     self.postMessage({id:data.id, result});
   }
