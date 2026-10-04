@@ -170,8 +170,9 @@ try {
     throw Error(`Unexpected bundle requests: ${JSON.stringify(bundleRequests)}`);
   const directPayloads = toolchainRequests.filter(request => /\.(?:wasm|dll|a|dat|json)$/.test(request) &&
     !request.endsWith('/index.json') && !request.endsWith('/asset-manifest.json'));
-  // The separately bundled Preview 2 guest provider adds one verified module request.
-  if (directPayloads.length || toolchainRequests.length > 21)
+  // The separately bundled Preview 2 guest provider and component host add two
+  // verified module requests outside the four payload bundles.
+  if (directPayloads.length || toolchainRequests.length > 22)
     throw Error(`Toolchain request graph was not bundled: ${JSON.stringify({ count: toolchainRequests.length, directPayloads })}`);
   const finalUrl = new URL(url);
   finalUrl.searchParams.set('site-identity', expectedIdentity.siteIdentitySha256);
