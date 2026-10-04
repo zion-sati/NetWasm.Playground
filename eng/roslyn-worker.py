@@ -197,6 +197,8 @@ try {
  const implementation = await load('target-implementation.dll');
  const wit = await load('compiler.wit.wasm');
  const witJson = await (await fetch('compiler-wit.json')).text();
+ const syncWitInventory = await (await fetch('compiler-wit-platform.wat')).text();
+ const asyncWitInventory = await (await fetch('compiler-wit-async-platform.wat')).text();
  const manifest = await (await fetch('runtime-pack.json')).text();
  const recipes = await (await fetch('trusted-recipes.json')).json();
  for(const recipe of Object.values(recipes)) for(const kind of ['references','implementations']) {
@@ -206,8 +208,9 @@ try {
   const recipe = recipes[data.recipe];
   try {
    const result = JSON.parse(api.CompileGeneratedRecipe(data.source, reference, JSON.stringify(recipe.support), implementation,
-     witJson, wit, manifest, JSON.stringify(recipe.references), JSON.stringify(recipe.implementations), data.recipe, data.evidence,
-     '15', false));
+     witJson, wit, syncWitInventory, asyncWitInventory, manifest,
+     JSON.stringify(recipe.references), JSON.stringify(recipe.implementations), data.recipe, data.evidence,
+     '15', false, 'Oz'));
    result.hostLinearMemoryBytes = runtime.Module?.HEAPU8?.buffer?.byteLength ?? null;
    self.postMessage({id:data.id,result});
   } catch(error) { self.postMessage({id:data.id,error:String(error)}); }
@@ -498,6 +501,14 @@ def main():
                               str(web / "compiler.wit.wasm"), "--json", "--no-docs"],
                              capture_output=True, text=True, check=True)
         (web / "compiler-wit.json").write_text(wit.stdout)
+        for world, name in (
+                ("netwasm:platform/platform@1.0.0", "compiler-wit-platform.wat"),
+                ("netwasm:platform/async-platform@1.0.0", "compiler-wit-async-platform.wat")):
+            inventory = subprocess.run(["node", str(tools / "wasm-tools/run-wasm-tools.mjs"),
+                                        str(tools / "wasm-tools/wasm-tools.wasm"), "component", "embed",
+                                        str(web / "compiler.wit.wasm"), "--world", world, "--dummy", "-t"],
+                                       capture_output=True, text=True, check=True)
+            (web / name).write_text(inventory.stdout)
     if trusted:
         stage_trusted_inputs(trusted, web)
     source = (baseline / "app/Program.cs").read_text()

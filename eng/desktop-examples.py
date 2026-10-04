@@ -21,11 +21,16 @@ PACKAGES = {
     'json-dom': ['NetWasm.System.Text.Json'],
     'json-generated': ['NetWasm.System.Text.Json'],
     'regex': ['NetWasm.System.Text.RegularExpressions'],
+    'fluentvalidation': ['NetWasm.FluentValidation'],
     'di': ['NetWasm.Microsoft.Extensions.DependencyInjection'],
     'logging': ['NetWasm.Microsoft.Extensions.Logging'],
     'hashing': ['NetWasm.System.IO.Hashing'],
 }
 ASYNC_RECIPES = {'async-linq', 'pipelines'}
+def package_version(pins, package):
+    if package == 'NetWasm.FluentValidation':
+        return pins['sources']['fluentvalidation']['packageVersion']
+    return pins['sources']['libraries']['packageVersion']
 def fingerprint(path):
     return {'bytes': path.stat().st_size, 'sha256': hashlib.sha256(path.read_bytes()).hexdigest()}
 def main():
@@ -52,7 +57,7 @@ def main():
         examples = [example for example in examples if example['id'] in args.recipe]
         if {example['id'] for example in examples} != set(args.recipe): parser.error('Unknown recipe')
     (run/'examples.json').write_text(json.dumps(examples)+'\n')
-    pins = json.loads((ROOT/'eng/upstream-sources.json').read_text()); version=pins['sources']['libraries']['packageVersion']
+    pins = json.loads((ROOT/'eng/upstream-sources.json').read_text())
     (run/'NuGet.Config').write_text('<configuration><packageSources><clear/><add key="nuget.org" value="https://api.nuget.org/v3/index.json"/></packageSources><fallbackPackageFolders><clear/></fallbackPackageFolders></configuration>\n')
     env=dict(os.environ,NUGET_PACKAGES=str(run/'packages'),NUGET_HTTP_CACHE_PATH=str(run/'http-cache'))
     outcomes=[]
@@ -62,7 +67,11 @@ def main():
         (app/'Program.cs').write_text(example['source'])
         support=[{'path':path.relative_to(baseline/'app').as_posix(),'text':path.read_text()} for path in sorted((baseline/'app/obj/Release/netwasm0.1').glob('*.cs'))]
         for index,file in enumerate(support): (app/f'Support{index}.cs').write_text(file['text'])
-        refs=''.join(f'<PackageReference Include="{package}" Version="[{version}]"/>' for package in PACKAGES[recipe])
+        package_versions = {package_version(pins, package) for package in PACKAGES[recipe]}
+        version = package_versions.pop() if package_versions else pins['sources']['libraries']['packageVersion']
+        if package_versions:
+            raise RuntimeError(f'{recipe} requires packages from different release versions')
+        refs=''.join(f'<PackageReference Include="{package}" Version="[{package_version(pins, package)}]"/>' for package in PACKAGES[recipe])
         contract = '<NetWasmComponentContract>async-command</NetWasmComponentContract>' if recipe in ASYNC_RECIPES else ''
         (app/'NetWasmApp.csproj').write_text('<Project Sdk="NetWasm.Sdk"><PropertyGroup><OutputType>Exe</OutputType><TargetFramework>netwasm0.1</TargetFramework><ImplicitUsings>disable</ImplicitUsings><Nullable>enable</Nullable><GenerateAssemblyInfo>false</GenerateAssemblyInfo><GenerateTargetFrameworkAttribute>false</GenerateTargetFrameworkAttribute>'+contract+'</PropertyGroup><ItemGroup>'+refs+'</ItemGroup></Project>\n')
         (app/'linker.targets').write_text('<Project><Target Name="UseVerifiedExampleLinker" AfterTargets="NetWasmSdkResolveBuildEnvironment"><PropertyGroup><NetWasmWasmLdPath>'+escape(str(args.wasm_ld.absolute()))+'</NetWasmWasmLdPath></PropertyGroup></Target></Project>')
@@ -79,6 +88,7 @@ def main():
         stdout=execute(run_command,'run')
         expected={
             'regex':'Ada: 42\nGrace: 99\nAda scored 42, Grace scored 99\n',
+            'fluentvalidation':'Valid: False\nName: Name is required.\nAge: Age must be 42.\n',
             'di':'Hello, Ada!\n',
             'logging':'info WidgetClient[1]\n      Fetched 42 widgets in 12.5 ms\n',
             'hashing':'CRC32: CBF43926\n',

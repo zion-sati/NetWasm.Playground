@@ -102,6 +102,11 @@ def package_members(package, version, members):
 def rebind_notice_origins(stage, pins):
     origins_path = stage / 'notices/origins.json'
     origins = json.loads(origins_path.read_text())
+    source_families = {source['repository']: family for family, source in pins.items()}
+    for target, catalog_entry in NOTICES.PUBLIC_CATALOG['files'].items():
+        source = catalog_entry['source']
+        if target not in origins['files'] and source.get('repository') in source_families:
+            origins['files'][target] = json.loads(json.dumps(catalog_entry))
     versions = {
         'netwasm.toolchain': pins['netwasm']['packageVersion'],
         'netwasm.tunit': pins['tunit']['packageVersion'],
@@ -117,15 +122,24 @@ def rebind_notice_origins(stage, pins):
         if catalog_entry is not None:
             entry['covers'] = catalog_entry['covers']
         source = entry['source']
-        source_family = next((family for family in ('netwasm', 'libraries')
-                              if source.get('kind') == 'git' and
-                              source.get('repository') == pins[family]['repository']), None)
+        if catalog_entry is not None:
+            catalog_source = catalog_entry['source']
+            same_nuget_source = (source.get('kind') == catalog_source.get('kind') == 'nuget' and
+                                  source.get('package') == catalog_source.get('package'))
+            same_git_source = (source.get('kind') == catalog_source.get('kind') == 'git' and
+                                source.get('repository') == catalog_source.get('repository'))
+            if same_nuget_source or same_git_source:
+                source['path'] = catalog_source['path']
+        source_family = (source_families.get(source.get('repository'))
+                         if source.get('kind') == 'git' else None)
         if source_family:
             commit = pins[source_family]['commit']
             repository = source['repository'].removeprefix('https://github.com/')
             notice = download(f"https://raw.githubusercontent.com/{repository}/{commit}/{source['path']}",
                               64 * 1024)
-            (stage / 'notices' / target).write_bytes(notice)
+            notice_path = stage / 'notices' / target
+            notice_path.parent.mkdir(parents=True, exist_ok=True)
+            notice_path.write_bytes(notice)
             source['commit'] = commit
             entry.update(bytes=len(notice), sha256=sha256(notice))
             continue
@@ -162,10 +176,15 @@ def add_guest_providers(stage, toolchain_archive):
     shutil.rmtree(browser)
 
 
+def add_component_host(stage):
+    subprocess.run(['node', str(ROOT / 'eng/bundle-toolchain-modules.mjs'), str(stage),
+                    '--hosting-only'], check=True)
+
+
 def add_http_example(stage, library_version):
     member = 'lib/NetWasm,Version=v0.1/System.Net.Http.dll'
     assembly = package_members('netwasm.system.net.http', library_version, {
-        member: '153296af818068b66e91b7bdfe0ed861a9f13093511f41c7e550e4512ebf6f86',
+        member: 'b35165fe34a6f179af6af3f6971af8e4f6999b0f07c4258c45413d662b25f528',
     })[member]
     for role in ('references', 'implementations'):
         destination = stage / role / 'System.Net.Http.dll'
@@ -197,7 +216,10 @@ ASSEMBLY_PACKAGES = {
     'System.Xml.ReaderWriter.dll': 'netwasm.system.xml',
     'TUnit.Assertions.dll': 'netwasm.tunit.assertions',
     'TUnit.Core.dll': 'netwasm.tunit.core',
+    'FluentValidation.dll': 'netwasm.fluentvalidation',
 }
+
+HOSTING_MODULES = PREPARE.HOSTING_MODULES
 
 
 def public_member(package, version, member):
@@ -206,11 +228,58 @@ def public_member(package, version, member):
         return package_zip.read(member)
 
 
+def add_compiler_wit_inventories(stage, version):
+    with tempfile.TemporaryDirectory(prefix='.compiler-wit-', dir=stage.parent) as temporary:
+        temporary = Path(temporary)
+        runner = temporary / 'run-wasm-tools.mjs'
+        module = temporary / 'wasm-tools.wasm'
+        runner.write_bytes(public_member(
+            'netwasm.toolchain', version, 'tools/wasm-tools/run-wasm-tools.mjs'))
+        module.write_bytes(public_member(
+            'netwasm.toolchain', version, 'tools/wasm-tools/wasm-tools.wasm'))
+        wit = stage / 'compiler/compiler.wit.wasm'
+        normalized = subprocess.run([
+            'node', '--no-warnings', str(runner), str(module), 'component', 'wit',
+            str(wit), '--json', '--no-docs',
+        ], cwd=temporary, capture_output=True, check=False)
+        if normalized.returncode != 0:
+            raise ValueError(
+                'Could not normalize compiler WIT: '
+                f'{normalized.stderr.decode(errors="replace").strip()}')
+        try:
+            json.loads(normalized.stdout)
+        except (UnicodeDecodeError, json.JSONDecodeError) as error:
+            raise ValueError('Invalid normalized compiler WIT') from error
+        (stage / 'compiler/compiler-wit.json').write_bytes(normalized.stdout)
+        for world, name in (
+                ('netwasm:platform/platform@1.0.0', 'compiler-wit-platform.wat'),
+                ('netwasm:platform/async-platform@1.0.0', 'compiler-wit-async-platform.wat')):
+            result = subprocess.run([
+                'node', '--no-warnings', str(runner), str(module), 'component', 'embed',
+                str(wit), '--world', world, '--dummy', '-t',
+            ], cwd=temporary, capture_output=True, check=False)
+            if result.returncode != 0:
+                raise ValueError(
+                    f'Could not derive compiler WIT core bindings for {world}: '
+                    f'{result.stderr.decode(errors="replace").strip()}')
+            if not result.stdout.startswith(b'(module') or len(result.stdout) > 1024 * 1024:
+                raise ValueError(f'Invalid compiler WIT core bindings for {world}')
+            (stage / 'compiler' / name).write_bytes(result.stdout)
+
+
 def refresh_public_assets(stage, pins, runtime_plan=None):
     """Replace every versioned compiler input in the pinned reusable browser base."""
     core = pins['netwasm']['packageVersion']
     libraries = pins['libraries']['packageVersion']
     tunit = pins['tunit']['packageVersion']
+    fluentvalidation = pins['fluentvalidation']['packageVersion']
+
+    def assembly_version(package):
+        if package.startswith('netwasm.tunit'):
+            return tunit
+        if package == 'netwasm.fluentvalidation':
+            return fluentvalidation
+        return libraries
 
     def replace(relative, package, version, member):
         destination = stage / relative
@@ -224,8 +293,14 @@ def refresh_public_assets(stage, pins, runtime_plan=None):
             'runtime/NetWasm.CoreLib.dll')
     replace('compiler/compiler.wit.wasm', 'netwasm.toolchain', core,
             'tools/wit-packages/compiler.wit.wasm')
+    add_compiler_wit_inventories(stage, core)
     replace('async-command.wit.wasm', 'netwasm.toolchain', core,
             'tools/wit-packages/async-command.wit.wasm')
+    hosting_directory = stage / 'hosting'
+    hosting_directory.mkdir(exist_ok=True)
+    for name in HOSTING_MODULES:
+        (hosting_directory / name).write_bytes(public_member(
+            'netwasm.hosting', core, f'tools/netwasm/hosting/{name}'))
     runtime = json.loads(public_member('netwasm.runtime.pack', core, 'runtime/runtime-pack.json'))
     target = next((item for item in runtime.get('targets', []) if item.get('target') == 'wasm32'), None)
     if target is None or not isinstance(target.get('systemLibraries', {}).get('names'), list):
@@ -287,7 +362,7 @@ def refresh_public_assets(stage, pins, runtime_plan=None):
         (system_directory / name).write_bytes(payload)
 
     for name, package in ASSEMBLY_PACKAGES.items():
-        version = tunit if package.startswith('netwasm.tunit') else libraries
+        version = assembly_version(package)
         member = f'lib/NetWasm,Version=v0.1/{name}'
         assembly = public_member(package, version, member)
         for role in ('references', 'implementations'):
@@ -303,6 +378,8 @@ def refresh_public_assets(stage, pins, runtime_plan=None):
         'pipelines': ['System.IO.Pipelines.dll', 'System.Memory.dll'],
         'web-encoding': ['System.Text.Encodings.Web.dll'],
         'xml': ['System.Xml.ReaderWriter.dll'],
+        'fluentvalidation': ['FluentValidation.dll', 'System.Linq.dll',
+                             'System.Text.RegularExpressions.dll'],
         'logging': ['Microsoft.Extensions.Logging.Abstractions.dll', 'Microsoft.Extensions.Logging.dll',
                     'Microsoft.Extensions.Options.dll', 'Microsoft.Extensions.Primitives.dll',
                     'Microsoft.Extensions.DependencyInjection.Abstractions.dll',
@@ -320,7 +397,8 @@ def refresh_public_assets(stage, pins, runtime_plan=None):
         if recipe_path.name == 'tunit-support.json':
             continue
         recipe = json.loads(recipe_path.read_text())
-        recipe['version'] = tunit if recipe['id'] == 'tunit' else libraries
+        recipe['version'] = (tunit if recipe['id'] == 'tunit' else
+                             fluentvalidation if recipe['id'] == 'fluentvalidation' else libraries)
         recipe_path.write_bytes(encoded(recipe))
 
     inputs_path = stage / 'compiler/inputs.json'
@@ -461,6 +539,7 @@ def main():
         refresh_public_assets(stage, pins, runtime_plan)
         rebind_notice_origins(stage, release_pins)
         add_guest_providers(stage, package_archive('netwasm.toolchain', pins['netwasm']['packageVersion']))
+        add_component_host(stage)
         add_http_example(stage, pins['libraries']['packageVersion'])
         framework = stage / 'compiler/_framework'
         shutil.copytree(args.compiler_framework, framework)

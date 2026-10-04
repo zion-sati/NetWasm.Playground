@@ -238,7 +238,8 @@ export class PlaygroundPipeline {
     try {
       if (!['hello', 'csharp15-tour', 'datetime', 'http',
         'allocation', 'linq', 'async-linq', 'pipelines', 'web-encoding', 'xml', 'json-dom',
-        'json-generated', 'tunit', 'regex', 'di', 'logging', 'hashing'].includes(snapshot.recipeId)) throw new Error('Unknown compilation recipe');
+        'json-generated', 'tunit', 'regex', 'di', 'logging', 'hashing',
+        'fluentvalidation'].includes(snapshot.recipeId)) throw new Error('Unknown compilation recipe');
       if (!optimizationModes.includes(optimization)) throw new Error('Unknown optimization mode');
       if (!['15', 'preview'].includes(snapshot.language) ||
           (snapshot.updatedMemorySafetyRules && snapshot.language !== 'preview'))

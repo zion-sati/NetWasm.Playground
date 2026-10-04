@@ -8,6 +8,8 @@ import { pathToFileURL } from 'node:url';
 const stage = resolve(process.argv[2] ?? '');
 if (!process.argv[2]) throw Error('Usage: bundle-toolchain-modules.mjs <staging-directory>');
 const providersOnly = process.argv[3] === '--providers-only';
+const hostingOnly = process.argv[3] === '--hosting-only';
+if (process.argv[3] && !providersOnly && !hostingOnly) throw Error('Unknown bundle mode');
 
 const temporary = await mkdtemp(join(tmpdir(), 'netwasm-toolchain-modules-'));
 const specifications = [
@@ -37,8 +39,14 @@ const specifications = [
       import * as cliModule from ${JSON.stringify(pathToFileURL(join(stage, 'jco/preview2/cli.js')).href)};
       import * as io from ${JSON.stringify(pathToFileURL(join(stage, 'jco/preview2/io.js')).href)};
       import * as clockModule from ${JSON.stringify(pathToFileURL(join(stage, 'jco/preview2/clocks.js')).href)};
-      export { executeComponent } from ${JSON.stringify(pathToFileURL(join(stage, 'hosting/component-executor.mjs')).href)};
       export { jco, cliModule, io, clockModule };
+    `,
+  },
+  {
+    name: 'component-host',
+    destination: 'jco/component-host.mjs',
+    source: `
+      export { executeComponent } from ${JSON.stringify(pathToFileURL(join(stage, 'hosting/component-executor.mjs')).href)};
     `,
   },
   {
@@ -56,14 +64,22 @@ const specifications = [
   },
 ];
 
+const hostingObsolete = [
+  'hosting/canonical-component-binder.mjs', 'hosting/command-executor.mjs',
+  'hosting/component-execution-preparation.mjs', 'hosting/component-executor.mjs',
+  'hosting/component-managed-exception-host.mjs', 'hosting/diagnostic-command-export.mjs',
+  'hosting/execution-contracts.mjs', 'hosting/execution-result.mjs',
+  'hosting/execution-scope-closer.mjs', 'hosting/guest-wake-notifier.mjs',
+  'hosting/managed-errors.mjs', 'hosting/managed-exception-details.mjs',
+  'hosting/managed-exception-reporter.mjs',
+  'hosting/managed-process-observer.mjs', 'hosting/pollable-reactor.mjs',
+  'hosting/terminal-managed-export.mjs',
+];
+
 const obsolete = [
   'hosts/binaryen-host.mjs', 'hosts/tool-inputs.mjs', 'hosts/wasm-tools-host.mjs',
   'hosts/wasm32-memory-ceiling.mjs', 'lld/netwasm-browser-lld.mjs', 'lld/netwasm-lld.mjs',
-  'hosting/canonical-component-binder.mjs', 'hosting/command-executor.mjs',
-  'hosting/component-execution-preparation.mjs', 'hosting/component-executor.mjs',
-  'hosting/execution-contracts.mjs', 'hosting/execution-result.mjs',
-  'hosting/execution-scope-closer.mjs', 'hosting/guest-wake-notifier.mjs',
-  'hosting/managed-process-observer.mjs', 'hosting/pollable-reactor.mjs',
+  ...hostingObsolete,
   'jco/browser.js', 'jco/js-component-bindgen-component.js', 'jco/preview2/cli.js',
   'jco/preview2/clocks.js', 'jco/preview2/common.js', 'jco/preview2/config.js',
   'jco/preview2/environment.js', 'jco/preview2/filesystem.js', 'jco/preview2/http.js',
@@ -75,7 +91,9 @@ const obsolete = [
 ];
 
 try {
-  for (const specification of providersOnly ? specifications.filter(item => item.name === 'guest-providers') : specifications) {
+  const selected = providersOnly ? specifications.filter(item => item.name === 'guest-providers')
+    : hostingOnly ? specifications.filter(item => item.name === 'component-host') : specifications;
+  for (const specification of selected) {
     const entry = join(temporary, `${specification.name}.mjs`);
     await writeFile(entry, specification.source);
     const bundle = await rolldown({ input: entry, external: id => id === 'node:fs/promises' });
@@ -89,10 +107,11 @@ try {
     const code = chunks[0].code.replace(/^\/\/#(?:end)?region.*\n/gm, '');
     await writeFile(destination, code);
   }
-  if (!providersOnly) for (const relative of obsolete) await rm(join(stage, relative));
+  if (hostingOnly) for (const relative of hostingObsolete) await rm(join(stage, relative));
+  else if (!providersOnly) for (const relative of obsolete) await rm(join(stage, relative));
 
   // Rolldown preserves these URLs relative to the generated guest module in jco/.
-  if (!providersOnly) {
+  if (!providersOnly && !hostingOnly) {
     const guest = await readFile(join(stage, 'jco/guest-runtime.mjs'), 'utf8');
     for (const name of ['js-component-bindgen-component.core.wasm', 'js-component-bindgen-component.core2.wasm']) {
       if (!guest.includes(`./${name}`)) throw Error(`Guest runtime lost ${name} URL`);

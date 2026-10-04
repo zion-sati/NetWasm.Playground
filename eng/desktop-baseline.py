@@ -63,8 +63,26 @@ def main():
     app = run / "app"
     app.mkdir()
     with zipfile.ZipFile(run / "templates.nupkg") as archive:
-        for name in ("NetWasmApp.csproj", "Program.cs", "global.json"):
-            (app / name).write_bytes(archive.read("content/NetWasm.App/" + name))
+        template_files = {
+            "NetWasmApp.csproj": (
+                "content/NetWasm.App/console/NetWasmProject.csproj",
+                "content/NetWasm.App/NetWasmApp.csproj",
+            ),
+            "Program.cs": (
+                "content/NetWasm.App/console/Program.cs",
+                "content/NetWasm.App/Program.cs",
+            ),
+            "global.json": (
+                "content/NetWasm.App/base/global.json",
+                "content/NetWasm.App/global.json",
+            ),
+        }
+        available = set(archive.namelist())
+        for destination, candidates in template_files.items():
+            source = next((candidate for candidate in candidates if candidate in available), None)
+            if source is None:
+                raise RuntimeError(f"Published app template lacks {destination}")
+            (app / destination).write_bytes(archive.read(source))
     settings = json.loads((app / "global.json").read_text())
     settings["sdk"] = {"version": toolchain["dotnetSdk"], "rollForward": "disable",
                        "allowPrerelease": False}

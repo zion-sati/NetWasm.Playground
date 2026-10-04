@@ -82,6 +82,8 @@ async function initialize() {
       loader.load('compiler/target-implementation.dll').then(toBase64),
       loader.load('compiler/compiler-wit.json').then(bytes => new TextDecoder().decode(bytes)),
       loader.load('compiler/compiler.wit.wasm').then(toBase64),
+      loader.load('compiler/compiler-wit-platform.wat').then(bytes => new TextDecoder().decode(bytes)),
+      loader.load('compiler/compiler-wit-async-platform.wat').then(bytes => new TextDecoder().decode(bytes)),
       runtimeManifestPromise,
       (async () => {
         const runtimeManifest = JSON.parse(await runtimeManifestPromise);
@@ -104,7 +106,7 @@ async function initialize() {
 serveWorker(async (data, emit) => {
   report = emit;
   if (data.operation !== 'compile' && data.operation !== 'prune' && data.operation !== 'initialize') throw Error('Unsupported compiler operation');
-  if (data.operation === 'compile' && (![...coreRecipes, 'http', 'allocation', 'linq', 'async-linq', 'pipelines', 'web-encoding', 'xml', 'json-dom', 'json-generated', 'tunit', 'regex', 'di', 'logging', 'hashing'].includes(data.recipe) || typeof data.source !== 'string' || data.source.length > 65536 || new TextEncoder().encode(data.source).length > 65536 || !['15', 'preview'].includes(data.language) || !['none', 'O0', 'O1', 'O2', 'O3', 'Os', 'Oz'].includes(data.optimization) || typeof data.updatedMemorySafetyRules !== 'boolean' || (data.updatedMemorySafetyRules && data.language !== 'preview'))) throw Error('Invalid compiler source, recipe, language, or optimization settings');
+  if (data.operation === 'compile' && (![...coreRecipes, 'http', 'allocation', 'linq', 'async-linq', 'pipelines', 'web-encoding', 'xml', 'json-dom', 'json-generated', 'tunit', 'regex', 'di', 'logging', 'hashing', 'fluentvalidation'].includes(data.recipe) || typeof data.source !== 'string' || data.source.length > 65536 || new TextEncoder().encode(data.source).length > 65536 || !['15', 'preview'].includes(data.language) || !['none', 'O0', 'O1', 'O2', 'O3', 'Os', 'Oz'].includes(data.optimization) || typeof data.updatedMemorySafetyRules !== 'boolean' || (data.updatedMemorySafetyRules && data.language !== 'preview'))) throw Error('Invalid compiler source, recipe, language, or optimization settings');
   const module = data.operation === 'prune' ? (() => {
     if (!(data.module instanceof Uint8Array) || data.module.length > 5 * 1048576 || typeof data.prefix !== 'string' || data.prefix.length > 255) throw Error('Invalid export pruning request');
     return data.module.slice();
