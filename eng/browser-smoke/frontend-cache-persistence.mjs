@@ -1,3 +1,4 @@
+import { setOptimizations } from './playground-ui.mjs';
 import { browserType } from './engine.mjs';
 import { mkdirSync, writeFileSync } from 'node:fs';
 
@@ -27,7 +28,7 @@ try {
   const url = process.env.PLAYGROUND_URL ?? 'http://127.0.0.1:4173/';
   const compile = async () => {
     await page.locator('.monaco-editor').waitFor();
-    await page.getByLabel('Optimization', { exact: true }).selectOption('none');
+    await setOptimizations(page, 'none');
     await page.locator('#compile').click();
     await page.waitForFunction(() => document.querySelector('#stop').disabled, undefined,
       { timeout: 240_000 });

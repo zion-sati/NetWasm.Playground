@@ -1,3 +1,4 @@
+import { openSample, setOptimizations } from './playground-ui.mjs';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { browserName, browserType } from './engine.mjs';
@@ -36,8 +37,8 @@ try {
   });
   await page.goto(url);
   await page.locator('.monaco-editor').waitFor();
-  await page.getByLabel('Example', { exact: true }).selectOption(contract.helloWorld42.exampleId);
-  await page.getByLabel('Optimization', { exact: true }).selectOption(contract.helloWorld42.optimization);
+  await openSample(page, contract.helloWorld42.exampleId);
+  await setOptimizations(page, contract.helloWorld42.optimization);
   await page.evaluate(() => {
     window.nativeOptimizerStatuses = [];
     new MutationObserver(() => window.nativeOptimizerStatuses.push(document.querySelector('#status').textContent))
@@ -89,8 +90,8 @@ try {
     const fallbackPage = await fallbackContext.newPage();
     await fallbackPage.goto(url);
     await fallbackPage.locator('.monaco-editor').waitFor();
-    await fallbackPage.getByLabel('Example', { exact: true }).selectOption(contract.helloWorld42.exampleId);
-    await fallbackPage.getByLabel('Optimization', { exact: true }).selectOption(contract.helloWorld42.optimization);
+    await openSample(fallbackPage, contract.helloWorld42.exampleId);
+    await setOptimizations(fallbackPage, contract.helloWorld42.optimization);
     await fallbackPage.locator('#run').click();
     await fallbackPage.waitForFunction(() => document.querySelector('#stop').disabled,
       undefined, { timeout: 300_000 });

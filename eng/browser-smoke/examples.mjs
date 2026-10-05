@@ -1,3 +1,4 @@
+import { openSample, setOptimizations } from './playground-ui.mjs';
 import { chromium } from 'playwright';
 import {readFileSync,writeFileSync,mkdirSync} from 'node:fs';
 import {createHash} from 'node:crypto';
@@ -9,9 +10,9 @@ const browser=await chromium.launch({headless:true});const results=[],errors=[];
 try {
  const page=await browser.newPage({acceptDownloads:true});page.on('pageerror',error=>errors.push(String(error)));
  await page.goto(url);await page.locator('.monaco-editor').waitFor();
- await page.getByLabel('Optimization',{exact:true}).selectOption(process.env.PLAYGROUND_COMPARE_DESKTOP_BYTES==='1'?'Oz':'none');
+ await setOptimizations(page, process.env.PLAYGROUND_COMPARE_DESKTOP_BYTES==='1'?'Oz':'none');
  for(const example of expected) {
-  await page.getByLabel('Example',{exact:true}).selectOption(example.id);
+  await openSample(page, example.id);
   if(await page.locator('#download').isEnabled())throw Error('Recipe change retained stale download');
   await page.locator('#run').click();
   await page.waitForFunction(()=>document.querySelector('#stop').disabled,undefined,{timeout:240000});
@@ -27,7 +28,7 @@ try {
   console.log(`PASS: browser ${example.id} ${bytes.length} bytes`);
  }
  // Edit declarations/source within a library recipe; compilation must use the snapshot.
- await page.getByLabel('Example',{exact:true}).selectOption('linq');
+ await openSample(page, 'linq');
  await page.locator('#editor .view-lines').click({position:{x:80,y:12}});await page.keyboard.press('ControlOrMeta+A');
  await page.keyboard.insertText('using System; using System.Linq; Console.WriteLine(new[]{1,2,3}.Where(x=>x>1).Sum());');
  await page.locator('#run').click();await page.waitForFunction(()=>document.querySelector('#stop').disabled,undefined,{timeout:180000});

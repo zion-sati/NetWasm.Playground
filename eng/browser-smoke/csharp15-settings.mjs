@@ -1,3 +1,4 @@
+import { openSample, setOptimizations } from './playground-ui.mjs';
 import { chromium } from 'playwright';
 import { mkdirSync, writeFileSync } from 'node:fs';
 
@@ -11,8 +12,8 @@ try {
   page.on('pageerror', error => errors.push(String(error)));
   await page.goto(process.env.PLAYGROUND_URL ?? 'http://127.0.0.1:4173/');
   await page.locator('.monaco-editor').waitFor();
-  await page.getByLabel('Optimization', { exact: true }).selectOption('none');
-  await page.getByLabel('Example', { exact: true }).selectOption('csharp15-tour');
+  await setOptimizations(page, 'none');
+  await openSample(page, 'csharp15-tour');
   async function compileExpecting(success) {
     await page.locator('#compile').click();
     await page.waitForFunction(() => document.querySelector('#compile').disabled &&

@@ -21,8 +21,7 @@ declare const __PLAYGROUND_VERSION__: string;
 (globalThis as typeof globalThis & { MonacoEnvironment: unknown }).MonacoEnvironment = { getWorker: () => new EditorWorker() };
 document.querySelector<HTMLDivElement>('#app')!.innerHTML = `
 <section class="workbench" aria-label="C# playground">
-  <div class="ide-toolbar"><label>Project <select id="example" aria-label="Example"></select></label><div class="actions"><button id="run" class="primary">Run <span aria-hidden="true">▶</span></button><button id="compile"><span class="compile-spinner" aria-hidden="true"></span>Publish</button><button id="stop" disabled>Stop</button><button id="download" disabled>Download</button><button id="settings-toggle" aria-expanded="true">Settings</button></div></div>
-  <aside id="settings" class="settings"><label>Language <select id="language" aria-label="Language"><option value="15">C# 15</option><option value="preview">C# 15 preview</option></select></label><label>Publish optimization <select id="optimization" aria-label="Optimization"></select></label><label id="memory-safety-setting" class="feature-setting" hidden><input id="updated-memory-safety" type="checkbox"><span>Updated memory safety rules</span></label><button id="clear-cache" type="button">Clear compilation cache</button></aside>
+  <div class="ide-toolbar"><button id="open-samples" class="project-button"><span>Project</span><strong id="project-name">Hello World</strong><span aria-hidden="true">⌄</span></button><div class="actions"><button id="run" class="primary">Run <span aria-hidden="true">▶</span></button><button id="compile"><span class="compile-spinner" aria-hidden="true"></span>Publish</button><button id="stop" disabled>Stop</button><button id="download" disabled>Download</button><button id="settings-toggle">Settings</button></div></div>
   <div class="ide-grid">
     <aside class="explorer"><div class="ide-heading"><strong>Explorer</strong><div><button id="new-file" title="New C# file">+</button><button id="import-files" title="Import C# files">↑</button><button id="rename-file" title="Rename selected file">✎</button><button id="delete-file" title="Delete selected file">×</button></div></div><input id="file-input" type="file" accept=".cs,text/plain" multiple hidden><div id="file-tree" role="tree" aria-label="Project files"></div></aside>
     <section class="editor-area"><div id="editor-tabs" class="editor-tabs" role="tablist"></div><div class="pane-heading"><h2 id="source-name">Program.cs</h2><span>C# · Release</span></div><div id="editor" aria-label="C# source editor"></div></section>
@@ -31,6 +30,9 @@ document.querySelector<HTMLDivElement>('#app')!.innerHTML = `
   <div id="toolchain-progress" class="toolchain-progress" role="status" aria-live="polite" hidden><div><strong>Preparing toolchain</strong><span id="toolchain-progress-detail">Reading manifest…</span></div><progress id="toolchain-progress-bar" aria-label="Toolchain preload progress"></progress></div>
   <footer class="status-bar"><div id="status" role="status" aria-live="polite">Ready</div><div id="project-status">1 file</div></footer><aside id="compilation-success" class="compilation-success" hidden><span>Compiled entirely in your browser with NetWasm.</span><a href="https://github.com/zion-sati/NetWasm" target="_blank" rel="noreferrer">Follow the project on GitHub →</a></aside>
 </section><p class="cache-note">Your project stays in this browser. Compilation artifacts are cached locally for faster rebuilds.</p><p id="footnote" class="footnote">Run uses the fastest build. Publish uses the selected size optimization and creates a downloadable WASI Preview 2 component.</p>`;
+document.body.insertAdjacentHTML('beforeend', `
+<dialog id="samples-dialog" class="ide-dialog"><form method="dialog"><header><div><h2>Open a sample</h2><p>Choose a complete project to open in the Playground.</p></div><button value="cancel" aria-label="Close">×</button></header><div id="sample-list" class="sample-list"></div></form></dialog>
+<dialog id="settings-dialog" class="ide-dialog settings-dialog"><form method="dialog"><header><div><h2>Playground settings</h2><p>Run and Publish use independent build profiles.</p></div><button value="cancel" aria-label="Close">×</button></header><div class="settings-grid"><section><h3>Run</h3><p>Optimize for the shortest edit and test loop.</p><label>Optimization <select id="run-optimization" aria-label="Run optimization"></select></label></section><section><h3>Publish</h3><p>Optimize the downloadable artifact.</p><label>Optimization <select id="optimization" aria-label="Publish optimization"></select></label></section><section class="compiler-settings"><h3>Compiler</h3><label>Language <select id="language" aria-label="Language"><option value="15">C# 15</option><option value="preview">C# 15 preview</option></select></label><label id="memory-safety-setting" class="feature-setting" hidden><input id="updated-memory-safety" type="checkbox"><span>Updated memory safety rules</span></label><button id="clear-cache" type="button">Clear compilation cache</button></section></div><footer><button value="cancel" class="primary">Done</button></footer></form></dialog>`);
 const el = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id)! as T;
 el('playground-version').textContent = `v${__PLAYGROUND_VERSION__}`;
 const compileButton = el<HTMLButtonElement>('compile');
@@ -38,13 +40,16 @@ const runButton = el<HTMLButtonElement>('run');
 const stopButton = el<HTMLButtonElement>('stop');
 const downloadButton = el<HTMLButtonElement>('download');
 const clearCacheButton = el<HTMLButtonElement>('clear-cache');
-const exampleSelect = el<HTMLSelectElement>('example');
+const samplesDialog = el<HTMLDialogElement>('samples-dialog');
+const settingsDialog = el<HTMLDialogElement>('settings-dialog');
+const runOptimizationSelect = el<HTMLSelectElement>('run-optimization');
 const optimizationSelect = el<HTMLSelectElement>('optimization');
 const languageSelect = el<HTMLSelectElement>('language');
 const updatedMemorySafety = el<HTMLInputElement>('updated-memory-safety');
 const memorySafetySetting = el<HTMLLabelElement>('memory-safety-setting');
-for (const example of examples) { const option = document.createElement('option'); option.value = example.id; option.textContent = example.name; exampleSelect.append(option); }
-for (const mode of optimizationModes) { const option = document.createElement('option'); option.value = mode; option.textContent = optimizationLabels[mode]; optimizationSelect.append(option); }
+for (const mode of optimizationModes) { for (const select of [runOptimizationSelect, optimizationSelect]) { const option = document.createElement('option'); option.value = mode; option.textContent = optimizationLabels[mode]; select.append(option); } }
+runOptimizationSelect.value = localStorage.getItem('netwasm.runOptimization') ?? 'none';
+if (!optimizationModes.includes(runOptimizationSelect.value as OptimizationMode)) runOptimizationSelect.value = 'none';
 optimizationSelect.value = localStorage.getItem('netwasm.publishOptimization') ?? 'Oz';
 if (!optimizationModes.includes(optimizationSelect.value as OptimizationMode)) optimizationSelect.value = 'Oz';
 languageSelect.value = localStorage.getItem('netwasm.language') ?? '15';
@@ -145,7 +150,7 @@ function replaceProject(next: PlaygroundProject) {
   for (const model of models.values()) model.dispose();
   models.clear();
   project = next;
-  if ([...exampleSelect.options].some(option => option.value === project.recipeId)) exampleSelect.value = project.recipeId;
+  el('project-name').textContent = project.name;
   revision++;
   comparisons.clear(); showComparisons(); invalidateDownload();
   renderFiles(); openFile(project.activeFileId); setDiagnostics([]); scheduleSave();
@@ -211,21 +216,49 @@ function showPreloadProgress(progress: ToolchainPreloadProgress) {
   if (!active && el('status').textContent.startsWith('Preparing toolchain')) el('status').textContent = `Preparing toolchain · ${percentage}%`;
 }
 editor.onDidChangeModelContent(() => { if (switchingModel) return; const file = activeFile(); file.text = editor.getValue(); revision++; comparisons.clear(); showComparisons(); invalidateDownload(); setDiagnostics([]); scheduleSave(); el('status').textContent = unsupported ?? (active ? 'Project changed · result pending for earlier revision' : 'Project changed'); });
-exampleSelect.onchange = () => {
+function loadExample(recipeId: string) {
   comparisons.clear(); showComparisons();
-  const example = examples.find(example => example.id === exampleSelect.value);
+  const example = examples.find(candidate => candidate.id === recipeId);
   if (!example) return;
   const previousRevision = revision;
   languageSelect.value = example.language ?? '15';
   updatedMemorySafety.checked = example.updatedMemorySafetyRules ?? false;
   memorySafetySetting.hidden = languageSelect.value !== 'preview';
-  replaceProject(createProject(example.name, example.files ?? [{ path: example.id === 'tunit' ? 'Tests.cs' : 'Program.cs', text: example.source }], example.id));
+  const next = createProject(example.name, example.files ?? [{ path: example.id === 'tunit' ? 'Tests.cs' : 'Program.cs', text: example.source }], example.id);
+  next.kind = example.kind ?? 'command';
+  replaceProject(next);
   // A recipe change must invalidate its artifact even when the source is equal.
   if (revision === previousRevision) { revision++; invalidateDownload(); setDiagnostics([]); el('status').textContent = 'Example changed'; }
   el('footnote').textContent = example.id === 'tunit' ? 'TUnit uses the NetWasm asynchronous component host and the generated guest test runner.' : 'Projects can contain up to 32 C# files. Run uses the fast profile; Publish creates a downloadable component.';
   editor.setScrollTop(0);
   editor.setPosition({ lineNumber: 1, column: 1 });
-};
+  samplesDialog.close();
+}
+const categories = ['Getting started', 'Language and runtime', 'Libraries', 'Interop and workers', 'Testing'] as const;
+for (const category of categories) {
+  const members = examples.filter(example => (example.category ?? 'Libraries') === category);
+  if (!members.length) continue;
+  const section = document.createElement('section');
+  const heading = document.createElement('h3');
+  heading.textContent = category;
+  section.append(heading);
+  for (const example of members) {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'sample-card';
+    button.dataset.sampleId = example.id;
+    const name = document.createElement('strong');
+    name.textContent = example.name;
+    const description = document.createElement('span');
+    description.textContent = example.description ?? 'Open this sample project.';
+    button.append(name, description);
+    button.onclick = () => loadExample(example.id);
+    section.append(button);
+  }
+  el('sample-list').append(section);
+}
+el<HTMLButtonElement>('open-samples').onclick = () => samplesDialog.showModal();
+runOptimizationSelect.onchange = () => { localStorage.setItem('netwasm.runOptimization', runOptimizationSelect.value); invalidateDownload(); el('status').textContent = `Run optimization changed to ${optimizationLabels[runOptimizationSelect.value as OptimizationMode]}`; };
 optimizationSelect.onchange = () => { localStorage.setItem('netwasm.publishOptimization', optimizationSelect.value); invalidateDownload(); el('status').textContent = `Publish optimization changed to ${optimizationLabels[optimizationSelect.value as OptimizationMode]}`; };
 function languageSettingsChanged() {
   if (languageSelect.value !== 'preview') updatedMemorySafety.checked = false;
@@ -245,11 +278,11 @@ updatedMemorySafety.onchange = () => {
     ? 'Updated memory safety rules enabled'
     : 'Updated memory safety rules disabled';
 };
-function snapshot(run: boolean): SourceSnapshot { return { requestId: ++nextRequest, revision, files: project.files.map(file => ({ ...file })), recipeId: project.recipeId, optimization: run ? 'none' : optimizationSelect.value as OptimizationMode, language: languageSelect.value as LanguageMode, updatedMemorySafetyRules: updatedMemorySafety.checked }; }
-function request(run: boolean) { const job = { snapshot: snapshot(run), run }; selectDock(run ? 'console' : 'build'); if (active) { queued = job; el('status').textContent = 'Latest request queued'; } else void execute(job); }
+function snapshot(run: boolean): SourceSnapshot { return { requestId: ++nextRequest, revision, files: project.files.map(file => ({ ...file })), recipeId: project.recipeId, optimization: (run ? runOptimizationSelect.value : optimizationSelect.value) as OptimizationMode, language: languageSelect.value as LanguageMode, updatedMemorySafetyRules: updatedMemorySafety.checked }; }
+function request(run: boolean) { const job = { snapshot: snapshot(run), run }; selectDock('build'); if (active) { queued = job; el('status').textContent = 'Latest request queued'; } else void execute(job); }
 async function execute(job: { snapshot: SourceSnapshot; run: boolean }) {
   runOnly = job.run && !!compilation?.success && compilation.revision === job.snapshot.revision && compilation.optimization === job.snapshot.optimization && compilation.language === job.snapshot.language && compilation.updatedMemorySafetyRules === job.snapshot.updatedMemorySafetyRules;
-  compileButton.disabled = true; runButton.disabled = true; optimizationSelect.disabled = true; languageSelect.disabled = true; updatedMemorySafety.disabled = true; clearCacheButton.disabled = true;
+  compileButton.disabled = true; runButton.disabled = true; runOptimizationSelect.disabled = true; optimizationSelect.disabled = true; languageSelect.disabled = true; updatedMemorySafety.disabled = true; clearCacheButton.disabled = true;
   document.querySelector('.workbench')!.setAttribute('aria-busy', 'true');
   if (!job.run) setCompilationSuccess(false);
   active = job.snapshot; stopped = false; stopButton.disabled = false; stages.clear(); el('stages').replaceChildren(); el('output').textContent = ''; el('exit').textContent = ''; el('timings').textContent = ''; el('optimizer').textContent = ''; el('status').textContent = 'Starting';
@@ -265,11 +298,12 @@ async function execute(job: { snapshot: SourceSnapshot; run: boolean }) {
       }
     }
     if (job.run && result?.success && !stopped && revision === job.snapshot.revision) {
+      selectDock('console');
       const run = await pipeline.run(result, job.snapshot);
       if (!stopped && revision === job.snapshot.revision) { el('output').textContent = run.stdout + run.stderr; el('exit').textContent = run.exitCode === undefined ? '' : `Exit ${run.exitCode}`; showTimings([...result.timings, ...run.timings]); el('status').textContent = run.cancelled ? 'Stopped' : run.success ? 'Run complete' : run.error ? errorSummary(run.error) : 'Run failed'; if (job.snapshot.recipeId === 'tunit' && !run.cancelled && !run.error && run.exitCode !== undefined) { const report = formatTestReport(run.stdout); el('output').textContent = report.text + run.stderr; el('status').textContent = `Tests complete · ${report.passed} passed · ${report.failed} failed`; } }
     } else if (!stopped && result?.success && revision === job.snapshot.revision) el('status').textContent = 'Compilation complete';
   } catch (error) { if (!stopped && revision === job.snapshot.revision) el('status').textContent = errorSummary(error); }
-  finally { if (stageTimer) clearInterval(stageTimer); stageTimer = undefined; active = undefined; stopButton.disabled = true; compileButton.disabled = !!unsupported; runButton.disabled = !!unsupported; optimizationSelect.disabled = false; languageSelect.disabled = false; updatedMemorySafety.disabled = false; clearCacheButton.disabled = false; document.querySelector('.workbench')!.setAttribute('aria-busy', 'false'); const next = queued; queued = undefined; if (next) void execute(next); }
+  finally { if (stageTimer) clearInterval(stageTimer); stageTimer = undefined; active = undefined; stopButton.disabled = true; compileButton.disabled = !!unsupported; runButton.disabled = !!unsupported; runOptimizationSelect.disabled = false; optimizationSelect.disabled = false; languageSelect.disabled = false; updatedMemorySafety.disabled = false; clearCacheButton.disabled = false; document.querySelector('.workbench')!.setAttribute('aria-busy', 'false'); const next = queued; queued = undefined; if (next) void execute(next); }
 }
 unsupported = browserSupportMessage();
 if (unsupported) { compileButton.disabled = true; runButton.disabled = true; el('status').textContent = unsupported; }
@@ -294,7 +328,7 @@ compileButton.onclick = () => request(false);
 runButton.onclick = () => request(true);
 stopButton.onclick = () => { stopped = true; queued = undefined; pipeline?.stop(); stopButton.disabled = true; el('status').textContent = 'Stopped'; };
 downloadButton.onclick = () => { if (!downloadUrl || publishedCompilation?.revision !== revision) return; const anchor = document.createElement('a'); anchor.href = downloadUrl; anchor.download = `program-${publishedCompilation.optimization ?? 'Oz'}.wasm`; anchor.click(); };
-el<HTMLButtonElement>('settings-toggle').onclick = () => { const settings = el('settings'); settings.hidden = !settings.hidden; el('settings-toggle').setAttribute('aria-expanded', String(!settings.hidden)); };
+el<HTMLButtonElement>('settings-toggle').onclick = () => settingsDialog.showModal();
 for (const button of document.querySelectorAll<HTMLButtonElement>('.dock-tabs [data-panel]')) button.onclick = () => selectDock(button.dataset.panel!);
 el<HTMLButtonElement>('dock-collapse').onclick = () => el('bottom-dock').classList.toggle('collapsed');
 el<HTMLButtonElement>('new-file').onclick = () => {

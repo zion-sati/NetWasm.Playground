@@ -1,3 +1,4 @@
+import { closeSettings, openSample, openSettings, sampleIds } from './playground-ui.mjs';
 import { chromium } from 'playwright';
 
 const base = process.argv[2] ?? 'http://127.0.0.1:4173/';
@@ -10,18 +11,20 @@ try {
   const language = page.getByLabel('Language', { exact: true });
   if (await language.inputValue() !== '15') throw Error('C# 15 is not the default language');
 
-  const ids = await page.getByLabel('Example', { exact: true }).locator('option').evaluateAll(options =>
-    options.map(option => option.value));
+  const ids = await sampleIds(page);
   if (!ids.includes('csharp15-tour')) throw Error('Missing C# 15 feature tour');
   if (ids.filter(id => id.startsWith('csharp15-')).length !== 1)
     throw Error('C# 15 features should be combined into one example');
 
-  await page.getByLabel('Example', { exact: true }).selectOption('csharp15-tour');
+  await openSample(page, 'csharp15-tour');
   if (await language.inputValue() !== 'preview') throw Error('Memory-safety example did not select preview');
   const setting = page.locator('#memory-safety-setting');
+  await openSettings(page);
   if (!await setting.isVisible() || !await page.locator('#updated-memory-safety').isChecked())
     throw Error('Memory-safety opt-in was not selected');
-  await page.getByLabel('Example', { exact: true }).selectOption('hello');
+  await closeSettings(page);
+  await openSample(page, 'hello');
+  await openSettings(page);
   if (await language.inputValue() !== '15' || await setting.isVisible() || await page.locator('#updated-memory-safety').isChecked())
     throw Error('Stable example did not restore stable C# 15 settings');
 
@@ -31,6 +34,7 @@ try {
   await language.selectOption('15');
   if (await setting.isVisible() || await page.locator('#updated-memory-safety').isChecked())
     throw Error('Stable language mode retained a preview-only feature');
+  await closeSettings(page);
 
   const overflow = await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth);
   if (overflow) throw Error('C# 15 controls overflow the viewport');

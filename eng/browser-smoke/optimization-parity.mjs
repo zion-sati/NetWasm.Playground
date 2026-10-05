@@ -1,3 +1,4 @@
+import { openSample, setOptimizations } from './playground-ui.mjs';
 import { browserType } from './engine.mjs';
 import { createHash } from 'node:crypto';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
@@ -17,11 +18,11 @@ try {
   await page.locator('.monaco-editor').waitFor();
   await page.locator('#clear-cache').click();
   await page.locator('#status').filter({ hasText: 'Compilation cache cleared' }).waitFor();
-  await page.getByLabel('Example', { exact: true }).selectOption(example);
+  await openSample(page, example);
 
   const results = [];
   for (const mode of modes) {
-    await page.getByLabel('Optimization', { exact: true }).selectOption(mode);
+    await setOptimizations(page, mode);
     await page.locator('#compile').click();
     await page.waitForFunction(() => document.querySelector('#stop').disabled, undefined,
       { timeout: 300_000 });

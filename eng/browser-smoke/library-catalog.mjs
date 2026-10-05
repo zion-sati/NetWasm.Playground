@@ -1,3 +1,4 @@
+import { openSample, sampleIds, setOptimizations } from './playground-ui.mjs';
 import { chromium } from 'playwright';
 
 const url = process.env.PLAYGROUND_URL ?? 'http://127.0.0.1:4173/';
@@ -19,12 +20,11 @@ try {
   const errors = [];
   page.on('pageerror', error => errors.push(error.message));
   await page.goto(url);
-  await page.locator('#optimization').selectOption('none');
-  const available = await page.locator('#example option').evaluateAll(options =>
-    options.map(option => option.value));
+  await setOptimizations(page, 'none');
+  const available = await sampleIds(page);
   for (const [id, expected] of examples) {
     if (!available.includes(id)) throw new Error(`Missing library example: ${id}`);
-    await page.locator('#example').selectOption(id);
+    await openSample(page, id);
     await page.locator('#run').click();
     await page.waitForFunction(() => document.querySelector('#stop').disabled, undefined, { timeout: 240_000 });
     const actual = {
@@ -36,7 +36,7 @@ try {
       throw new Error(`${id}: ${JSON.stringify(actual)}`);
     console.log(`PASS ${id}`);
   }
-  await page.locator('#example').selectOption('hello');
+  await openSample(page, 'hello');
   await page.locator('#editor .view-lines').click();
   await page.keyboard.press('ControlOrMeta+A');
   await page.keyboard.insertText(`using System;

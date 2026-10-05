@@ -1,3 +1,4 @@
+import { openSample, setOptimizations } from './playground-ui.mjs';
 import { browserType } from './engine.mjs';
 import { execFileSync } from 'node:child_process';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
@@ -91,7 +92,7 @@ try {
       throw Error(`Responsive toolbar overflow: ${JSON.stringify(toolbarLayout)}`);
   };
   await page.setViewportSize({ width: 1440, height: 900 });
-  await page.getByLabel('Example', { exact: true }).selectOption('csharp15-tour');
+  await openSample(page, 'csharp15-tour');
   await page.getByLabel('Language', { exact: true }).selectOption('preview');
   const intermediateToolbarLayout = await inspectToolbar();
   assertToolbar(intermediateToolbarLayout);
@@ -104,7 +105,7 @@ try {
   const toolbarLayout = await inspectToolbar();
   await page.screenshot({ path: `${output}/responsive-toolbar.png`, fullPage: false });
   assertToolbar(toolbarLayout);
-  await page.getByLabel('Example', { exact: true }).selectOption('hello');
+  await openSample(page, 'hello');
   await page.getByLabel('Language', { exact: true }).selectOption('15');
   await page.setViewportSize({ width: 1280, height: 900 });
   const pageContract = await page.evaluate(async () => {
@@ -157,7 +158,7 @@ try {
       !preload.detail.includes(' loaded'))
     throw Error(`Preload progress missing: ${JSON.stringify(preload)}`);
   if (!await page.locator('#compile').isEnabled() || !await page.locator('#run').isEnabled()) throw Error('Background preload disabled actions');
-  await page.getByLabel('Optimization', { exact: true }).selectOption('none');
+  await setOptimizations(page, 'none');
   await page.locator('#run').click();
   if (await page.locator('#compile').isEnabled() || await page.locator('#run').isEnabled()) throw Error('Busy controls remain enabled');
   await page.waitForFunction(() => document.querySelector('#stop').disabled, undefined, { timeout: 240000 });

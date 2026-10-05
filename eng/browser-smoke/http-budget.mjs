@@ -1,3 +1,4 @@
+import { openSample } from './playground-ui.mjs';
 import { chromium } from 'playwright';
 
 const source = `using System;
@@ -57,7 +58,7 @@ try {
   });
   await page.goto(process.env.PLAYGROUND_URL ?? 'http://127.0.0.1:4173/');
   await page.locator('#optimization').selectOption('none');
-  await page.locator('#example').selectOption('http');
+  await openSample(page, 'http');
   await page.locator('#editor .view-lines').click({ position: { x: 80, y: 12 } });
   await page.keyboard.press('ControlOrMeta+A');
   await page.keyboard.insertText(source);
@@ -67,7 +68,7 @@ try {
   if (!denied.includes('Guest HTTP request body limit exceeded') || uploads.length)
     throw Error(`HTTP byte limit did not deny the request: ${JSON.stringify({ denied, uploads })}`);
 
-  await page.locator('#example').selectOption('hello');
+  await openSample(page, 'hello');
   await page.locator('#run').click();
   await page.waitForFunction(() => document.querySelector('#stop').disabled, undefined, { timeout: 240_000 });
   const status = await page.locator('#status').textContent();

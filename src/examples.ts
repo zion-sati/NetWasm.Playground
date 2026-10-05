@@ -1,15 +1,42 @@
 import releaseContract from '../eng/release-contract.json' with { type: 'json' };
+import type { ProjectKind } from './workspace';
 
 export interface ExampleRecipe {
   id: string;
   name: string;
+  description?: string;
+  category?: 'Getting started' | 'Language and runtime' | 'Libraries' | 'Interop and workers' | 'Testing';
+  kind?: ProjectKind;
   source: string;
   files?: readonly { path: string; text: string }[];
   language?: '15' | 'preview';
   updatedMemorySafetyRules?: boolean;
 }
 
-export const examples: readonly ExampleRecipe[] = [
+const descriptions: Readonly<Record<string, { description: string; category: NonNullable<ExampleRecipe['category']> }>> = {
+  hello: { description: 'Compile and run the smallest C# console application.', category: 'Getting started' },
+  'multi-file': { description: 'Build one application from separate C# source files.', category: 'Getting started' },
+  'span-memory-unsafe': { description: 'Use Span, Memory, stackalloc, fixed pointers, and raw memory access.', category: 'Language and runtime' },
+  'csharp15-tour': { description: 'Try the supported C# 15 preview language features.', category: 'Language and runtime' },
+  datetime: { description: 'Read UTC time through the browser host clock.', category: 'Language and runtime' },
+  http: { description: 'Make an asynchronous HTTP request through browser fetch.', category: 'Libraries' },
+  allocation: { description: 'Allocate managed objects and exercise the precise garbage collector.', category: 'Language and runtime' },
+  linq: { description: 'Filter, project, and aggregate a sequence with LINQ.', category: 'Libraries' },
+  'async-linq': { description: 'Compose and consume an asynchronous LINQ sequence.', category: 'Libraries' },
+  pipelines: { description: 'Write and read buffers with System.IO.Pipelines.', category: 'Libraries' },
+  'web-encoding': { description: 'Encode text safely with System.Text.Encodings.Web.', category: 'Libraries' },
+  xml: { description: 'Read XML with the forward-only XmlReader API.', category: 'Libraries' },
+  'json-dom': { description: 'Inspect JSON using the read-only JsonDocument DOM.', category: 'Libraries' },
+  'json-generated': { description: 'Serialize JSON with source-generated metadata.', category: 'Libraries' },
+  regex: { description: 'Match text with .NET regular expressions.', category: 'Libraries' },
+  fluentvalidation: { description: 'Build and execute a FluentValidation rule.', category: 'Libraries' },
+  di: { description: 'Resolve services with Microsoft.Extensions.DependencyInjection.', category: 'Libraries' },
+  hashing: { description: 'Compute non-cryptographic hashes with System.IO.Hashing.', category: 'Libraries' },
+  logging: { description: 'Use source-generated Microsoft.Extensions.Logging messages.', category: 'Libraries' },
+  tunit: { description: 'Compile and run an asynchronous TUnit test project.', category: 'Testing' },
+};
+
+const recipes: readonly ExampleRecipe[] = [
   {
     id: releaseContract.helloWorld42.exampleId,
     name: 'Hello World',
@@ -453,3 +480,8 @@ public sealed class Tests
 `,
   },
 ];
+
+export const examples: readonly ExampleRecipe[] = recipes.map(recipe => ({
+  ...descriptions[recipe.id],
+  ...recipe,
+}));

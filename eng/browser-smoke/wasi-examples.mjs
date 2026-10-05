@@ -1,3 +1,4 @@
+import { openSample } from './playground-ui.mjs';
 import { chromium, firefox, webkit } from 'playwright';
 
 const engines = { chromium, firefox, webkit };
@@ -21,7 +22,7 @@ for (const name of selected) {
     await page.locator('#optimization').selectOption('none');
 
     for (const example of ['datetime', 'http', 'span-memory-unsafe']) {
-      await page.locator('#example').selectOption(example);
+      await openSample(page, example);
       await page.locator('#run').click();
       if (!await page.locator('#compile').isDisabled() || !await page.locator('#run').isDisabled())
         throw Error(`${name}/${example}: busy controls stayed enabled`);

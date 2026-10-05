@@ -1,3 +1,4 @@
+import { setOptimizations } from './playground-ui.mjs';
 import { browserType } from './engine.mjs';
 import { createHash } from 'node:crypto';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
@@ -17,7 +18,7 @@ try {
   await page.locator('#clear-cache').click();
   await page.locator('#status').filter({ hasText: 'Compilation cache cleared' }).waitFor();
 
-  await page.getByLabel('Optimization', { exact: true }).selectOption(optimization);
+  await setOptimizations(page, optimization);
   const compile = async value => {
     await page.locator('#editor .view-lines').click({ position: { x: 80, y: 12 } });
     await page.keyboard.press('ControlOrMeta+A');
@@ -75,7 +76,7 @@ try {
   const afterCold = await runtimeStorage();
   await page.reload();
   await page.locator('.monaco-editor').waitFor();
-  await page.getByLabel('Optimization', { exact: true }).selectOption(optimization);
+  await setOptimizations(page, optimization);
   const warm = await compile(43);
   const afterWarm = await runtimeStorage();
   const results = {

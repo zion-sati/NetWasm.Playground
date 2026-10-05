@@ -1,3 +1,4 @@
+import { openSample, setOptimizations } from './playground-ui.mjs';
 import { chromium } from 'playwright';
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
@@ -12,12 +13,12 @@ try {
   page.on('pageerror', error => errors.push(String(error)));
   await page.goto(process.env.PLAYGROUND_URL ?? 'http://127.0.0.1:5173/playground/');
   await page.locator('.monaco-editor').waitFor();
-  const modes = await page.getByLabel('Optimization', { exact: true }).locator('option').evaluateAll(options => options.map(option => option.value));
+  const modes = await page.locator('#optimization option').evaluateAll(options => options.map(option => option.value));
   if (modes.includes('O4') || !['none', 'O0', 'O1', 'O2', 'O3', 'Os', 'Oz'].every(mode => modes.includes(mode))) throw Error(`Unexpected optimization modes: ${modes}`);
-  if (await page.getByLabel('Optimization', { exact: true }).inputValue() !== 'Oz') throw Error('Expected -Oz to be selected by default');
-  await page.getByLabel('Example', { exact: true }).selectOption('json-generated');
+  if (await page.locator('#optimization').inputValue() !== 'Oz') throw Error('Expected -Oz to be selected by default');
+  await openSample(page, 'json-generated');
   for (const mode of ['none', 'Oz']) {
-    await page.getByLabel('Optimization', { exact: true }).selectOption(mode);
+    await setOptimizations(page, mode);
     await page.evaluate(() => {
       window.optimizationStatuses = [];
       new MutationObserver(() => window.optimizationStatuses.push(document.querySelector('#status').textContent))
@@ -25,7 +26,7 @@ try {
     });
     const started = Date.now();
     await page.locator('#compile').click();
-    if (await page.getByLabel('Optimization', { exact: true }).isEnabled()) throw Error('Optimization changed while busy');
+    if (await page.locator('#optimization').isEnabled()) throw Error('Optimization changed while busy');
     await page.waitForFunction(() => document.querySelector('#stop').disabled, undefined, { timeout: 240000 });
     const ui = await page.evaluate(() => ({
       status: document.querySelector('#status').textContent,
