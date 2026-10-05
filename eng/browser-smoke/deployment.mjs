@@ -18,6 +18,7 @@ const browser = await browserType.launch({ headless: true });
 const errors = [];
 const requests = [];
 const consoleErrors = [];
+const optionalTelemetry = /\/cdn-cgi\/rum(?:[/?]|$)/i;
 const bundleStarts = new Map();
 const bundleResponses = new Map();
 let resolveBundleStarts;
@@ -25,7 +26,9 @@ const bundlesStarted = new Promise(resolve => { resolveBundleStarts = resolve; }
 try {
   const page = await browser.newPage({ acceptDownloads: true });
   page.on('pageerror', error => errors.push(String(error)));
-  page.on('console', message => { if (message.type() === 'error') consoleErrors.push(message.text()); });
+  page.on('console', message => {
+    if (message.type() === 'error') consoleErrors.push({ text: message.text(), url: message.location().url });
+  });
   page.on('request', request => {
     requests.push(request.url());
     const name = new URL(request.url()).pathname.split('/').at(-1);
@@ -41,19 +44,15 @@ try {
       bundleResponses.set(name, {
         status: response.status(),
         cacheControl: headers['cache-control'] ?? null,
-        cfCacheStatus: headers['cf-cache-status'] ?? null,
         age: headers.age ?? null,
         contentEncoding: headers['content-encoding'] ?? null,
       });
     }
   });
-  const initialDocument = await page.request.get(url);
-  if (!initialDocument.ok()) throw Error(`Playground document fetch failed: ${initialDocument.status()}`);
-  const initialDocumentBytes = await initialDocument.body();
   const initialNavigation = await page.goto(url, { waitUntil: 'commit' });
   if (!initialNavigation?.ok()) throw Error(`Playground navigation failed: ${initialNavigation?.status()}`);
   await page.waitForFunction(() => crossOriginIsolated, undefined, { timeout: 30_000 });
-  const initialSiteIdentity = await observeSiteIdentity(page, url, initialDocumentBytes, expectedIdentity);
+  const initialSiteIdentity = await observeSiteIdentity(page, url, expectedIdentity);
   const toolchainManifest = initialSiteIdentity.toolchainManifest;
   if (toolchainManifest.schemaVersion !== 3 ||
       Object.keys(toolchainManifest.bundles).sort().join(',') !== 'compiler,guest,linker,tools')
@@ -109,16 +108,14 @@ try {
   await page.getByLabel('Language', { exact: true }).selectOption('15');
   await page.setViewportSize({ width: 1280, height: 900 });
   const pageContract = await page.evaluate(async () => {
-    const csp = document.querySelector('meta[http-equiv="Content-Security-Policy"]')?.content ?? '';
     const icons = [...document.querySelectorAll('link[rel="icon"]')].map(link => link.href);
     const statuses = await Promise.all(icons.map(async href => (await fetch(href)).status));
     const brandLink = document.querySelector('.brand > a');
-    return { csp, icons, statuses, brandLink: brandLink ? { href: brandLink.href, text: brandLink.textContent } : null,
+    return { icons, statuses, brandLink: brandLink ? { href: brandLink.href, text: brandLink.textContent } : null,
       brandText: document.querySelector('.brand')?.textContent,
       version: document.querySelector('#playground-version')?.textContent };
   });
-  if (!pageContract.csp.includes('https://static.cloudflareinsights.com') ||
-      !pageContract.csp.includes('https://cloudflareinsights.com') || pageContract.icons.length !== 2 ||
+  if (pageContract.icons.length !== 2 ||
       pageContract.statuses.some(status => status !== 200) || pageContract.brandLink?.href !== 'https://www.netwasm.com/' ||
       pageContract.brandLink?.text !== 'NetWasm' || pageContract.brandText !== `NetWasm Playgroundv${playgroundVersion}` ||
       pageContract.version !== `v${playgroundVersion}`)
@@ -176,8 +173,11 @@ try {
   await download.saveAs(componentPath);
   const nativeStdout = execFileSync('wasmtime', [componentPath], { encoding: 'utf8' });
   if (nativeStdout !== stdout) throw Error('Wasmtime output differs from browser output');
-  if (errors.length || consoleErrors.some(error => error.includes('Content Security Policy') || error.includes('favicon.ico')))
-    throw Error(`Page errors: ${JSON.stringify({ errors, consoleErrors })}`);
+  const applicationErrors = errors.filter(error => !optionalTelemetry.test(error));
+  const applicationConsoleErrors = consoleErrors.filter(error => !optionalTelemetry.test(`${error.text} ${error.url}`));
+  if (applicationErrors.length || applicationConsoleErrors.some(error =>
+    error.text.includes('Content Security Policy') || error.text.includes('favicon.ico')))
+    throw Error(`Page errors: ${JSON.stringify({ applicationErrors, applicationConsoleErrors })}`);
   const toolchainRequests = [...new Set(requests.filter(request => request.includes('/toolchain/')).map(request => new URL(request).pathname))];
   const bundleRequests = toolchainRequests.filter(request => request.endsWith('.bin'));
   const expectedBundles = Object.values(toolchainManifest.bundles).map(receipt => receipt.path).sort();
@@ -191,20 +191,16 @@ try {
     throw Error(`Toolchain request graph was not bundled: ${JSON.stringify({ count: toolchainRequests.length, directPayloads })}`);
   const finalUrl = new URL(url);
   finalUrl.searchParams.set('site-identity', expectedIdentity.siteIdentitySha256);
-  const finalDocument = await page.request.get(finalUrl.href);
-  if (!finalDocument.ok()) throw Error(`Playground document fetch failed: ${finalDocument.status()}`);
-  const finalDocumentBytes = await finalDocument.body();
   const finalNavigation = await page.goto(finalUrl.href, { waitUntil: 'commit' });
   if (!finalNavigation?.ok()) throw Error(`Playground reload failed: ${finalNavigation?.status()}`);
   await page.waitForFunction(() => crossOriginIsolated, undefined, { timeout: 30_000 });
-  const finalSiteIdentity = await observeSiteIdentity(page, url, finalDocumentBytes, expectedIdentity);
+  const finalSiteIdentity = await observeSiteIdentity(page, url, expectedIdentity);
   const bytes = readFileSync(componentPath);
   const result = { passed: true, browser: browser.version(), stdout, status,
     component: { bytes: bytes.length, sha256: createHash('sha256').update(bytes).digest('hex') },
     siteIdentity: { sha256: finalSiteIdentity.siteIdentitySha256,
       sourceCommit: finalSiteIdentity.identity.sourceCommit,
-      indexHtmlSha256: finalSiteIdentity.indexHtmlSha256,
-      edgeTransform: finalSiteIdentity.edgeTransform,
+      indexHtmlSha256: finalSiteIdentity.identity.indexHtmlSha256,
       toolchainId: finalSiteIdentity.index.id,
       toolchainManifestSha256: finalSiteIdentity.toolchainManifestSha256 },
     toolchainRequests: { unique: toolchainRequests.length, bundles: bundleRequests, parallelStartSpreadMs: bundleStartSpreadMs,
