@@ -129,6 +129,7 @@ def main():
             '</PropertyGroup></Project>')
 
         container_command = (
+            "trap 'chmod -R a+rwX /work' EXIT; "
             'apt-get update >/dev/null && '
             'apt-get install -y --no-install-recommends python3 >/dev/null && '
             'ln -sf /usr/bin/python3 /usr/local/bin/python && '
