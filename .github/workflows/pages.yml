@@ -57,6 +57,7 @@ jobs:
       site_identity_sha256: ${{ steps.coordinates.outputs.site_identity_sha256 }}
       toolchain_id: ${{ steps.toolchain.outputs.id }}
       toolchain_manifest_sha256: ${{ steps.toolchain.outputs.manifest_sha256 }}
+      playground_version: ${{ inputs.version || steps.released-toolchain.outputs.version }}
     steps:
       - name: Check out source
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
@@ -182,6 +183,7 @@ jobs:
           EXPECTED_SITE_IDENTITY_SHA256: ${{ needs.build-site.outputs.site_identity_sha256 }}
           EXPECTED_TOOLCHAIN_ID: ${{ needs.build-site.outputs.toolchain_id }}
           EXPECTED_TOOLCHAIN_MANIFEST_SHA256: ${{ needs.build-site.outputs.toolchain_manifest_sha256 }}
+          EXPECTED_PLAYGROUND_VERSION: ${{ needs.build-site.outputs.playground_version }}
         run: |
           npm run preview -- --host 127.0.0.1 --port 4173 &
           server_pid=$!
@@ -252,6 +254,7 @@ jobs:
           EXPECTED_SITE_IDENTITY_SHA256: ${{ needs.build-site.outputs.site_identity_sha256 }}
           EXPECTED_TOOLCHAIN_ID: ${{ needs.build-site.outputs.toolchain_id }}
           EXPECTED_TOOLCHAIN_MANIFEST_SHA256: ${{ needs.build-site.outputs.toolchain_manifest_sha256 }}
+          EXPECTED_PLAYGROUND_VERSION: ${{ needs.build-site.outputs.playground_version }}
         run: |
           index_url="${PLAYGROUND_URL%/}/toolchain/index.json"
           identity_url="${PLAYGROUND_URL%/}/site-identity.json"
