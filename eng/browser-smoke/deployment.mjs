@@ -9,7 +9,10 @@ const url = process.env.PLAYGROUND_URL;
 const output = process.env.PLAYGROUND_EVIDENCE;
 if (!url || !output) throw Error('PLAYGROUND_URL and PLAYGROUND_EVIDENCE are required');
 const expectedIdentity = expectedSiteIdentity();
-const playgroundVersion = JSON.parse(readFileSync(new URL('../../package.json', import.meta.url))).version;
+const playgroundVersion = process.env.EXPECTED_PLAYGROUND_VERSION ??
+  JSON.parse(readFileSync(new URL('../../package.json', import.meta.url))).version;
+if (!/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(playgroundVersion))
+  throw Error('Invalid expected Playground version');
 mkdirSync(output, { recursive: true });
 const browser = await browserType.launch({ headless: true });
 const errors = [];
