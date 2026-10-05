@@ -131,8 +131,16 @@ try {
   ]);
   const bundleStartSpreadMs = Math.max(...bundleStarts.values()) - Math.min(...bundleStarts.values());
   if (bundleStartSpreadMs > 1000) throw Error(`Bundle requests were serialized: ${JSON.stringify([...bundleStarts])}`);
-  await page.waitForFunction(() => Number(document.querySelector('#toolchain-progress')?.dataset.totalBundles) > 0 &&
-    Number(document.querySelector('#toolchain-progress')?.dataset.loadedBundleBytes) > 0);
+  await page.waitForFunction(() => {
+    const progress = document.querySelector('#toolchain-progress');
+    const completed = Number(progress?.dataset.completedBundles);
+    const total = Number(progress?.dataset.totalBundles);
+    const loadedBytes = Number(progress?.dataset.loadedBundleBytes);
+    const totalBytes = Number(progress?.dataset.totalBundleBytes);
+    const partialProgress = completed < total && loadedBytes > 0 && loadedBytes < totalBytes;
+    const completedProgress = completed === total && loadedBytes === totalBytes && totalBytes > 0;
+    return total > 0 && (partialProgress || completedProgress);
+  });
   const preload = await page.evaluate(() => ({
     hidden: document.querySelector('#toolchain-progress').hidden,
     completed: Number(document.querySelector('#toolchain-progress').dataset.completedBundles),
