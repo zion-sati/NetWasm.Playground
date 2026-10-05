@@ -254,7 +254,6 @@ jobs:
           EXPECTED_SITE_IDENTITY_SHA256: ${{ needs.build-site.outputs.site_identity_sha256 }}
           EXPECTED_TOOLCHAIN_ID: ${{ needs.build-site.outputs.toolchain_id }}
           EXPECTED_TOOLCHAIN_MANIFEST_SHA256: ${{ needs.build-site.outputs.toolchain_manifest_sha256 }}
-          EXPECTED_PLAYGROUND_VERSION: ${{ needs.build-site.outputs.playground_version }}
         run: |
           index_url="${PLAYGROUND_URL%/}/toolchain/index.json"
           identity_url="${PLAYGROUND_URL%/}/site-identity.json"
@@ -283,6 +282,7 @@ jobs:
           EXPECTED_SITE_IDENTITY_SHA256: ${{ needs.build-site.outputs.site_identity_sha256 }}
           EXPECTED_TOOLCHAIN_ID: ${{ needs.build-site.outputs.toolchain_id }}
           EXPECTED_TOOLCHAIN_MANIFEST_SHA256: ${{ needs.build-site.outputs.toolchain_manifest_sha256 }}
+          EXPECTED_PLAYGROUND_VERSION: ${{ needs.build-site.outputs.playground_version }}
         run: bash eng/run-browser-lane.sh
       - name: Retain live deployment evidence
         if: always()
