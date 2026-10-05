@@ -41,6 +41,8 @@ export interface FrontendCacheMetrics {
   loadedEntries: number;
   readBytes: number;
   cacheReadMilliseconds: number;
+  cacheLookupMilliseconds?: number;
+  cacheHydrationMilliseconds?: number;
   cacheWriteMilliseconds: number;
 }
 
@@ -70,6 +72,11 @@ export interface CompilationResult {
   timings: StageTiming[];
   frontendCacheMetrics?: FrontendCacheMetrics;
   runtimeCacheMetrics?: RuntimeCacheMetrics;
+  compilerHostLinearMemoryBytes?: number;
+  optimizerHost?: 'native-threads' | 'javascript';
+  optimizerWorkerCount?: number;
+  optimizerLinearMemoryBytes?: number;
+  optimizerFallback?: string;
   assets?: AssetMeasurement;
   error?: string;
   stage?: string;

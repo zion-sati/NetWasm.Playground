@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { brotliCompressSync, brotliDecompressSync } from 'node:zlib';
-import { serveBrotli } from '../cloudflare-brotli-worker.mjs';
+import worker, { isolateResponse, serveBrotli } from '../cloudflare-brotli-worker.mjs';
 
 const hashed = `https://playground.netwasm.com/toolchain/id/bundles/compiler.${'a'.repeat(64)}.bin`;
 const wasm = 'https://regexstorm.netwasm.com/engine/RegexStorm-component.core.wasm';
@@ -86,4 +86,17 @@ test('supports HEAD and conditional requests without downloading or inventing a 
     assert.equal(response.body, null);
     assert.equal(response.headers.get('Content-Encoding'), 'br');
   }
+});
+
+test('adds cross-origin isolation headers without changing response status or body', async () => {
+  const response = isolateResponse(new Response('page', {
+    status: 201, statusText: 'Created', headers: { ETag: '"page"' },
+  }));
+  assert.equal(response.status, 201);
+  assert.equal(response.statusText, 'Created');
+  assert.equal(response.headers.get('ETag'), '"page"');
+  assert.equal(response.headers.get('Cross-Origin-Opener-Policy'), 'same-origin');
+  assert.equal(response.headers.get('Cross-Origin-Embedder-Policy'), 'require-corp');
+  assert.equal(await response.text(), 'page');
+  assert.equal(typeof worker.fetch, 'function');
 });

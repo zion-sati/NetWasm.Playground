@@ -45,6 +45,71 @@ def safe_path(value):
     return path
 
 
+def verify_nativeaot_compiler(folder, expected_toolchain, expected_netwasm_version):
+    receipt_path = folder / 'nativeaot-compiler-receipt.json'
+    receipt = json.loads(receipt_path.read_text())
+    if set(receipt) != {'schemaVersion', 'netwasmVersion', 'nativeAotLlvm', 'files'} or \
+            receipt['schemaVersion'] != 1 or receipt['netwasmVersion'] != expected_netwasm_version or \
+            receipt['nativeAotLlvm'] != expected_toolchain or not isinstance(receipt['files'], dict):
+        raise ValueError('NativeAOT compiler receipt does not match the pinned toolchain')
+    expected_files = set(receipt['files']) | {receipt_path.name}
+    actual_files = {path.name for path in folder.iterdir() if path.is_file()}
+    if actual_files != expected_files or not any(name.endswith('.wasm') for name in receipt['files']) or \
+            not any(name.endswith(('.js', '.mjs')) for name in receipt['files']):
+        raise ValueError('NativeAOT compiler output inventory is incomplete')
+    for name, expected in receipt['files'].items():
+        path = folder / name
+        if set(expected) != {'bytes', 'sha256'} or path.stat().st_size != expected['bytes'] or \
+                sha256(path.read_bytes()) != expected['sha256']:
+            raise ValueError(f'NativeAOT compiler output changed: {name}')
+
+
+def add_browser_wasm_opt(stage, pin):
+    required_pin_fields = {'repository', 'tag', 'sourceCommit', 'asset', 'url', 'bytes',
+                           'sha256', 'binaryenVersion', 'effectiveVersion'}
+    if set(pin) != required_pin_fields or \
+            pin['repository'] != 'https://github.com/zion-sati/NetWasm.NativeTools' or \
+            not re.fullmatch(r'[a-f0-9]{40}', pin['sourceCommit']) or \
+            not re.fullmatch(r'[a-f0-9]{64}', pin['sha256']) or \
+            not isinstance(pin['bytes'], int) or pin['bytes'] < 1 or pin['bytes'] > 32 * 1024 * 1024:
+        raise ValueError('Invalid browser wasm-opt release pin')
+    expected_url = (f"{pin['repository']}/releases/download/{pin['tag']}/{pin['asset']}")
+    if pin['url'] != expected_url:
+        raise ValueError('Browser wasm-opt release URL does not match its coordinates')
+    payload = download(pin['url'], pin['bytes'])
+    if len(payload) != pin['bytes'] or sha256(payload) != pin['sha256']:
+        raise ValueError('Pinned browser wasm-opt release changed')
+    expected_files = {'wasm-opt.js', 'wasm-opt.wasm', 'build-receipt.json', 'LICENSE.upstream'}
+    with zipfile.ZipFile(io.BytesIO(payload)) as archive:
+        infos = archive.infolist()
+        if {info.filename for info in infos} != expected_files or \
+                len(infos) != len(expected_files) or any(info.is_dir() for info in infos):
+            raise ValueError('Browser wasm-opt release inventory changed')
+        files = {info.filename: archive.read(info) for info in infos}
+    try:
+        receipt = json.loads(files['build-receipt.json'])
+    except (UnicodeDecodeError, json.JSONDecodeError) as error:
+        raise ValueError('Invalid browser wasm-opt build receipt') from error
+    if receipt.get('schemaVersion') != 1 or receipt.get('adaptationVersion') != 1 or \
+            receipt.get('sourceCommit') != pin['sourceCommit'] or \
+            receipt.get('binaryenVersion') != pin['binaryenVersion'] or \
+            receipt.get('effectiveVersion') != pin['effectiveVersion'] or \
+            receipt.get('buildTarget') != 'wasm-opt' or \
+            receipt.get('maximumWorkerCount') != 8 or receipt.get('pthreadPoolBuildSize') != 8 or \
+            receipt.get('reservedProcessorCount') != 2 or \
+            receipt.get('binaryenCoresEnvironmentVariable') != 'BINARYEN_CORES' or \
+            receipt.get('javascriptSize') != len(files['wasm-opt.js']) or \
+            receipt.get('wasmSize') != len(files['wasm-opt.wasm']) or \
+            receipt.get('javascriptSha256') != sha256(files['wasm-opt.js']) or \
+            receipt.get('wasmSha256') != sha256(files['wasm-opt.wasm']) or \
+            len(files['LICENSE.upstream']) < 1024:
+        raise ValueError('Browser wasm-opt build receipt does not match its release')
+    destination = stage / 'native-wasm-opt'
+    destination.mkdir()
+    for name, contents in files.items():
+        (destination / name).write_bytes(contents)
+
+
 def download(url, maximum):
     request = urllib.request.Request(url, headers={'User-Agent': 'NetWasm.Playground-release-builder'})
     with urllib.request.urlopen(request) as response:
@@ -528,7 +593,8 @@ def main():
             destination = stage.joinpath(*path.parts)
             destination.parent.mkdir(parents=True, exist_ok=True)
             destination.write_bytes(payload)
-        release_pins = json.loads((ROOT / 'eng/upstream-sources.json').read_text())['sources']
+        upstream = json.loads((ROOT / 'eng/upstream-sources.json').read_text())
+        release_pins = upstream['sources']
         pins = json.loads(json.dumps(release_pins))
         if CANDIDATE_FEED is not None:
             pins['netwasm']['packageVersion'] = CANDIDATE_VERSION
@@ -536,6 +602,11 @@ def main():
         if args.candidate_tunit_version:
             pins['tunit']['packageVersion'] = args.candidate_tunit_version
             pins['tunit']['commit'] = args.candidate_tunit_commit
+        verify_nativeaot_compiler(args.compiler_framework, upstream['nativeAotLlvmCandidate'],
+                                  pins['netwasm']['packageVersion'])
+        pins['nativeAotLlvmCompilerHost'] = upstream['nativeAotLlvmCandidate']
+        add_browser_wasm_opt(stage, upstream['browserWasmOpt'])
+        pins['browserWasmOpt'] = upstream['browserWasmOpt']
         refresh_public_assets(stage, pins, runtime_plan)
         rebind_notice_origins(stage, release_pins)
         add_guest_providers(stage, package_archive('netwasm.toolchain', pins['netwasm']['packageVersion']))

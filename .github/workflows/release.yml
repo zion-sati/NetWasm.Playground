@@ -78,8 +78,23 @@ jobs:
         uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6
         with:
           dotnet-version: 11.0.100-rc.1.26425.128
-      - name: Install WebAssembly build workload
-        run: dotnet workload install wasm-tools --skip-manifest-update
+      - name: Install pinned NativeAOT-LLVM Emscripten toolchain
+        shell: bash
+        run: |
+          python3 - <<'PY' > "$RUNNER_TEMP/nativeaot-pins.env"
+          import json
+          from pathlib import Path
+          candidate = json.loads(Path('source/eng/upstream-sources.json').read_text())['nativeAotLlvmCandidate']
+          print(f"EMSDK_REVISION={candidate['emsdkRevision']}")
+          print(f"EMSCRIPTEN_VERSION={candidate['emscriptenVersion']}")
+          PY
+          source "$RUNNER_TEMP/nativeaot-pins.env"
+          git init "$RUNNER_TEMP/emsdk"
+          git -C "$RUNNER_TEMP/emsdk" remote add origin https://github.com/emscripten-core/emsdk.git
+          git -C "$RUNNER_TEMP/emsdk" fetch --depth=1 origin "$EMSDK_REVISION"
+          git -C "$RUNNER_TEMP/emsdk" checkout --detach FETCH_HEAD
+          "$RUNNER_TEMP/emsdk/emsdk" install "$EMSCRIPTEN_VERSION"
+          "$RUNNER_TEMP/emsdk/emsdk" activate "$EMSCRIPTEN_VERSION"
       - name: Set up Node.js
         uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
@@ -88,8 +103,11 @@ jobs:
           cache-dependency-path: source/package-lock.json
       - run: npm ci
         working-directory: source
-      - name: Build compiler framework from public packages
-        run: python3 source/eng/build-release-compiler.py --output .cache/release/compiler-framework
+      - name: Build NativeAOT-LLVM compiler host from pinned public inputs
+        run: |
+          python3 source/eng/build-nativeaot-compiler.py \
+            --emsdk "$RUNNER_TEMP/emsdk" \
+            --output .cache/release/compiler-framework
       - name: Build content-addressed browser toolchain manifest
         run: python3 source/eng/rebuild-public-toolchain.py --compiler-framework .cache/release/compiler-framework --output source/public/toolchain
       - name: Package reproducible release asset
@@ -154,7 +172,7 @@ jobs:
           name: release-receipts-${{ github.run_id }}
           path: |
             .cache/release/archive-receipt.json
-            .cache/release/compiler-framework-receipt.json
+            .cache/release/compiler-framework/nativeaot-compiler-receipt.json
             source/public/toolchain/index.json
             source/public/toolchain/*/asset-manifest.json
           retention-days: 90

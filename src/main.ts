@@ -18,9 +18,9 @@ declare const __PLAYGROUND_VERSION__: string;
 
 (globalThis as typeof globalThis & { MonacoEnvironment: unknown }).MonacoEnvironment = { getWorker: () => new EditorWorker() };
 document.querySelector<HTMLDivElement>('#app')!.innerHTML = `
-<section class="workbench" aria-label="C# playground"><aside class="compile-notice"><span aria-hidden="true">⏱</span><p><strong>Browser compilation is slower.</strong> NetWasm's compiler runs in Mono interpreter mode on a single browser thread for reliability. Even simple samples can take tens of seconds. Optimization defaults to <b>-Oz</b> for the smallest output; choose <b>None</b> for the fastest compile-and-test loop.</p></aside><div class="toolbar"><div class="options"><label class="recipe">Example <select id="example" aria-label="Example"></select></label><label class="recipe">Language <select id="language" aria-label="Language"><option value="15">C# 15</option><option value="preview">C# 15 preview</option></select></label><label class="recipe">Optimization <select id="optimization" aria-label="Optimization"></select></label><label id="memory-safety-setting" class="feature-setting" hidden><input id="updated-memory-safety" type="checkbox"><span>Updated memory safety rules<small><a href="https://learn.microsoft.com/dotnet/csharp/language-reference/proposals/unsafe-evolution" target="_blank" rel="noreferrer">Requires explicit <code>unsafe(...)</code> at affected call sites.</a></small></span></label></div><div class="actions"><button id="compile"><span class="compile-spinner" aria-hidden="true"></span>Compile</button><button id="run" class="primary">Run <span aria-hidden="true">▶</span></button><button id="stop" disabled>Stop</button><button id="download" disabled>Download</button></div></div>
+<section class="workbench" aria-label="C# playground"><aside class="compile-notice"><span aria-hidden="true">⏱</span><p><strong>Compilation runs locally in your browser.</strong> NetWasm runs its NativeAOT compiler in a dedicated worker and uses the multithreaded native optimizer when browser isolation is available. Optimization defaults to <b>-Oz</b> for the smallest output; choose <b>None</b> for the fastest compile-and-test loop.</p></aside><div class="toolbar"><div class="options"><label class="recipe">Example <select id="example" aria-label="Example"></select></label><label class="recipe">Language <select id="language" aria-label="Language"><option value="15">C# 15</option><option value="preview">C# 15 preview</option></select></label><label class="recipe">Optimization <select id="optimization" aria-label="Optimization"></select></label><label id="memory-safety-setting" class="feature-setting" hidden><input id="updated-memory-safety" type="checkbox"><span>Updated memory safety rules<small><a href="https://learn.microsoft.com/dotnet/csharp/language-reference/proposals/unsafe-evolution" target="_blank" rel="noreferrer">Requires explicit <code>unsafe(...)</code> at affected call sites.</a></small></span></label></div><div class="actions"><button id="compile"><span class="compile-spinner" aria-hidden="true"></span>Compile</button><button id="run" class="primary">Run <span aria-hidden="true">▶</span></button><button id="stop" disabled>Stop</button><button id="download" disabled>Download</button></div></div>
 <div class="panes"><section class="source-pane"><div class="pane-heading"><h2 id="source-name">Program.cs</h2><span>C# · Release</span></div><div id="editor" aria-label="C# source editor"></div></section><section class="results-pane"><div class="pane-heading"><h2>Console</h2><span id="exit"></span></div><pre id="output" tabindex="0" aria-label="Program output"></pre><div class="diagnostic-heading"><h2>Diagnostics</h2><span id="diagnostic-count">0</span></div><div id="diagnostics" aria-label="Compiler diagnostics"><p class="empty">Compile to check your source.</p></div></section></div>
-<div id="toolchain-progress" class="toolchain-progress" role="status" aria-live="polite" hidden><div><strong>Preparing toolchain in the background</strong><span id="toolchain-progress-detail">Reading manifest…</span></div><progress id="toolchain-progress-bar" aria-label="Toolchain preload progress"></progress></div><footer class="results"><div id="status" role="status" aria-live="polite">Ready</div><div id="size">No component yet</div></footer><aside id="compilation-success" class="compilation-success" aria-label="Compilation success" hidden><span>Compiled entirely in your browser with NetWasm.</span><a href="https://github.com/zion-sati/NetWasm" target="_blank" rel="noreferrer">Follow the project on GitHub →</a></aside><div class="details"><ol id="stages" aria-label="Pipeline progress"></ol><div id="timings"></div><div id="comparison"></div><div id="assets"></div></div></section><p class="cache-note">Reusable compiler artifacts stay in this browser so later compilations can be faster. Source files are not stored. <button id="clear-cache" type="button">Clear compilation cache</button></p><p id="footnote" class="footnote">One file, no setup. Download the compiled WASI Preview 2 component to run with Wasmtime.</p><p class="footnote">Current Chromium, Firefox and Safari browsers are supported.</p>`;
+<div id="toolchain-progress" class="toolchain-progress" role="status" aria-live="polite" hidden><div><strong>Preparing toolchain in the background</strong><span id="toolchain-progress-detail">Reading manifest…</span></div><progress id="toolchain-progress-bar" aria-label="Toolchain preload progress"></progress></div><footer class="results"><div id="status" role="status" aria-live="polite">Ready</div><div id="size">No component yet</div></footer><aside id="compilation-success" class="compilation-success" aria-label="Compilation success" hidden><span>Compiled entirely in your browser with NetWasm.</span><a href="https://github.com/zion-sati/NetWasm" target="_blank" rel="noreferrer">Follow the project on GitHub →</a></aside><div class="details"><ol id="stages" aria-label="Pipeline progress"></ol><div id="timings"></div><div id="comparison"></div><div id="optimizer"></div><div id="assets"></div></div></section><p class="cache-note">Reusable compiler artifacts stay in this browser so later compilations can be faster. Source files are not stored. <button id="clear-cache" type="button">Clear compilation cache</button></p><p id="footnote" class="footnote">One file, no setup. Download the compiled WASI Preview 2 component to run with Wasmtime.</p><p class="footnote">Current Chromium, Firefox and Safari browsers are supported.</p>`;
 const el = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id)! as T;
 el('playground-version').textContent = `v${__PLAYGROUND_VERSION__}`;
 const compileButton = el<HTMLButtonElement>('compile');
@@ -53,7 +53,7 @@ const comparisons = new Map<OptimizationMode, { bytes: number; milliseconds: num
 const stages = new Map<string, HTMLLIElement>();
 const progressSteps: Record<string, number> = {
   download: 1, 'compiler-initialize': 2,
-  compile: 3, roslyn: 3, generator: 3, netwasm: 3, 'cache-read': 3, 'cache-write': 3,
+  compile: 3, roslyn: 3, generator: 3, netwasm: 3, 'cache-lookup': 3, 'cache-hydrate': 3, 'cache-write': 3,
   'runtime-cache-read': 4, 'runtime-cache-write': 4, 'runtime-optimize': 4,
   'runtime-validate': 4, 'linker-initialize': 4, 'tools-initialize': 4, link: 4, parse: 4,
   merge: 5, prune: 5, optimize: 6, validate: 7, componentization: 7, run: 8,
@@ -61,7 +61,8 @@ const progressSteps: Record<string, number> = {
 const stageLabels: Record<string, string> = {
   download: 'Loading toolchain manifest', 'compiler-initialize': 'Loading C# compiler',
   compile: 'Compiling C#', roslyn: 'Checking C#', generator: 'Generating source', netwasm: 'Compiling WebAssembly',
-  'cache-read': 'Reading compiler cache', 'cache-write': 'Saving compiler cache',
+  'cache-lookup': 'Looking up compiler cache', 'cache-hydrate': 'Hydrating compiler cache',
+  'cache-write': 'Saving compiler cache',
   'runtime-cache-read': 'Reading runtime cache', 'runtime-cache-write': 'Saving runtime cache',
   'runtime-optimize': 'Optimizing runtime', 'runtime-validate': 'Validating runtime',
   'linker-initialize': 'Loading linker', 'tools-initialize': 'Loading WebAssembly tools',
@@ -90,6 +91,18 @@ function setDiagnostics(diagnostics: Diagnostic[]) {
   for (const d of diagnostics) { const button = document.createElement('button'); button.className = 'diagnostic'; button.textContent = `${d.line === undefined ? '' : `${d.line + 1}:${(d.column ?? 0) + 1} · `}${d.code} ${d.message}`; button.onclick = () => { const position = { lineNumber: (d.line ?? 0) + 1, column: (d.column ?? 0) + 1 }; editor.setPosition(position); editor.revealPositionInCenter(position); editor.focus(); }; el('diagnostics').append(button); }
 }
 function showTimings(timings: StageTiming[]) { el('timings').textContent = timings.map(t => `${t.stage}: ${(t.milliseconds / 1000).toFixed(2)} s`).join(' · '); }
+function showOptimizer(result: CompilationResult) {
+  if (!result.optimizerHost) { el('optimizer').textContent = ''; return; }
+  if (result.optimizerHost === 'native-threads') {
+    const workers = result.optimizerWorkerCount ? ` · ${result.optimizerWorkerCount} workers` : '';
+    const memory = result.optimizerLinearMemoryBytes ? ` · ${formatMegabytes(result.optimizerLinearMemoryBytes)} memory` : '';
+    el('optimizer').textContent = `Optimizer: native WebAssembly${workers}${memory}`;
+    return;
+  }
+  el('optimizer').textContent = result.optimizerFallback
+    ? 'Optimizer: JavaScript fallback · native optimizer unavailable'
+    : 'Optimizer: JavaScript';
+}
 function onEvent(event: PipelineEvent) {
   if (!active || stopped || event.requestId !== active.requestId || event.revision !== revision) return;
   if (event.type === 'console') el('output').textContent += event.text;
@@ -157,14 +170,14 @@ async function execute(job: { snapshot: SourceSnapshot; run: boolean }) {
   compileButton.disabled = true; runButton.disabled = true; optimizationSelect.disabled = true; languageSelect.disabled = true; updatedMemorySafety.disabled = true; clearCacheButton.disabled = true;
   document.querySelector('.workbench')!.setAttribute('aria-busy', 'true');
   if (!runOnly) setCompilationSuccess(false);
-  active = job.snapshot; stopped = false; stopButton.disabled = false; stages.clear(); el('stages').replaceChildren(); el('output').textContent = ''; el('exit').textContent = ''; el('timings').textContent = ''; el('status').textContent = 'Starting';
+  active = job.snapshot; stopped = false; stopButton.disabled = false; stages.clear(); el('stages').replaceChildren(); el('output').textContent = ''; el('exit').textContent = ''; el('timings').textContent = ''; el('optimizer').textContent = ''; el('status').textContent = 'Starting';
   pipeline ??= new PlaygroundPipeline(onEvent);
   try {
     let result = compilation;
     if (!job.run || !result?.success || result.revision !== job.snapshot.revision || result.optimization !== job.snapshot.optimization || result.language !== job.snapshot.language || result.updatedMemorySafetyRules !== job.snapshot.updatedMemorySafetyRules) {
       result = await pipeline.compile(job.snapshot);
       if (!stopped && revision === job.snapshot.revision) {
-        setDiagnostics(result.diagnostics); showTimings(result.timings);
+        setDiagnostics(result.diagnostics); showTimings(result.timings); showOptimizer(result);
         if (result.success && result.component) { invalidateDownload(); compilation = result; downloadUrl = URL.createObjectURL(new Blob([new Uint8Array(result.component)], { type: 'application/wasm' })); downloadButton.disabled = false; setCompilationSuccess(true); el('size').textContent = `${optimizationLabels[result.optimization ?? 'Oz']} · ${formatBytes(result.component.byteLength)}`; const exclusive = result.timings.filter(t => !['generator', 'roslyn', 'netwasm'].includes(t.stage)).reduce((total, timing) => total + timing.milliseconds, 0); comparisons.set(result.optimization ?? 'Oz', { bytes: result.component.byteLength, milliseconds: exclusive }); showComparisons(); }
         else { invalidateDownload(); el('status').textContent = result.cancelled ? 'Stopped' : result.error ? errorSummary(result.error) : 'Compilation failed'; }
       }

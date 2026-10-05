@@ -44,9 +44,12 @@ try {
       });
     }
   });
+  const initialDocument = await page.request.get(url);
+  if (!initialDocument.ok()) throw Error(`Playground document fetch failed: ${initialDocument.status()}`);
+  const initialDocumentBytes = await initialDocument.body();
   const initialNavigation = await page.goto(url);
   if (!initialNavigation?.ok()) throw Error(`Playground navigation failed: ${initialNavigation?.status()}`);
-  const initialSiteIdentity = await observeSiteIdentity(page, url, await initialNavigation.body(), expectedIdentity);
+  const initialSiteIdentity = await observeSiteIdentity(page, url, initialDocumentBytes, expectedIdentity);
   const toolchainManifest = initialSiteIdentity.toolchainManifest;
   if (toolchainManifest.schemaVersion !== 3 ||
       Object.keys(toolchainManifest.bundles).sort().join(',') !== 'compiler,guest,linker,tools')
@@ -176,9 +179,12 @@ try {
     throw Error(`Toolchain request graph was not bundled: ${JSON.stringify({ count: toolchainRequests.length, directPayloads })}`);
   const finalUrl = new URL(url);
   finalUrl.searchParams.set('site-identity', expectedIdentity.siteIdentitySha256);
+  const finalDocument = await page.request.get(finalUrl.href);
+  if (!finalDocument.ok()) throw Error(`Playground document fetch failed: ${finalDocument.status()}`);
+  const finalDocumentBytes = await finalDocument.body();
   const finalNavigation = await page.goto(finalUrl.href);
   if (!finalNavigation?.ok()) throw Error(`Playground reload failed: ${finalNavigation?.status()}`);
-  const finalSiteIdentity = await observeSiteIdentity(page, url, await finalNavigation.body(), expectedIdentity);
+  const finalSiteIdentity = await observeSiteIdentity(page, url, finalDocumentBytes, expectedIdentity);
   const bytes = readFileSync(componentPath);
   const result = { passed: true, browser: browser.version(), stdout, status,
     component: { bytes: bytes.length, sha256: createHash('sha256').update(bytes).digest('hex') },

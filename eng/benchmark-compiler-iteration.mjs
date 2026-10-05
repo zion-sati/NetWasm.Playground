@@ -18,10 +18,25 @@ const output = resolve(value('--output'));
 const port = Number(args.includes('--port') ? value('--port') : '5187');
 if (!Number.isInteger(port) || port < 1024 || port > 65535) throw new Error('Invalid --port');
 const candidateToolchain = optionalValue('--toolchain');
+const nativeAotCompiler = optionalValue('--nativeaot-compiler');
+const nativeWasmOpt = optionalValue('--native-wasm-opt');
+const forceJavaScriptWasmOpt = args.includes('--force-javascript-wasm-opt');
+const wasmOptWorkers = Number(optionalValue('--wasm-opt-workers') ?? '4');
 const selectedRecipes = optionalValue('--recipes')?.split(',').filter(Boolean);
+const selectedSteps = optionalValue('--steps')?.split(',').filter(Boolean);
 const runOverride = optionalValue('--runs');
+const optimization = optionalValue('--optimization') ?? 'none';
 if (runOverride !== undefined && (!Number.isInteger(Number(runOverride)) || Number(runOverride) < 1))
   throw new Error('Invalid --runs');
+if (!['none', 'O0', 'O1', 'O2', 'O3', 'Os', 'Oz'].includes(optimization))
+  throw new Error('Invalid --optimization');
+if (!Number.isInteger(wasmOptWorkers) || wasmOptWorkers < 1 || wasmOptWorkers > 16)
+  throw new Error('Invalid --wasm-opt-workers');
+if (nativeWasmOpt && forceJavaScriptWasmOpt)
+  throw new Error('Select either native or forced JavaScript wasm-opt');
+if (selectedSteps && (selectedSteps.length === 0 || selectedSteps.some(step =>
+  !['cold', 'identical', 'body-edit', 'reverse-edit'].includes(step))))
+  throw new Error('Invalid --steps');
 
 const benchmarkDist = resolve(root, 'artifacts/.compiler-iteration-browser-site');
 await build({ root, publicDir: 'public', logLevel: 'silent', build: {
@@ -32,8 +47,20 @@ if (candidateToolchain) {
   await rm(resolve(benchmarkDist, 'toolchain'), { recursive: true, force: true });
   await cp(resolve(candidateToolchain), resolve(benchmarkDist, 'toolchain'), { recursive: true });
 }
+if (nativeAotCompiler) {
+  await rm(resolve(benchmarkDist, 'nativeaot'), { recursive: true, force: true });
+  await cp(resolve(nativeAotCompiler), resolve(benchmarkDist, 'nativeaot'), { recursive: true });
+}
+if (nativeWasmOpt) {
+  await rm(resolve(benchmarkDist, 'native-wasm-opt'), { recursive: true, force: true });
+  await cp(resolve(nativeWasmOpt), resolve(benchmarkDist, 'native-wasm-opt'), { recursive: true });
+}
 const server = await preview({ root, logLevel: 'silent', build: { outDir: benchmarkDist },
-  preview: { host: '127.0.0.1', port, strictPort: true } });
+  preview: { host: '127.0.0.1', port, strictPort: true,
+    headers: {
+      'Cross-Origin-Opener-Policy': 'same-origin',
+      'Cross-Origin-Embedder-Policy': 'require-corp',
+    } } });
 const browser = await chromium.launch({ headless: true });
 const releaseTag = optionalValue('--release-tag');
 let toolchainIndex;
@@ -42,6 +69,7 @@ let cases = [
   { recipe: 'json-generated', runs: 5, from: 'Score = 42', to: 'Score = 43' },
   { recipe: 'regex', runs: 1, from: 'Ada:42, Grace:99', to: 'Ada:43, Grace:99' },
   { recipe: 'di', runs: 1, from: 'SayHello("Ada")', to: 'SayHello("Grace")' },
+  { recipe: 'fluentvalidation', runs: 1, from: 'Age = 41', to: 'Age = 42' },
 ];
 if (selectedRecipes) {
   const requested = new Set(selectedRecipes);
@@ -59,7 +87,7 @@ const summarize = values => {
     maximum: sorted.at(-1),
   };
 };
-const summarizeRuns = runs => Object.fromEntries(['cold', 'identical', 'body-edit', 'reverse-edit'].map(label => {
+const summarizeRuns = runs => Object.fromEntries(runs[0].steps.map(({ label }) => {
   const steps = runs.map(run => run.steps.find(step => step.label === label));
   const stageNames = [...new Set(steps.flatMap(step => [...step.timings, ...step.runTimings].map(timing => timing.stage)))];
   return [label, {
@@ -69,6 +97,8 @@ const summarizeRuns = runs => Object.fromEntries(['cold', 'identical', 'body-edi
     compileWallMilliseconds: summarize(steps.map(step => step.compileWallMilliseconds)),
     runWallMilliseconds: summarize(steps.map(step => step.runWallMilliseconds)),
     componentBytes: summarize(steps.map(step => step.componentBytes)),
+    compilerHostLinearMemoryBytes: summarize(steps.map(step => step.compilerHostLinearMemoryBytes)),
+    toolsHostLinearMemoryBytes: summarize(steps.map(step => step.toolsHostLinearMemoryBytes)),
     stages: Object.fromEntries(stageNames.map(stage => [stage, summarize(steps.map(step =>
       [...step.timings, ...step.runTimings].filter(timing => timing.stage === stage)
         .reduce((total, timing) => total + timing.milliseconds, 0)))])),
@@ -88,10 +118,14 @@ const receipt = {
     logicalCpuCount: cpus().length,
     totalMemoryBytes: totalmem(),
     workerCount: 1,
-    optimization: 'none',
+    wasmOptWorkerCount: nativeWasmOpt ? wasmOptWorkers : 1,
+    compilerHost: nativeAotCompiler ? 'NativeAOT-LLVM' : 'pending toolchain inspection',
+    wasmOptHost: nativeWasmOpt ? 'Binaryen browser CLI with pthreads'
+      : forceJavaScriptWasmOpt ? 'Binaryen JavaScript CLI' : 'production-selected optimizer',
+    optimization,
     network: 'local Vite; immutable public toolchain assets already present',
     concurrentHostLoad: 'No concurrent CPU-heavy build or benchmark; ordinary interactive desktop processes remained.',
-    unavailableCounters: ['allocations', 'gc', 'retained-memory', 'peak-memory', 'methods-decoded', 'methods-analyzed', 'methods-lowered', 'cache-hits', 'cache-misses', 'cache-evictions', 'key-construction'],
+    unavailableCounters: ['allocations', 'gc', 'retained-memory', 'process-private-memory', 'methods-decoded', 'methods-analyzed', 'methods-lowered', 'cache-hits', 'cache-misses', 'cache-evictions', 'key-construction'],
   },
   publicToolchain: {
     releaseTag: releaseTag ?? null,
@@ -111,14 +145,23 @@ try {
   toolchainIndex = await (await fetch(`http://127.0.0.1:${port}/toolchain/index.json`)).json();
   receipt.publicToolchain.id = toolchainIndex.id;
   receipt.publicToolchain.manifestSha256 = toolchainIndex.manifestSha256;
+  const toolchainManifest = await (await fetch(
+    `http://127.0.0.1:${port}/toolchain/${toolchainIndex.id}/asset-manifest.json`)).json();
+  receipt.environment.compilerHost = nativeAotCompiler || toolchainManifest.pins?.nativeAotLlvmCompilerHost
+    ? 'NativeAOT-LLVM' : 'Mono browser host';
   for (const fixture of cases) {
     const runs = [];
     for (let runIndex = 0; runIndex < fixture.runs; runIndex++) {
       const page = await browser.newPage();
+      page.on('console', message => {
+        if (message.type() === 'error') process.stderr.write(`browser console: ${message.text()}\n`);
+      });
+      page.on('pageerror', error => process.stderr.write(`browser page error: ${error.stack ?? error}\n`));
       await page.exposeFunction('__benchmarkProgress', label => process.stdout.write(`${fixture.recipe} ${runIndex + 1}/${fixture.runs} ${label}\n`));
       await page.goto(`http://127.0.0.1:${port}/eng/benchmark-host.html`, { waitUntil: 'domcontentloaded' });
-      const sequence = await page.evaluate(async ({ recipe, from, to, runIndex }) => {
-        const { PlaygroundPipeline, examples } = globalThis.__netwasmBenchmark;
+      const sequence = await page.evaluate(async ({ recipe, from, to, runIndex, optimization, nativeAotCompiler, nativeWasmOpt, forceJavaScriptWasmOpt, wasmOptWorkers, selectedSteps }) => {
+        const { PlaygroundPipeline, examples, createNativeAotCompilerChannel,
+          createFrontendCache, createNativeWasmOptChannel } = globalThis.__netwasmBenchmark;
         const fixture = examples.find(example => example.id === recipe);
         if (!fixture) throw new Error(`Unknown fixture ${recipe}`);
         if (!fixture.source.includes(from) || fixture.source.includes(to)) throw new Error(`Edit anchor failed for ${recipe}`);
@@ -144,18 +187,59 @@ try {
           events.push(event);
           if (event.type === 'stage' && event.state === 'running') void window.__benchmarkProgress(`stage:${event.stage}`);
         });
+        if (forceJavaScriptWasmOpt) pipeline.nativeWasmOptUnavailable = true;
+        if (nativeAotCompiler) {
+          const nativeChannel = createNativeAotCompilerChannel({
+            candidateRoot: '/nativeaot/',
+            createFrontendCache,
+            report: event => {
+              if (event.stage) events.push({ type: 'stage', ...event });
+            },
+          });
+          const originalChannel = pipeline.channel.bind(pipeline);
+          const originalInitializeChannel = pipeline.initializeChannel.bind(pipeline);
+          pipeline.channel = name => {
+            if (name !== 'compiler') return originalChannel(name);
+            pipeline.channels.set('compiler', nativeChannel);
+            return nativeChannel;
+          };
+          pipeline.initializeChannel = name => name === 'compiler'
+            ? nativeChannel.request({ operation: 'initialize', toolchainId: pipeline.toolchainId }).then(() => undefined)
+            : originalInitializeChannel(name);
+        }
+        const originalChannel = pipeline.channel.bind(pipeline);
+        const originalDispose = pipeline.dispose.bind(pipeline);
+        const nativeTools = nativeWasmOpt
+          ? createNativeWasmOptChannel('/native-wasm-opt/', wasmOptWorkers) : undefined;
+        let originalTools;
+        const toolMemoryBytes = [];
+        const proxy = {
+          async request(data, transfers, timeout, executionTimeout) {
+            const selected = data.operation === 'wasm-opt' && nativeTools
+              ? nativeTools : (originalTools ??= originalChannel('tools'));
+            const response = await selected.request(data, transfers, timeout, executionTimeout);
+            if (Number.isSafeInteger(response.memoryBytes)) toolMemoryBytes.push(response.memoryBytes);
+            return response;
+          },
+          reset(reason) { originalTools?.reset(reason); nativeTools?.reset(reason); },
+        };
+        pipeline.channel = name => name === 'tools' ? proxy : originalChannel(name);
+        pipeline.dispose = () => { nativeTools?.reset(); originalDispose(); };
         if (!(pipeline.channels instanceof Map)) throw new Error('Compiler channel observation boundary unavailable');
-        const steps = [
+        let steps = [
           ['cold', sourceV1, 1],
           ['identical', sourceV1, 1],
           ['body-edit', sourceV2, 2],
           ['reverse-edit', sourceV1, 1],
         ];
+        if (selectedSteps) steps = steps.filter(([label]) => selectedSteps.includes(label));
         const results = [];
         try {
           for (let index = 0; index < steps.length; index++) {
             const [label, source, version] = steps[index];
-            const snapshot = { requestId: runIndex * 10 + index + 1, revision: index + 1, source, recipeId: recipe, optimization: 'none' };
+            const snapshot = { requestId: runIndex * 10 + index + 1, revision: index + 1, source,
+              recipeId: recipe, optimization, language: '15', updatedMemorySafetyRules: false };
+            const toolMemoryStart = toolMemoryBytes.length;
             const compilerChannelBefore = pipeline.channels.get('compiler');
             const wallStarted = performance.now();
             const compiled = await pipeline.compile(snapshot);
@@ -179,19 +263,28 @@ try {
             const executed = await pipeline.run(compiled, snapshot);
             const runWallMilliseconds = performance.now() - runStarted;
             if (!executed.success || executed.exitCode !== 0) throw new Error(`${recipe}/${label} execution failed at ${executed.stage}: ${executed.error ?? executed.stderr}`);
-            results.push({ label, version, compilerWorker, compileWallMilliseconds, runWallMilliseconds, componentBytes, componentSha256,
+            const currentToolMemory = toolMemoryBytes.slice(toolMemoryStart);
+            results.push({ label, version, compilerWorker, compileWallMilliseconds, runWallMilliseconds,
+              componentBytes, componentSha256,
+              compilerHostLinearMemoryBytes: compiled.compilerHostLinearMemoryBytes,
+              toolsHostLinearMemoryBytes: currentToolMemory.length ? Math.max(...currentToolMemory) : 0,
               timings: compiled.timings, runTimings: executed.timings, stdout: executed.stdout, stderr: executed.stderr });
             await window.__benchmarkProgress(label);
           }
         } finally { pipeline.dispose(); }
         return { inputs, steps: results, stageEvents: events.filter(event => event.type === 'stage') };
-      }, { ...fixture, runIndex });
+      }, { ...fixture, runIndex, optimization, nativeAotCompiler: Boolean(nativeAotCompiler),
+        nativeWasmOpt: Boolean(nativeWasmOpt), forceJavaScriptWasmOpt,
+        wasmOptWorkers, selectedSteps });
       await page.close();
-      const [cold, identical, edit, reverse] = sequence.steps;
-      if (cold.componentSha256 !== identical.componentSha256 || cold.componentSha256 !== reverse.componentSha256)
+      const byLabel = Object.fromEntries(sequence.steps.map(step => [step.label, step]));
+      const stable = ['cold', 'identical', 'reverse-edit'].filter(label => byLabel[label]);
+      if (stable.length > 1 && stable.some(label => byLabel[label].componentSha256 !== byLabel[stable[0]].componentSha256))
         throw new Error(`${fixture.recipe} stable-input component hashes differ`);
-      if (cold.componentSha256 === edit.componentSha256) throw new Error(`${fixture.recipe} body edit did not change component`);
-      if (cold.stdout !== identical.stdout || cold.stdout !== reverse.stdout || cold.stdout === edit.stdout)
+      if (byLabel.cold && byLabel['body-edit'] && byLabel.cold.componentSha256 === byLabel['body-edit'].componentSha256)
+        throw new Error(`${fixture.recipe} body edit did not change component`);
+      if (stable.length > 1 && stable.some(label => byLabel[label].stdout !== byLabel[stable[0]].stdout) ||
+          byLabel.cold && byLabel['body-edit'] && byLabel.cold.stdout === byLabel['body-edit'].stdout)
         throw new Error(`${fixture.recipe} execution outcome guard failed`);
       runs.push(sequence);
     }

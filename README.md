@@ -18,6 +18,12 @@ the current source so the tradeoff can be compared directly. C# remains a
 Release compilation for every setting; this control changes the final
 WebAssembly optimization pass.
 
+The browser compiler uses NativeAOT-LLVM in a dedicated worker. When the page
+has cross-origin isolation and shared WebAssembly memory, `wasm-opt` uses a
+bounded native pthread pool; otherwise the result panel identifies the
+single-threaded JavaScript fallback. See the [0.6.1 performance report](docs/performance-0.6.1.md)
+and [cross-origin isolation behavior](docs/cross-origin-isolation.md).
+
 ## Local development
 
 Use the pinned Node version in the public NetWasm toolchain manifest.
@@ -99,6 +105,9 @@ Production builds also write Brotli quality 11 `.br` sidecars for every `.wasm`
 and `.bin` file. Originals and their manifest hashes are preserved. Follow the
 [Cloudflare Worker setup](docs/cloudflare-brotli.md) to serve those sidecars
 through standard HTTP content encoding without changing the loaders.
+The same hosting boundary supplies the headers needed by the native optimizer;
+static hosts use the reviewed same-origin service-worker path described in the
+[cross-origin isolation guide](docs/cross-origin-isolation.md).
 The content-addressed filenames are safe to retain in a CDN cache indefinitely;
 `toolchain/index.json` remains the short-lived pointer to the current manifest.
 

@@ -31,18 +31,23 @@ try {
   await idle();
   if (await page.locator('#output').textContent() !== '42\n') throw Error('Run failed');
   const readCacheStages = () => page.locator('#stages li').evaluateAll(items => Object.fromEntries(items
-    .filter(item => ['cache-read', 'cache-write'].includes(item.dataset.stage))
+    .filter(item => ['cache-lookup', 'cache-hydrate', 'cache-write'].includes(item.dataset.stage))
     .map(item => [item.dataset.stage, item.dataset.state])));
   const cacheStages = await readCacheStages();
-  if (cacheStages['cache-read'] !== 'complete' || cacheStages['cache-write'] !== 'complete')
+  if (cacheStages['cache-lookup'] !== 'complete' || cacheStages['cache-hydrate'] !== 'complete' ||
+      cacheStages['cache-write'] !== 'complete')
     throw Error(`Cache stages did not complete: ${JSON.stringify(cacheStages)}`);
   const statuses = await page.evaluate(() => window.progressStatuses);
   if (!statuses.some(text => text.startsWith('Step 3 of 8')) || !statuses.some(text => text.startsWith('Step 6 of 8')) || !statuses.some(text => text.startsWith('Step 8 of 8'))) throw Error(JSON.stringify(statuses));
+  const cacheStatus = statuses.findIndex(text => text.includes('Hydrating compiler cache'));
+  const compileStatus = statuses.findIndex((text, index) => index > cacheStatus && text.includes('Compiling WebAssembly'));
+  if (cacheStatus < 0 || compileStatus < 0)
+    throw Error(`Compiler status did not advance after the cache read: ${JSON.stringify(statuses)}`);
   await page.locator('#compile').click();
   await busy();
   await idle();
   const warmCacheStages = await readCacheStages();
-  if (warmCacheStages['cache-read'] !== 'complete')
+  if (warmCacheStages['cache-lookup'] !== 'complete' || warmCacheStages['cache-hydrate'] !== 'complete')
     throw Error(`Warm cache read did not complete: ${JSON.stringify(warmCacheStages)}`);
   await page.evaluate(() => { window.progressStatuses = []; });
   await page.locator('#run').click();

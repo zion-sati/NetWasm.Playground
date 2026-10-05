@@ -75,8 +75,9 @@ class ToolchainReleaseVersionTests(unittest.TestCase):
 
         self.assertIn("release:\n    types: [published]", release)
         self.assertIn("Existing published GitHub Release tag to retry", release)
-        self.assertIn("python3 source/eng/build-release-compiler.py", release)
-        self.assertIn("dotnet workload install wasm-tools --skip-manifest-update", release)
+        self.assertIn("python3 source/eng/build-nativeaot-compiler.py", release)
+        self.assertIn("nativeaot-compiler-receipt.json", release)
+        self.assertNotIn("dotnet workload install wasm-tools", release)
         self.assertIn("Build content-addressed browser toolchain manifest", release)
         self.assertIn("python3 source/eng/rebuild-public-toolchain.py", release)
         self.assertIn("Retain exact browser toolchain archive", release)
