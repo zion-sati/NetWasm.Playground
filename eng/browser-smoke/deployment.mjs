@@ -50,8 +50,9 @@ try {
   const initialDocument = await page.request.get(url);
   if (!initialDocument.ok()) throw Error(`Playground document fetch failed: ${initialDocument.status()}`);
   const initialDocumentBytes = await initialDocument.body();
-  const initialNavigation = await page.goto(url);
+  const initialNavigation = await page.goto(url, { waitUntil: 'commit' });
   if (!initialNavigation?.ok()) throw Error(`Playground navigation failed: ${initialNavigation?.status()}`);
+  await page.waitForFunction(() => crossOriginIsolated, undefined, { timeout: 30_000 });
   const initialSiteIdentity = await observeSiteIdentity(page, url, initialDocumentBytes, expectedIdentity);
   const toolchainManifest = initialSiteIdentity.toolchainManifest;
   if (toolchainManifest.schemaVersion !== 3 ||
@@ -185,8 +186,9 @@ try {
   const finalDocument = await page.request.get(finalUrl.href);
   if (!finalDocument.ok()) throw Error(`Playground document fetch failed: ${finalDocument.status()}`);
   const finalDocumentBytes = await finalDocument.body();
-  const finalNavigation = await page.goto(finalUrl.href);
+  const finalNavigation = await page.goto(finalUrl.href, { waitUntil: 'commit' });
   if (!finalNavigation?.ok()) throw Error(`Playground reload failed: ${finalNavigation?.status()}`);
+  await page.waitForFunction(() => crossOriginIsolated, undefined, { timeout: 30_000 });
   const finalSiteIdentity = await observeSiteIdentity(page, url, finalDocumentBytes, expectedIdentity);
   const bytes = readFileSync(componentPath);
   const result = { passed: true, browser: browser.version(), stdout, status,
