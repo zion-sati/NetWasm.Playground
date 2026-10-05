@@ -43,6 +43,10 @@ HOSTING_MODULES = (
 
 def bundle_role(relative):
     path = Path(relative)
+    # Keep the threaded optimizer closure lazy. It is fetched only after the
+    # browser proves cross-origin isolation and Wasm shared-memory support.
+    if relative.startswith('native-wasm-opt/'):
+        return None
     if relative in {'wasm-merge.js', 'wasm-opt.js', 'path-browserify.js'}:
         return 'tools'
     if relative.startswith('notices/') or path.suffix in {'.js', '.mjs'}:

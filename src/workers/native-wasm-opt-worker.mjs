@@ -29,6 +29,7 @@ function serveWorker(handler) {
 const maximumAssetBytes = 16 * 1048576;
 const limits = { maximumInputBytes: 5 * 1048576, maximumOutputBytes: 5 * 1048576 };
 let initialized, runtime, configuredRoot, configuredWorkers, workerCount;
+let linearMemory;
 let javascriptUrl, wasmUrl;
 let stdout = [], stderr = [];
 
@@ -95,6 +96,15 @@ async function initialize(root, requestedWorkers) {
       environment: { BINARYEN_CORES: String(requestedWorkers) },
       pthreadWorkerUrl: javascriptUrl,
       locateFile: name => name === 'wasm-opt.wasm' ? wasmUrl : (() => { throw Error('Unexpected native wasm-opt asset'); })(),
+      instantiateWasm(imports, receive) {
+        linearMemory = imports?.a?.a;
+        if (!(linearMemory instanceof WebAssembly.Memory))
+          throw Error('Native wasm-opt did not expose its imported memory');
+        WebAssembly.instantiate(wasm, imports).then(
+          ({ instance, module }) => receive(instance, module),
+          error => { throw error; });
+        return {};
+      },
       onPthreadWorker: () => workerCount++,
       print: text => stdout.push(String(text)),
       printErr: text => stderr.push(String(text)),
@@ -142,7 +152,8 @@ serveWorker(async data => {
     }
     return { exitCode, stdout: stdout.join('\n'), stderr: stderr.join('\n'), files: outputs,
       workerCount: configuredWorkers, pthreadPoolSize: workerCount,
-      hardwareConcurrency: metadata.hardwareConcurrency, optimizationMilliseconds };
+      hardwareConcurrency: metadata.hardwareConcurrency,
+      memoryBytes: linearMemory.buffer.byteLength, optimizationMilliseconds };
   } catch (error) {
     throw Error(errorText(error));
   } finally { clean(names); }

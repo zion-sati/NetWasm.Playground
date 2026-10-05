@@ -1,0 +1,1956 @@
+{
+  "schemaVersion": 1,
+  "capturedAt": "2026-10-05T08:07:03.734Z",
+  "command": "node eng/benchmark-compiler-iteration.mjs",
+  "arguments": [
+    "--output",
+    ".cache/performance/reports/fluent-oz-native-3.json",
+    "--recipes",
+    "fluentvalidation",
+    "--steps",
+    "cold",
+    "--runs",
+    "3",
+    "--optimization",
+    "Oz",
+    "--native-wasm-opt",
+    "public/toolchain/3d83689b9cfab72b11593b9d9735f92416b98030c68b09dacb942ffb02fc2df2/native-wasm-opt",
+    "--wasm-opt-workers",
+    "8"
+  ],
+  "environment": {
+    "browserVersion": "151.0.7922.34",
+    "platform": "darwin",
+    "architecture": "arm64",
+    "node": "v26.7.0",
+    "cpuModel": "Apple M1 Max",
+    "logicalCpuCount": 10,
+    "totalMemoryBytes": 68719476736,
+    "workerCount": 1,
+    "wasmOptWorkerCount": 8,
+    "compilerHost": "NativeAOT-LLVM",
+    "wasmOptHost": "Binaryen browser CLI with pthreads",
+    "optimization": "Oz",
+    "network": "local Vite; immutable public toolchain assets already present",
+    "concurrentHostLoad": "No concurrent CPU-heavy build or benchmark; ordinary interactive desktop processes remained.",
+    "unavailableCounters": [
+      "allocations",
+      "gc",
+      "retained-memory",
+      "process-private-memory",
+      "methods-decoded",
+      "methods-analyzed",
+      "methods-lowered",
+      "cache-hits",
+      "cache-misses",
+      "cache-evictions",
+      "key-construction"
+    ]
+  },
+  "publicToolchain": {
+    "releaseTag": null,
+    "source": "checked-in public toolchain",
+    "id": "3d83689b9cfab72b11593b9d9735f92416b98030c68b09dacb942ffb02fc2df2",
+    "manifestSha256": "b9a71b92cd59f3bd0cfed70b2234c5cf35f45aabbad6ad47ad625f298d04bdd6"
+  },
+  "semantics": {
+    "repetition": "Each repetition opens a fresh page and creates a fresh PlaygroundPipeline, compiler worker, linker worker, and tools worker. Browser HTTP cache remains available; timings therefore exclude first-visit Internet transfer.",
+    "sequence": "Within a repetition, cold, identical, body-edit, and reverse-edit steps reuse the same PlaygroundPipeline. Runtime compiler-channel identity records whether each step starts warm and whether the production memory threshold recycles the worker afterward.",
+    "inclusiveTimings": [
+      "compile includes generator, roslyn, and netwasm",
+      "run includes transpile, instantiate, and execute"
+    ],
+    "exclusiveBoundaries": [
+      "initialization: download, compiler-initialize, linker-initialize, tools-initialize",
+      "source generation: generator",
+      "managed compilation: roslyn",
+      "NetWasm compiler: netwasm",
+      "runtime link: link",
+      "package: parse, merge, prune, validate, componentization",
+      "execution: transpile, instantiate, execute"
+    ],
+    "fixtureLimit": "Browser examples are maintained feature-equivalent fixtures, not byte-identical inputs to the local frozen PE/SDK fixtures. Browser generated inputs and public package/toolchain pins are authoritative for this adapter baseline."
+  },
+  "fixtures": [
+    {
+      "recipe": "fluentvalidation",
+      "repetitions": 3,
+      "inputs": {
+        "sourceV1Sha256": "1e6d95bbc66e7a57ae9d13fc76650b4b6b88723b0852c341b4b2a5be6efba280",
+        "sourceV2Sha256": "3178365e25da26eef1b14423abbf5d4469bef91a0c212db041d96f85f5444aac",
+        "sourceV1Bytes": 736,
+        "sourceV2Bytes": 736
+      },
+      "edit": {
+        "from": "Age = 41",
+        "to": "Age = 42"
+      },
+      "summary": {
+        "cold": {
+          "compilerSessionClassifications": [
+            "created-then-recycled",
+            "created-then-recycled",
+            "created-then-recycled"
+          ],
+          "warmCompilerSessionSamples": 0,
+          "retainedAfterCompileSamples": 0,
+          "compileWallMilliseconds": {
+            "samples": [
+              79684.2950000763,
+              82145.35500001907,
+              78750.0799999237
+            ],
+            "median": 79684.2950000763,
+            "minimum": 78750.0799999237,
+            "maximum": 82145.35500001907
+          },
+          "runWallMilliseconds": {
+            "samples": [
+              543.4199995994568,
+              302.7649998664856,
+              303.4949998855591
+            ],
+            "median": 303.4949998855591,
+            "minimum": 302.7649998664856,
+            "maximum": 543.4199995994568
+          },
+          "componentBytes": {
+            "samples": [
+              3321445,
+              3321445,
+              3321445
+            ],
+            "median": 3321445,
+            "minimum": 3321445,
+            "maximum": 3321445
+          },
+          "compilerHostLinearMemoryBytes": {
+            "samples": [
+              398721024,
+              398721024,
+              398721024
+            ],
+            "median": 398721024,
+            "minimum": 398721024,
+            "maximum": 398721024
+          },
+          "toolsHostLinearMemoryBytes": {
+            "samples": [
+              104529920,
+              104529920,
+              104529920
+            ],
+            "median": 104529920,
+            "minimum": 104529920,
+            "maximum": 104529920
+          },
+          "stages": {
+            "download": {
+              "samples": [
+                4.690000057220459,
+                4.360000133514404,
+                4.185000419616699
+              ],
+              "median": 4.360000133514404,
+              "minimum": 4.185000419616699,
+              "maximum": 4.690000057220459
+            },
+            "compiler-initialize": {
+              "samples": [
+                444.414999961853,
+                963.3449997901917,
+                426.55000019073486
+              ],
+              "median": 444.414999961853,
+              "minimum": 426.55000019073486,
+              "maximum": 963.3449997901917
+            },
+            "compile": {
+              "samples": [
+                8767.984999656677,
+                8558.424999713898,
+                8059.235000133514
+              ],
+              "median": 8558.424999713898,
+              "minimum": 8059.235000133514,
+              "maximum": 8767.984999656677
+            },
+            "roslyn": {
+              "samples": [
+                167.7699,
+                186.15,
+                168.39
+              ],
+              "median": 168.39,
+              "minimum": 167.7699,
+              "maximum": 186.15
+            },
+            "netwasm": {
+              "samples": [
+                5617.91,
+                5303.085,
+                5106.235
+              ],
+              "median": 5303.085,
+              "minimum": 5106.235,
+              "maximum": 5617.91
+            },
+            "runtime-cache-read": {
+              "samples": [
+                0.75,
+                0.7300000190734863,
+                0.690000057220459
+              ],
+              "median": 0.7300000190734863,
+              "minimum": 0.690000057220459,
+              "maximum": 0.75
+            },
+            "linker-initialize": {
+              "samples": [
+                191.625,
+                265.4799995422363,
+                184.77500009536743
+              ],
+              "median": 191.625,
+              "minimum": 184.77500009536743,
+              "maximum": 265.4799995422363
+            },
+            "tools-initialize": {
+              "samples": [
+                87.76000022888184,
+                223.5349998474121,
+                92.03999996185303
+              ],
+              "median": 92.03999996185303,
+              "minimum": 87.76000022888184,
+              "maximum": 223.5349998474121
+            },
+            "link": {
+              "samples": [
+                1366.460000038147,
+                1575.0149998664856,
+                1408.085000038147
+              ],
+              "median": 1408.085000038147,
+              "minimum": 1366.460000038147,
+              "maximum": 1575.0149998664856
+            },
+            "runtime-optimize": {
+              "samples": [
+                439.1199998855591,
+                597.1549997329712,
+                449.6549997329712
+              ],
+              "median": 449.6549997329712,
+              "minimum": 439.1199998855591,
+              "maximum": 597.1549997329712
+            },
+            "runtime-validate": {
+              "samples": [
+                109.0149998664856,
+                283.00499963760376,
+                114.48000001907349
+              ],
+              "median": 114.48000001907349,
+              "minimum": 109.0149998664856,
+              "maximum": 283.00499963760376
+            },
+            "runtime-cache-write": {
+              "samples": [
+                1.059999942779541,
+                1.119999885559082,
+                1.1100001335144043
+              ],
+              "median": 1.1100001335144043,
+              "minimum": 1.059999942779541,
+              "maximum": 1.119999885559082
+            },
+            "parse": {
+              "samples": [
+                10.50499963760376,
+                13.985000133514404,
+                10.375000476837158
+              ],
+              "median": 10.50499963760376,
+              "minimum": 10.375000476837158,
+              "maximum": 13.985000133514404
+            },
+            "merge": {
+              "samples": [
+                3487.0650000572205,
+                3847.8799996376038,
+                3491.465000152588
+              ],
+              "median": 3491.465000152588,
+              "minimum": 3487.0650000572205,
+              "maximum": 3847.8799996376038
+            },
+            "prune": {
+              "samples": [
+                272.7649998664856,
+                316.5,
+                278.2200002670288
+              ],
+              "median": 278.2200002670288,
+              "minimum": 272.7649998664856,
+              "maximum": 316.5
+            },
+            "optimize": {
+              "samples": [
+                64119.16499996185,
+                65300.58999967575,
+                64028.43499994278
+              ],
+              "median": 64119.16499996185,
+              "minimum": 64028.43499994278,
+              "maximum": 65300.58999967575
+            },
+            "validate": {
+              "samples": [
+                35.69999980926514,
+                24.06999969482422,
+                24.09500026702881
+              ],
+              "median": 24.09500026702881,
+              "minimum": 24.06999969482422,
+              "maximum": 35.69999980926514
+            },
+            "componentization": {
+              "samples": [
+                108.78999996185303,
+                94.32499980926514,
+                94.5149998664856
+              ],
+              "median": 94.5149998664856,
+              "minimum": 94.32499980926514,
+              "maximum": 108.78999996185303
+            },
+            "run": {
+              "samples": [
+                542.9650001525879,
+                302.30999994277954,
+                303.07499980926514
+              ],
+              "median": 303.07499980926514,
+              "minimum": 302.30999994277954,
+              "maximum": 542.9650001525879
+            },
+            "transpile": {
+              "samples": [
+                456.42000007629395,
+                239.5499997138977,
+                240.94000005722046
+              ],
+              "median": 240.94000005722046,
+              "minimum": 239.5499997138977,
+              "maximum": 456.42000007629395
+            },
+            "instantiate": {
+              "samples": [
+                13.150000095367432,
+                7.704999923706055,
+                7.800000190734863
+              ],
+              "median": 7.800000190734863,
+              "minimum": 7.704999923706055,
+              "maximum": 13.150000095367432
+            },
+            "execute": {
+              "samples": [
+                39.13499975204468,
+                33.375,
+                33.47499990463257
+              ],
+              "median": 33.47499990463257,
+              "minimum": 33.375,
+              "maximum": 39.13499975204468
+            }
+          }
+        }
+      },
+      "runs": [
+        {
+          "inputs": {
+            "sourceV1Sha256": "1e6d95bbc66e7a57ae9d13fc76650b4b6b88723b0852c341b4b2a5be6efba280",
+            "sourceV2Sha256": "3178365e25da26eef1b14423abbf5d4469bef91a0c212db041d96f85f5444aac",
+            "sourceV1Bytes": 736,
+            "sourceV2Bytes": 736
+          },
+          "steps": [
+            {
+              "label": "cold",
+              "version": 1,
+              "compilerWorker": {
+                "startedWithExistingChannel": false,
+                "retainedAfterCompile": false,
+                "classification": "created-then-recycled"
+              },
+              "compileWallMilliseconds": 79684.2950000763,
+              "runWallMilliseconds": 543.4199995994568,
+              "componentBytes": 3321445,
+              "componentSha256": "0c37a8395dfe92649673ddc762a37577d58d231871fcad85f3024b18f0178dae",
+              "compilerHostLinearMemoryBytes": 398721024,
+              "toolsHostLinearMemoryBytes": 104529920,
+              "timings": [
+                {
+                  "stage": "download",
+                  "milliseconds": 4.690000057220459
+                },
+                {
+                  "stage": "compiler-initialize",
+                  "milliseconds": 444.414999961853
+                },
+                {
+                  "stage": "compile",
+                  "milliseconds": 8767.984999656677
+                },
+                {
+                  "stage": "roslyn",
+                  "milliseconds": 167.7699
+                },
+                {
+                  "stage": "netwasm",
+                  "milliseconds": 5617.91
+                },
+                {
+                  "stage": "runtime-cache-read",
+                  "milliseconds": 0.75
+                },
+                {
+                  "stage": "linker-initialize",
+                  "milliseconds": 191.625
+                },
+                {
+                  "stage": "tools-initialize",
+                  "milliseconds": 87.76000022888184
+                },
+                {
+                  "stage": "link",
+                  "milliseconds": 1366.460000038147
+                },
+                {
+                  "stage": "runtime-optimize",
+                  "milliseconds": 439.1199998855591
+                },
+                {
+                  "stage": "runtime-validate",
+                  "milliseconds": 109.0149998664856
+                },
+                {
+                  "stage": "runtime-cache-write",
+                  "milliseconds": 1.059999942779541
+                },
+                {
+                  "stage": "parse",
+                  "milliseconds": 5.554999828338623
+                },
+                {
+                  "stage": "parse",
+                  "milliseconds": 2.6500000953674316
+                },
+                {
+                  "stage": "parse",
+                  "milliseconds": 2.299999713897705
+                },
+                {
+                  "stage": "merge",
+                  "milliseconds": 3487.0650000572205
+                },
+                {
+                  "stage": "prune",
+                  "milliseconds": 272.7649998664856
+                },
+                {
+                  "stage": "optimize",
+                  "milliseconds": 64119.16499996185
+                },
+                {
+                  "stage": "validate",
+                  "milliseconds": 35.69999980926514
+                },
+                {
+                  "stage": "componentization",
+                  "milliseconds": 108.78999996185303
+                }
+              ],
+              "runTimings": [
+                {
+                  "stage": "run",
+                  "milliseconds": 542.9650001525879
+                },
+                {
+                  "stage": "transpile",
+                  "milliseconds": 456.42000007629395
+                },
+                {
+                  "stage": "instantiate",
+                  "milliseconds": 13.150000095367432
+                },
+                {
+                  "stage": "execute",
+                  "milliseconds": 39.13499975204468
+                }
+              ],
+              "stdout": "Valid: False\nName: Name is required.\nAge: Age must be 42.\n",
+              "stderr": ""
+            }
+          ],
+          "stageEvents": [
+            {
+              "requestId": 1,
+              "revision": 1,
+              "type": "stage",
+              "stage": "download",
+              "state": "running"
+            },
+            {
+              "requestId": 1,
+              "revision": 1,
+              "type": "stage",
+              "stage": "download",
+              "state": "complete",
+              "milliseconds": 4.690000057220459
+            },
+            {
+              "requestId": 1,
+              "revision": 1,
+              "type": "stage",
+              "stage": "compiler-initialize",
+              "state": "running"
+            },
+            {
+              "requestId": 1,
+              "revision": 1,
+              "type": "stage",
+              "stage": "compiler-initialize",
+              "state": "complete",
+              "milliseconds": 444.414999961853
+            },
+            {
+              "requestId": 1,
+              "revision": 1,
+              "type": "stage",
+              "stage": "compile",
+              "state": "running"
+            },
+            {
+              "requestId": 1,
+              "revision": 1,
+              "type": "stage",
+              "stage": "cache-read",
+              "state": "running"
+            },
+            {
+              "requestId": 1,
+              "revision": 1,
+              "type": "stage",
+              "stage": "cache-read",
+              "state": "complete",
+              "milliseconds": 5.244999885559082
+            },
+            {
+              "requestId": 1,
+              "revision": 1,
+              "type": "stage",
+              "stage": "netwasm",
+              "state": "running"
+            },
+            {
+              "requestId": 1,
+              "revision": 1,
+              "type": "stage",
+              "stage": "netwasm",
+              "state": "complete",
+              "milliseconds": 5690.284999847412
+            },
+            {
+              "requestId": 1,
+              "revision": 1,
+              "type": "stage",
+              "stage": "cache-write",
+              "state": "running"
+            },
+            {
+              "requestId": 1,
+              "revision": 1,
+              "type": "stage",
+              "stage": "cache-write",
+              "state": "complete",
+              "milliseconds": 2547.6550002098083
+            },
+            {
+              "requestId": 1,
+              "revision": 1,
+              "type": "stage",
+              "stage": "compile",
+              "state": "complete",
+              "milliseconds": 8767.984999656677
+            },
+            {
+              "requestId": 1,
+              "revision": 1,
+              "type": "stage",
+              "stage": "roslyn",
+              "state": "complete",
+              "milliseconds": 167.7699
+            },
+            {
+              "requestId": 1,
+              "revision": 1,
+              "type": "stage",
+              "stage": "netwasm",
+              "state": "complete",
+              "milliseconds": 5617.91
+            },
+            {
+              "requestId": 1,
+              "revision": 1,
+              "type": "stage",
+              "stage": "runtime-cache-read",
+              "state": "running"
+            },
+            {
+              "requestId": 1,
+              "revision": 1,
+              "type": "stage",
+              "stage": "runtime-cache-read",
+              "state": "complete",
+              "milliseconds": 0.75
+            },
+            {
+              "requestId": 1,
+              "revision": 1,
+              "type": "stage",
+              "stage": "linker-initialize",
+              "state": "running"
+            },
+            {
+              "requestId": 1,
+              "revision": 1,
+              "type": "stage",
+              "stage": "linker-initialize",
+              "state": "complete",
+              "milliseconds": 191.625
+            },
+            {
+              "requestId": 1,
+              "revision": 1,
+              "type": "stage",
+              "stage": "tools-initialize",
+              "state": "running"
+            },
+            {
+              "requestId": 1,
+              "revision": 1,
+              "type": "stage",
+              "stage": "tools-initialize",
+              "state": "complete",
+              "milliseconds": 87.76000022888184
+            },
+            {
+              "requestId": 1,
+              "revision": 1,
+              "type": "stage",
+              "stage": "link",
+              "state": "running"
+            },
+            {
+              "requestId": 1,
+              "revision": 1,
+              "type": "stage",
+              "stage": "link",
+              "state": "running"
+            },
+            {
+              "requestId": 1,
+              "revision": 1,
+              "type": "stage",
+              "stage": "link",
+              "state": "complete",
+              "milliseconds": 1366.460000038147
+            },
+            {
+              "requestId": 1,
+              "revision": 1,
+              "type": "stage",
+              "stage": "runtime-optimize",
+              "state": "running"
+            },
+            {
+              "requestId": 1,
+              "revision": 1,
+              "type": "stage",
+              "stage": "runtime-optimize",
+              "state": "complete",
+              "milliseconds": 439.1199998855591
+            },
+            {
+              "requestId": 1,
+              "revision": 1,
+              "type": "stage",
+              "stage": "runtime-validate",
+              "state": "running"
+            },
+            {
+              "requestId": 1,
+              "revision": 1,
+              "type": "stage",
+              "stage": "runtime-validate",
+              "state": "complete",
+              "milliseconds": 109.0149998664856
+            },
+            {
+              "requestId": 1,
+              "revision": 1,
+              "type": "stage",
+              "stage": "runtime-cache-write",
+              "state": "running"
+            },
+            {
+              "requestId": 1,
+              "revision": 1,
+              "type": "stage",
+              "stage": "runtime-cache-write",
+              "state": "complete",
+              "milliseconds": 1.059999942779541
+            },
+            {
+              "requestId": 1,
+              "revision": 1,
+              "type": "stage",
+              "stage": "parse",
+              "state": "running"
+            },
+            {
+              "requestId": 1,
+              "revision": 1,
+              "type": "stage",
+              "stage": "parse",
+              "state": "complete",
+              "milliseconds": 5.554999828338623
+            },
+            {
+              "requestId": 1,
+              "revision": 1,
+              "type": "stage",
+              "stage": "parse",
+              "state": "running"
+            },
+            {
+              "requestId": 1,
+              "revision": 1,
+              "type": "stage",
+              "stage": "parse",
+              "state": "complete",
+              "milliseconds": 2.6500000953674316
+            },
+            {
+              "requestId": 1,
+              "revision": 1,
+              "type": "stage",
+              "stage": "parse",
+              "state": "running"
+            },
+            {
+              "requestId": 1,
+              "revision": 1,
+              "type": "stage",
+              "stage": "parse",
+              "state": "complete",
+              "milliseconds": 2.299999713897705
+            },
+            {
+              "requestId": 1,
+              "revision": 1,
+              "type": "stage",
+              "stage": "merge",
+              "state": "running"
+            },
+            {
+              "requestId": 1,
+              "revision": 1,
+              "type": "stage",
+              "stage": "merge",
+              "state": "complete",
+              "milliseconds": 3487.0650000572205
+            },
+            {
+              "requestId": 1,
+              "revision": 1,
+              "type": "stage",
+              "stage": "prune",
+              "state": "running"
+            },
+            {
+              "requestId": 1,
+              "revision": 1,
+              "type": "stage",
+              "stage": "prune",
+              "state": "complete",
+              "milliseconds": 272.7649998664856
+            },
+            {
+              "requestId": 1,
+              "revision": 1,
+              "type": "stage",
+              "stage": "optimize",
+              "state": "running"
+            },
+            {
+              "requestId": 1,
+              "revision": 1,
+              "type": "stage",
+              "stage": "optimize",
+              "state": "complete",
+              "milliseconds": 64119.16499996185
+            },
+            {
+              "requestId": 1,
+              "revision": 1,
+              "type": "stage",
+              "stage": "validate",
+              "state": "running"
+            },
+            {
+              "requestId": 1,
+              "revision": 1,
+              "type": "stage",
+              "stage": "validate",
+              "state": "complete",
+              "milliseconds": 35.69999980926514
+            },
+            {
+              "requestId": 1,
+              "revision": 1,
+              "type": "stage",
+              "stage": "componentization",
+              "state": "running"
+            },
+            {
+              "requestId": 1,
+              "revision": 1,
+              "type": "stage",
+              "stage": "componentization",
+              "state": "complete",
+              "milliseconds": 108.78999996185303
+            },
+            {
+              "requestId": 1,
+              "revision": 1,
+              "type": "stage",
+              "stage": "run",
+              "state": "running"
+            },
+            {
+              "requestId": 1,
+              "revision": 1,
+              "type": "stage",
+              "stage": "transpile",
+              "state": "running"
+            },
+            {
+              "requestId": 1,
+              "revision": 1,
+              "type": "stage",
+              "stage": "instantiate",
+              "state": "running"
+            },
+            {
+              "requestId": 1,
+              "revision": 1,
+              "type": "stage",
+              "stage": "execute",
+              "state": "running"
+            },
+            {
+              "requestId": 1,
+              "revision": 1,
+              "type": "stage",
+              "stage": "run",
+              "state": "complete",
+              "milliseconds": 542.9650001525879
+            },
+            {
+              "requestId": 1,
+              "revision": 1,
+              "type": "stage",
+              "stage": "transpile",
+              "state": "complete",
+              "milliseconds": 456.42000007629395
+            },
+            {
+              "requestId": 1,
+              "revision": 1,
+              "type": "stage",
+              "stage": "instantiate",
+              "state": "complete",
+              "milliseconds": 13.150000095367432
+            },
+            {
+              "requestId": 1,
+              "revision": 1,
+              "type": "stage",
+              "stage": "execute",
+              "state": "complete",
+              "milliseconds": 39.13499975204468
+            }
+          ]
+        },
+        {
+          "inputs": {
+            "sourceV1Sha256": "1e6d95bbc66e7a57ae9d13fc76650b4b6b88723b0852c341b4b2a5be6efba280",
+            "sourceV2Sha256": "3178365e25da26eef1b14423abbf5d4469bef91a0c212db041d96f85f5444aac",
+            "sourceV1Bytes": 736,
+            "sourceV2Bytes": 736
+          },
+          "steps": [
+            {
+              "label": "cold",
+              "version": 1,
+              "compilerWorker": {
+                "startedWithExistingChannel": false,
+                "retainedAfterCompile": false,
+                "classification": "created-then-recycled"
+              },
+              "compileWallMilliseconds": 82145.35500001907,
+              "runWallMilliseconds": 302.7649998664856,
+              "componentBytes": 3321445,
+              "componentSha256": "0c37a8395dfe92649673ddc762a37577d58d231871fcad85f3024b18f0178dae",
+              "compilerHostLinearMemoryBytes": 398721024,
+              "toolsHostLinearMemoryBytes": 104529920,
+              "timings": [
+                {
+                  "stage": "download",
+                  "milliseconds": 4.360000133514404
+                },
+                {
+                  "stage": "compiler-initialize",
+                  "milliseconds": 963.3449997901917
+                },
+                {
+                  "stage": "compile",
+                  "milliseconds": 8558.424999713898
+                },
+                {
+                  "stage": "roslyn",
+                  "milliseconds": 186.15
+                },
+                {
+                  "stage": "netwasm",
+                  "milliseconds": 5303.085
+                },
+                {
+                  "stage": "runtime-cache-read",
+                  "milliseconds": 0.7300000190734863
+                },
+                {
+                  "stage": "linker-initialize",
+                  "milliseconds": 265.4799995422363
+                },
+                {
+                  "stage": "tools-initialize",
+                  "milliseconds": 223.5349998474121
+                },
+                {
+                  "stage": "link",
+                  "milliseconds": 1575.0149998664856
+                },
+                {
+                  "stage": "runtime-optimize",
+                  "milliseconds": 597.1549997329712
+                },
+                {
+                  "stage": "runtime-validate",
+                  "milliseconds": 283.00499963760376
+                },
+                {
+                  "stage": "runtime-cache-write",
+                  "milliseconds": 1.119999885559082
+                },
+                {
+                  "stage": "parse",
+                  "milliseconds": 6.37000036239624
+                },
+                {
+                  "stage": "parse",
+                  "milliseconds": 4.00499963760376
+                },
+                {
+                  "stage": "parse",
+                  "milliseconds": 3.6100001335144043
+                },
+                {
+                  "stage": "merge",
+                  "milliseconds": 3847.8799996376038
+                },
+                {
+                  "stage": "prune",
+                  "milliseconds": 316.5
+                },
+                {
+                  "stage": "optimize",
+                  "milliseconds": 65300.58999967575
+                },
+                {
+                  "stage": "validate",
+                  "milliseconds": 24.06999969482422
+                },
+                {
+                  "stage": "componentization",
+                  "milliseconds": 94.32499980926514
+                }
+              ],
+              "runTimings": [
+                {
+                  "stage": "run",
+                  "milliseconds": 302.30999994277954
+                },
+                {
+                  "stage": "transpile",
+                  "milliseconds": 239.5499997138977
+                },
+                {
+                  "stage": "instantiate",
+                  "milliseconds": 7.704999923706055
+                },
+                {
+                  "stage": "execute",
+                  "milliseconds": 33.375
+                }
+              ],
+              "stdout": "Valid: False\nName: Name is required.\nAge: Age must be 42.\n",
+              "stderr": ""
+            }
+          ],
+          "stageEvents": [
+            {
+              "requestId": 11,
+              "revision": 1,
+              "type": "stage",
+              "stage": "download",
+              "state": "running"
+            },
+            {
+              "requestId": 11,
+              "revision": 1,
+              "type": "stage",
+              "stage": "download",
+              "state": "complete",
+              "milliseconds": 4.360000133514404
+            },
+            {
+              "requestId": 11,
+              "revision": 1,
+              "type": "stage",
+              "stage": "compiler-initialize",
+              "state": "running"
+            },
+            {
+              "requestId": 11,
+              "revision": 1,
+              "type": "stage",
+              "stage": "compiler-initialize",
+              "state": "complete",
+              "milliseconds": 963.3449997901917
+            },
+            {
+              "requestId": 11,
+              "revision": 1,
+              "type": "stage",
+              "stage": "compile",
+              "state": "running"
+            },
+            {
+              "requestId": 11,
+              "revision": 1,
+              "type": "stage",
+              "stage": "cache-read",
+              "state": "running"
+            },
+            {
+              "requestId": 11,
+              "revision": 1,
+              "type": "stage",
+              "stage": "cache-read",
+              "state": "complete",
+              "milliseconds": 4.710000038146973
+            },
+            {
+              "requestId": 11,
+              "revision": 1,
+              "type": "stage",
+              "stage": "netwasm",
+              "state": "running"
+            },
+            {
+              "requestId": 11,
+              "revision": 1,
+              "type": "stage",
+              "stage": "netwasm",
+              "state": "complete",
+              "milliseconds": 5381.585000038147
+            },
+            {
+              "requestId": 11,
+              "revision": 1,
+              "type": "stage",
+              "stage": "cache-write",
+              "state": "running"
+            },
+            {
+              "requestId": 11,
+              "revision": 1,
+              "type": "stage",
+              "stage": "cache-write",
+              "state": "complete",
+              "milliseconds": 2600.75
+            },
+            {
+              "requestId": 11,
+              "revision": 1,
+              "type": "stage",
+              "stage": "compile",
+              "state": "complete",
+              "milliseconds": 8558.424999713898
+            },
+            {
+              "requestId": 11,
+              "revision": 1,
+              "type": "stage",
+              "stage": "roslyn",
+              "state": "complete",
+              "milliseconds": 186.15
+            },
+            {
+              "requestId": 11,
+              "revision": 1,
+              "type": "stage",
+              "stage": "netwasm",
+              "state": "complete",
+              "milliseconds": 5303.085
+            },
+            {
+              "requestId": 11,
+              "revision": 1,
+              "type": "stage",
+              "stage": "runtime-cache-read",
+              "state": "running"
+            },
+            {
+              "requestId": 11,
+              "revision": 1,
+              "type": "stage",
+              "stage": "runtime-cache-read",
+              "state": "complete",
+              "milliseconds": 0.7300000190734863
+            },
+            {
+              "requestId": 11,
+              "revision": 1,
+              "type": "stage",
+              "stage": "linker-initialize",
+              "state": "running"
+            },
+            {
+              "requestId": 11,
+              "revision": 1,
+              "type": "stage",
+              "stage": "linker-initialize",
+              "state": "complete",
+              "milliseconds": 265.4799995422363
+            },
+            {
+              "requestId": 11,
+              "revision": 1,
+              "type": "stage",
+              "stage": "tools-initialize",
+              "state": "running"
+            },
+            {
+              "requestId": 11,
+              "revision": 1,
+              "type": "stage",
+              "stage": "tools-initialize",
+              "state": "complete",
+              "milliseconds": 223.5349998474121
+            },
+            {
+              "requestId": 11,
+              "revision": 1,
+              "type": "stage",
+              "stage": "link",
+              "state": "running"
+            },
+            {
+              "requestId": 11,
+              "revision": 1,
+              "type": "stage",
+              "stage": "link",
+              "state": "running"
+            },
+            {
+              "requestId": 11,
+              "revision": 1,
+              "type": "stage",
+              "stage": "link",
+              "state": "complete",
+              "milliseconds": 1575.0149998664856
+            },
+            {
+              "requestId": 11,
+              "revision": 1,
+              "type": "stage",
+              "stage": "runtime-optimize",
+              "state": "running"
+            },
+            {
+              "requestId": 11,
+              "revision": 1,
+              "type": "stage",
+              "stage": "runtime-optimize",
+              "state": "complete",
+              "milliseconds": 597.1549997329712
+            },
+            {
+              "requestId": 11,
+              "revision": 1,
+              "type": "stage",
+              "stage": "runtime-validate",
+              "state": "running"
+            },
+            {
+              "requestId": 11,
+              "revision": 1,
+              "type": "stage",
+              "stage": "runtime-validate",
+              "state": "complete",
+              "milliseconds": 283.00499963760376
+            },
+            {
+              "requestId": 11,
+              "revision": 1,
+              "type": "stage",
+              "stage": "runtime-cache-write",
+              "state": "running"
+            },
+            {
+              "requestId": 11,
+              "revision": 1,
+              "type": "stage",
+              "stage": "runtime-cache-write",
+              "state": "complete",
+              "milliseconds": 1.119999885559082
+            },
+            {
+              "requestId": 11,
+              "revision": 1,
+              "type": "stage",
+              "stage": "parse",
+              "state": "running"
+            },
+            {
+              "requestId": 11,
+              "revision": 1,
+              "type": "stage",
+              "stage": "parse",
+              "state": "complete",
+              "milliseconds": 6.37000036239624
+            },
+            {
+              "requestId": 11,
+              "revision": 1,
+              "type": "stage",
+              "stage": "parse",
+              "state": "running"
+            },
+            {
+              "requestId": 11,
+              "revision": 1,
+              "type": "stage",
+              "stage": "parse",
+              "state": "complete",
+              "milliseconds": 4.00499963760376
+            },
+            {
+              "requestId": 11,
+              "revision": 1,
+              "type": "stage",
+              "stage": "parse",
+              "state": "running"
+            },
+            {
+              "requestId": 11,
+              "revision": 1,
+              "type": "stage",
+              "stage": "parse",
+              "state": "complete",
+              "milliseconds": 3.6100001335144043
+            },
+            {
+              "requestId": 11,
+              "revision": 1,
+              "type": "stage",
+              "stage": "merge",
+              "state": "running"
+            },
+            {
+              "requestId": 11,
+              "revision": 1,
+              "type": "stage",
+              "stage": "merge",
+              "state": "complete",
+              "milliseconds": 3847.8799996376038
+            },
+            {
+              "requestId": 11,
+              "revision": 1,
+              "type": "stage",
+              "stage": "prune",
+              "state": "running"
+            },
+            {
+              "requestId": 11,
+              "revision": 1,
+              "type": "stage",
+              "stage": "prune",
+              "state": "complete",
+              "milliseconds": 316.5
+            },
+            {
+              "requestId": 11,
+              "revision": 1,
+              "type": "stage",
+              "stage": "optimize",
+              "state": "running"
+            },
+            {
+              "requestId": 11,
+              "revision": 1,
+              "type": "stage",
+              "stage": "optimize",
+              "state": "complete",
+              "milliseconds": 65300.58999967575
+            },
+            {
+              "requestId": 11,
+              "revision": 1,
+              "type": "stage",
+              "stage": "validate",
+              "state": "running"
+            },
+            {
+              "requestId": 11,
+              "revision": 1,
+              "type": "stage",
+              "stage": "validate",
+              "state": "complete",
+              "milliseconds": 24.06999969482422
+            },
+            {
+              "requestId": 11,
+              "revision": 1,
+              "type": "stage",
+              "stage": "componentization",
+              "state": "running"
+            },
+            {
+              "requestId": 11,
+              "revision": 1,
+              "type": "stage",
+              "stage": "componentization",
+              "state": "complete",
+              "milliseconds": 94.32499980926514
+            },
+            {
+              "requestId": 11,
+              "revision": 1,
+              "type": "stage",
+              "stage": "run",
+              "state": "running"
+            },
+            {
+              "requestId": 11,
+              "revision": 1,
+              "type": "stage",
+              "stage": "transpile",
+              "state": "running"
+            },
+            {
+              "requestId": 11,
+              "revision": 1,
+              "type": "stage",
+              "stage": "instantiate",
+              "state": "running"
+            },
+            {
+              "requestId": 11,
+              "revision": 1,
+              "type": "stage",
+              "stage": "execute",
+              "state": "running"
+            },
+            {
+              "requestId": 11,
+              "revision": 1,
+              "type": "stage",
+              "stage": "run",
+              "state": "complete",
+              "milliseconds": 302.30999994277954
+            },
+            {
+              "requestId": 11,
+              "revision": 1,
+              "type": "stage",
+              "stage": "transpile",
+              "state": "complete",
+              "milliseconds": 239.5499997138977
+            },
+            {
+              "requestId": 11,
+              "revision": 1,
+              "type": "stage",
+              "stage": "instantiate",
+              "state": "complete",
+              "milliseconds": 7.704999923706055
+            },
+            {
+              "requestId": 11,
+              "revision": 1,
+              "type": "stage",
+              "stage": "execute",
+              "state": "complete",
+              "milliseconds": 33.375
+            }
+          ]
+        },
+        {
+          "inputs": {
+            "sourceV1Sha256": "1e6d95bbc66e7a57ae9d13fc76650b4b6b88723b0852c341b4b2a5be6efba280",
+            "sourceV2Sha256": "3178365e25da26eef1b14423abbf5d4469bef91a0c212db041d96f85f5444aac",
+            "sourceV1Bytes": 736,
+            "sourceV2Bytes": 736
+          },
+          "steps": [
+            {
+              "label": "cold",
+              "version": 1,
+              "compilerWorker": {
+                "startedWithExistingChannel": false,
+                "retainedAfterCompile": false,
+                "classification": "created-then-recycled"
+              },
+              "compileWallMilliseconds": 78750.0799999237,
+              "runWallMilliseconds": 303.4949998855591,
+              "componentBytes": 3321445,
+              "componentSha256": "0c37a8395dfe92649673ddc762a37577d58d231871fcad85f3024b18f0178dae",
+              "compilerHostLinearMemoryBytes": 398721024,
+              "toolsHostLinearMemoryBytes": 104529920,
+              "timings": [
+                {
+                  "stage": "download",
+                  "milliseconds": 4.185000419616699
+                },
+                {
+                  "stage": "compiler-initialize",
+                  "milliseconds": 426.55000019073486
+                },
+                {
+                  "stage": "compile",
+                  "milliseconds": 8059.235000133514
+                },
+                {
+                  "stage": "roslyn",
+                  "milliseconds": 168.39
+                },
+                {
+                  "stage": "netwasm",
+                  "milliseconds": 5106.235
+                },
+                {
+                  "stage": "runtime-cache-read",
+                  "milliseconds": 0.690000057220459
+                },
+                {
+                  "stage": "linker-initialize",
+                  "milliseconds": 184.77500009536743
+                },
+                {
+                  "stage": "tools-initialize",
+                  "milliseconds": 92.03999996185303
+                },
+                {
+                  "stage": "link",
+                  "milliseconds": 1408.085000038147
+                },
+                {
+                  "stage": "runtime-optimize",
+                  "milliseconds": 449.6549997329712
+                },
+                {
+                  "stage": "runtime-validate",
+                  "milliseconds": 114.48000001907349
+                },
+                {
+                  "stage": "runtime-cache-write",
+                  "milliseconds": 1.1100001335144043
+                },
+                {
+                  "stage": "parse",
+                  "milliseconds": 5.660000324249268
+                },
+                {
+                  "stage": "parse",
+                  "milliseconds": 2.619999885559082
+                },
+                {
+                  "stage": "parse",
+                  "milliseconds": 2.0950002670288086
+                },
+                {
+                  "stage": "merge",
+                  "milliseconds": 3491.465000152588
+                },
+                {
+                  "stage": "prune",
+                  "milliseconds": 278.2200002670288
+                },
+                {
+                  "stage": "optimize",
+                  "milliseconds": 64028.43499994278
+                },
+                {
+                  "stage": "validate",
+                  "milliseconds": 24.09500026702881
+                },
+                {
+                  "stage": "componentization",
+                  "milliseconds": 94.5149998664856
+                }
+              ],
+              "runTimings": [
+                {
+                  "stage": "run",
+                  "milliseconds": 303.07499980926514
+                },
+                {
+                  "stage": "transpile",
+                  "milliseconds": 240.94000005722046
+                },
+                {
+                  "stage": "instantiate",
+                  "milliseconds": 7.800000190734863
+                },
+                {
+                  "stage": "execute",
+                  "milliseconds": 33.47499990463257
+                }
+              ],
+              "stdout": "Valid: False\nName: Name is required.\nAge: Age must be 42.\n",
+              "stderr": ""
+            }
+          ],
+          "stageEvents": [
+            {
+              "requestId": 21,
+              "revision": 1,
+              "type": "stage",
+              "stage": "download",
+              "state": "running"
+            },
+            {
+              "requestId": 21,
+              "revision": 1,
+              "type": "stage",
+              "stage": "download",
+              "state": "complete",
+              "milliseconds": 4.185000419616699
+            },
+            {
+              "requestId": 21,
+              "revision": 1,
+              "type": "stage",
+              "stage": "compiler-initialize",
+              "state": "running"
+            },
+            {
+              "requestId": 21,
+              "revision": 1,
+              "type": "stage",
+              "stage": "compiler-initialize",
+              "state": "complete",
+              "milliseconds": 426.55000019073486
+            },
+            {
+              "requestId": 21,
+              "revision": 1,
+              "type": "stage",
+              "stage": "compile",
+              "state": "running"
+            },
+            {
+              "requestId": 21,
+              "revision": 1,
+              "type": "stage",
+              "stage": "cache-read",
+              "state": "running"
+            },
+            {
+              "requestId": 21,
+              "revision": 1,
+              "type": "stage",
+              "stage": "cache-read",
+              "state": "complete",
+              "milliseconds": 5.164999961853027
+            },
+            {
+              "requestId": 21,
+              "revision": 1,
+              "type": "stage",
+              "stage": "netwasm",
+              "state": "running"
+            },
+            {
+              "requestId": 21,
+              "revision": 1,
+              "type": "stage",
+              "stage": "netwasm",
+              "state": "complete",
+              "milliseconds": 5184.135000228882
+            },
+            {
+              "requestId": 21,
+              "revision": 1,
+              "type": "stage",
+              "stage": "cache-write",
+              "state": "running"
+            },
+            {
+              "requestId": 21,
+              "revision": 1,
+              "type": "stage",
+              "stage": "cache-write",
+              "state": "complete",
+              "milliseconds": 2355.1100001335144
+            },
+            {
+              "requestId": 21,
+              "revision": 1,
+              "type": "stage",
+              "stage": "compile",
+              "state": "complete",
+              "milliseconds": 8059.235000133514
+            },
+            {
+              "requestId": 21,
+              "revision": 1,
+              "type": "stage",
+              "stage": "roslyn",
+              "state": "complete",
+              "milliseconds": 168.39
+            },
+            {
+              "requestId": 21,
+              "revision": 1,
+              "type": "stage",
+              "stage": "netwasm",
+              "state": "complete",
+              "milliseconds": 5106.235
+            },
+            {
+              "requestId": 21,
+              "revision": 1,
+              "type": "stage",
+              "stage": "runtime-cache-read",
+              "state": "running"
+            },
+            {
+              "requestId": 21,
+              "revision": 1,
+              "type": "stage",
+              "stage": "runtime-cache-read",
+              "state": "complete",
+              "milliseconds": 0.690000057220459
+            },
+            {
+              "requestId": 21,
+              "revision": 1,
+              "type": "stage",
+              "stage": "linker-initialize",
+              "state": "running"
+            },
+            {
+              "requestId": 21,
+              "revision": 1,
+              "type": "stage",
+              "stage": "linker-initialize",
+              "state": "complete",
+              "milliseconds": 184.77500009536743
+            },
+            {
+              "requestId": 21,
+              "revision": 1,
+              "type": "stage",
+              "stage": "tools-initialize",
+              "state": "running"
+            },
+            {
+              "requestId": 21,
+              "revision": 1,
+              "type": "stage",
+              "stage": "tools-initialize",
+              "state": "complete",
+              "milliseconds": 92.03999996185303
+            },
+            {
+              "requestId": 21,
+              "revision": 1,
+              "type": "stage",
+              "stage": "link",
+              "state": "running"
+            },
+            {
+              "requestId": 21,
+              "revision": 1,
+              "type": "stage",
+              "stage": "link",
+              "state": "running"
+            },
+            {
+              "requestId": 21,
+              "revision": 1,
+              "type": "stage",
+              "stage": "link",
+              "state": "complete",
+              "milliseconds": 1408.085000038147
+            },
+            {
+              "requestId": 21,
+              "revision": 1,
+              "type": "stage",
+              "stage": "runtime-optimize",
+              "state": "running"
+            },
+            {
+              "requestId": 21,
+              "revision": 1,
+              "type": "stage",
+              "stage": "runtime-optimize",
+              "state": "complete",
+              "milliseconds": 449.6549997329712
+            },
+            {
+              "requestId": 21,
+              "revision": 1,
+              "type": "stage",
+              "stage": "runtime-validate",
+              "state": "running"
+            },
+            {
+              "requestId": 21,
+              "revision": 1,
+              "type": "stage",
+              "stage": "runtime-validate",
+              "state": "complete",
+              "milliseconds": 114.48000001907349
+            },
+            {
+              "requestId": 21,
+              "revision": 1,
+              "type": "stage",
+              "stage": "runtime-cache-write",
+              "state": "running"
+            },
+            {
+              "requestId": 21,
+              "revision": 1,
+              "type": "stage",
+              "stage": "runtime-cache-write",
+              "state": "complete",
+              "milliseconds": 1.1100001335144043
+            },
+            {
+              "requestId": 21,
+              "revision": 1,
+              "type": "stage",
+              "stage": "parse",
+              "state": "running"
+            },
+            {
+              "requestId": 21,
+              "revision": 1,
+              "type": "stage",
+              "stage": "parse",
+              "state": "complete",
+              "milliseconds": 5.660000324249268
+            },
+            {
+              "requestId": 21,
+              "revision": 1,
+              "type": "stage",
+              "stage": "parse",
+              "state": "running"
+            },
+            {
+              "requestId": 21,
+              "revision": 1,
+              "type": "stage",
+              "stage": "parse",
+              "state": "complete",
+              "milliseconds": 2.619999885559082
+            },
+            {
+              "requestId": 21,
+              "revision": 1,
+              "type": "stage",
+              "stage": "parse",
+              "state": "running"
+            },
+            {
+              "requestId": 21,
+              "revision": 1,
+              "type": "stage",
+              "stage": "parse",
+              "state": "complete",
+              "milliseconds": 2.0950002670288086
+            },
+            {
+              "requestId": 21,
+              "revision": 1,
+              "type": "stage",
+              "stage": "merge",
+              "state": "running"
+            },
+            {
+              "requestId": 21,
+              "revision": 1,
+              "type": "stage",
+              "stage": "merge",
+              "state": "complete",
+              "milliseconds": 3491.465000152588
+            },
+            {
+              "requestId": 21,
+              "revision": 1,
+              "type": "stage",
+              "stage": "prune",
+              "state": "running"
+            },
+            {
+              "requestId": 21,
+              "revision": 1,
+              "type": "stage",
+              "stage": "prune",
+              "state": "complete",
+              "milliseconds": 278.2200002670288
+            },
+            {
+              "requestId": 21,
+              "revision": 1,
+              "type": "stage",
+              "stage": "optimize",
+              "state": "running"
+            },
+            {
+              "requestId": 21,
+              "revision": 1,
+              "type": "stage",
+              "stage": "optimize",
+              "state": "complete",
+              "milliseconds": 64028.43499994278
+            },
+            {
+              "requestId": 21,
+              "revision": 1,
+              "type": "stage",
+              "stage": "validate",
+              "state": "running"
+            },
+            {
+              "requestId": 21,
+              "revision": 1,
+              "type": "stage",
+              "stage": "validate",
+              "state": "complete",
+              "milliseconds": 24.09500026702881
+            },
+            {
+              "requestId": 21,
+              "revision": 1,
+              "type": "stage",
+              "stage": "componentization",
+              "state": "running"
+            },
+            {
+              "requestId": 21,
+              "revision": 1,
+              "type": "stage",
+              "stage": "componentization",
+              "state": "complete",
+              "milliseconds": 94.5149998664856
+            },
+            {
+              "requestId": 21,
+              "revision": 1,
+              "type": "stage",
+              "stage": "run",
+              "state": "running"
+            },
+            {
+              "requestId": 21,
+              "revision": 1,
+              "type": "stage",
+              "stage": "transpile",
+              "state": "running"
+            },
+            {
+              "requestId": 21,
+              "revision": 1,
+              "type": "stage",
+              "stage": "instantiate",
+              "state": "running"
+            },
+            {
+              "requestId": 21,
+              "revision": 1,
+              "type": "stage",
+              "stage": "execute",
+              "state": "running"
+            },
+            {
+              "requestId": 21,
+              "revision": 1,
+              "type": "stage",
+              "stage": "run",
+              "state": "complete",
+              "milliseconds": 303.07499980926514
+            },
+            {
+              "requestId": 21,
+              "revision": 1,
+              "type": "stage",
+              "stage": "transpile",
+              "state": "complete",
+              "milliseconds": 240.94000005722046
+            },
+            {
+              "requestId": 21,
+              "revision": 1,
+              "type": "stage",
+              "stage": "instantiate",
+              "state": "complete",
+              "milliseconds": 7.800000190734863
+            },
+            {
+              "requestId": 21,
+              "revision": 1,
+              "type": "stage",
+              "stage": "execute",
+              "state": "complete",
+              "milliseconds": 33.47499990463257
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

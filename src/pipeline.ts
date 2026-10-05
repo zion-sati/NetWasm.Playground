@@ -2,12 +2,14 @@ import type { CompilationResult, PipelineEvent, RunResult, SourceSnapshot, Stage
 import { WorkerChannel } from './worker-channel';
 import { optimizationArguments, optimizationModes } from './optimization';
 import { createFrontendCache } from './workers/frontend-cache.mjs';
+import { createNativeWasmOptChannel, supportsNativeWasmOpt } from './workers/native-wasm-opt-channel.mjs';
 const basename = (path: string) => path.slice(path.lastIndexOf('/') + 1);
 const compilerTimeoutMilliseconds = 300_000;
 type AssetReceipt = { sha256: string; bytes: number; bundle?: string; offset?: number };
 type BundleRole = 'compiler' | 'linker' | 'tools' | 'guest';
 type BundleReceipt = { path: string; sha256: string; bytes: number; rawBytes: number; assets: number };
 type ToolchainManifest = { schemaVersion: number; assets: Record<string, AssetReceipt>; bundles: Record<string, BundleReceipt> };
+type NativeWasmOptChannel = ReturnType<typeof createNativeWasmOptChannel>;
 export class PlaygroundPipeline {
   private channels = new Map<string, WorkerChannel>();
   private context?: SourceSnapshot;
@@ -26,6 +28,12 @@ export class PlaygroundPipeline {
   private onPreloadProgress?: (progress: ToolchainPreloadProgress) => void;
   private currentStage = 'download';
   private runOutput?: { stdout: string; stderr: string };
+  private nativeWasmOpt?: NativeWasmOptChannel;
+  private nativeWasmOptUnavailable = false;
+  private optimizerHost?: 'native-threads' | 'javascript';
+  private optimizerWorkerCount?: number;
+  private optimizerLinearMemoryBytes?: number;
+  private optimizerFallback?: string;
   constructor(private onEvent: (event: PipelineEvent) => void) {}
   private emit(event: object) { if (this.context) this.onEvent({ requestId: this.context.requestId, revision: this.context.revision, ...event } as PipelineEvent); }
   private reportPreloadProgress() {
@@ -225,13 +233,51 @@ export class PlaygroundPipeline {
   private async tool(operation: string, args: string[], files: Record<string, Uint8Array>, outputs: string[], timeout = 120_000) {
     // Snapshot input buffers because callers may retain an artifact for later stages.
     const owned = Object.fromEntries(Object.entries(files).map(([name, bytes]) => [name, bytes.slice()]));
-    const result = await this.channel('tools').request({ operation, args, files: owned, outputs }, Object.values(owned).map(bytes => bytes.buffer), timeout);
+    let result;
+    const nativeWasmOptAvailable = operation === 'wasm-opt' && this.canUseNativeWasmOpt();
+    if (nativeWasmOptAvailable) {
+      const nativeOwned = Object.fromEntries(Object.entries(owned).map(([name, bytes]) => [name, bytes.slice()]));
+      try {
+        result = await this.nativeWasmOptChannel().request(
+          { operation, args, files: nativeOwned, outputs },
+          Object.values(nativeOwned).map(bytes => bytes.buffer), timeout);
+        this.optimizerHost = 'native-threads';
+        this.optimizerWorkerCount = result.workerCount;
+        this.optimizerLinearMemoryBytes = result.memoryBytes;
+      } catch (error) {
+        if (this.abort?.signal.aborted) throw error;
+        this.nativeWasmOpt?.reset();
+        this.nativeWasmOpt = undefined;
+        this.nativeWasmOptUnavailable = true;
+        this.optimizerHost = 'javascript';
+        this.optimizerWorkerCount = undefined;
+        this.optimizerLinearMemoryBytes = undefined;
+        this.optimizerFallback = String(error).split('\n')[0].slice(0, 300);
+      }
+    }
+    if (operation === 'wasm-opt' && !nativeWasmOptAvailable) {
+      this.optimizerHost = 'javascript';
+      this.optimizerFallback ??= 'Cross-origin isolation or native optimizer assets are unavailable';
+    }
+    result ??= await this.channel('tools').request({ operation, args, files: owned, outputs }, Object.values(owned).map(bytes => bytes.buffer), timeout);
+    if (operation === 'wasm-opt' && this.optimizerHost === undefined) this.optimizerHost = 'javascript';
     if (result.exitCode !== 0) throw new Error(result.stderr || result.failure || `${operation} failed`);
     return result.files as Record<string, Uint8Array>;
+  }
+  private canUseNativeWasmOpt() {
+    return !this.nativeWasmOptUnavailable && supportsNativeWasmOpt() &&
+      ['build-receipt.json', 'wasm-opt.js', 'wasm-opt.wasm']
+        .every(name => this.manifest?.assets[`native-wasm-opt/${name}`]);
+  }
+  private nativeWasmOptChannel() {
+    return this.nativeWasmOpt ??= createNativeWasmOptChannel(
+      new URL('native-wasm-opt/', this.root!).href);
   }
   async compile(snapshot: SourceSnapshot): Promise<CompilationResult> {
     const optimization = snapshot.optimization ?? 'Oz';
     const epoch = this.epoch; this.context = snapshot; const timings: StageTiming[] = [];
+    this.optimizerHost = undefined; this.optimizerFallback = undefined;
+    this.optimizerWorkerCount = undefined; this.optimizerLinearMemoryBytes = undefined;
     const result = { requestId: snapshot.requestId, revision: snapshot.revision, optimization,
       language: snapshot.language, updatedMemorySafetyRules: snapshot.updatedMemorySafetyRules,
       diagnostics: [], timings };
@@ -322,6 +368,11 @@ export class PlaygroundPipeline {
       if (epoch !== this.epoch) throw new Error('Stopped');
       return { ...result, success: true, component, componentContract: compilation.componentContract,
         frontendCacheMetrics: compilation.frontendCacheMetrics,
+        compilerHostLinearMemoryBytes: compilation.hostLinearMemoryBytes,
+        optimizerHost: this.optimizerHost,
+        optimizerWorkerCount: this.optimizerWorkerCount,
+        optimizerLinearMemoryBytes: this.optimizerLinearMemoryBytes,
+        optimizerFallback: this.optimizerFallback,
         runtimeCacheMetrics: {
           outcome: runtimeLookup.hit ? 'hit' : runtimeLookup.available ? 'miss' : 'unavailable',
           readBytes: runtimeLookup.payload?.byteLength ?? 0,
@@ -363,6 +414,11 @@ export class PlaygroundPipeline {
     } catch (error) { return { ...base, ...this.runOutput, success: false, cancelled: epoch !== this.epoch, stage: this.currentStage, error: String(error) }; }
     finally { this.channels.get('guest')?.reset(); this.channels.delete('guest'); this.runOutput = undefined; this.context = undefined; }
   }
-  stop() { this.epoch++; this.abort?.abort(); for (const channel of this.channels.values()) channel.reset(); this.channelInitializations.clear(); }
+  stop() {
+    this.epoch++; this.abort?.abort();
+    for (const channel of this.channels.values()) channel.reset();
+    this.nativeWasmOpt?.reset(); this.nativeWasmOpt = undefined;
+    this.channelInitializations.clear();
+  }
   dispose() { this.stop(); this.channels.clear(); this.runtimeCache?.close(); this.runtimeCache = undefined; }
 }

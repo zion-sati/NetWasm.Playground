@@ -159,18 +159,25 @@ export function createNativeAotCompilerChannel(options = {}) {
   async function compileWithFrontendCache(operation, arguments_) {
     const prepared = JSON.parse(invoke(operation, arguments_));
     if (!prepared.frontendCache) return prepared;
-    report({ stage: 'cache-read', state: 'running' });
-    const cacheReadStarted = performance.now();
+    report({ stage: 'cache-lookup', state: 'running' });
+    const cacheLookupStarted = performance.now();
     const loaded = await frontendCache.load(prepared.frontendCache);
+    const cacheLookupMilliseconds = performance.now() - cacheLookupStarted;
+    report({ stage: 'cache-lookup', state: 'complete', milliseconds: cacheLookupMilliseconds });
+    report({ stage: 'cache-hydrate', state: 'running' });
+    const cacheHydrationStarted = performance.now();
     for (const entry of loaded.entries)
       invoke('importFrontendArtifact', [prepared.frontendCache.handle, entry.key,
         toBase64(entry.payload), toBase64(entry.checksum)]);
+    const cacheHydrationMilliseconds = performance.now() - cacheHydrationStarted;
+    report({ stage: 'cache-hydrate', state: 'complete', milliseconds: cacheHydrationMilliseconds });
     const loadedEntries = loaded.entries.length;
     const readBytes = loaded.totalBytes;
     loaded.entries.length = 0;
-    const cacheReadMilliseconds = performance.now() - cacheReadStarted;
-    report({ stage: 'cache-read', state: 'complete', milliseconds: cacheReadMilliseconds });
+    report({ stage: 'netwasm', state: 'running' });
+    const netwasmStarted = performance.now();
     const result = JSON.parse(invoke('compilePreparedRecipe', [prepared.frontendCache.handle]));
+    report({ stage: 'netwasm', state: 'complete', milliseconds: performance.now() - netwasmStarted });
     let cacheWriteMilliseconds = 0;
     if (result.frontendPublication) {
       report({ stage: 'cache-write', state: 'running' });
@@ -201,9 +208,15 @@ export function createNativeAotCompilerChannel(options = {}) {
       ...result.frontendCacheMetrics,
       loadedEntries,
       readBytes,
-      cacheReadMilliseconds,
+      cacheReadMilliseconds: cacheLookupMilliseconds + cacheHydrationMilliseconds,
+      cacheLookupMilliseconds,
+      cacheHydrationMilliseconds,
       cacheWriteMilliseconds,
     };
+    result.timings = [...(result.timings ?? []),
+      { stage: 'cache-lookup', milliseconds: cacheLookupMilliseconds },
+      { stage: 'cache-hydrate', milliseconds: cacheHydrationMilliseconds },
+      { stage: 'cache-write', milliseconds: cacheWriteMilliseconds }];
     return result;
   }
 

@@ -32,7 +32,7 @@ jobs:
   released-toolchain:
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-24.04
-    timeout-minutes: 90
+    timeout-minutes: 120
     steps:
       - name: Check out Playground
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
@@ -42,8 +42,6 @@ jobs:
         uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6
         with:
           dotnet-version: 11.0.100-rc.1.26425.128
-      - name: Install WebAssembly build workload
-        run: dotnet workload install wasm-tools --skip-manifest-update
       - name: Set up Node.js
         uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
@@ -63,9 +61,27 @@ jobs:
             "$archive" | sha256sum --check --strict
           tar -xJf "$archive" -C "$RUNNER_TEMP"
           echo "$RUNNER_TEMP/wasmtime-v47.0.3-x86_64-linux" >> "$GITHUB_PATH"
+      - name: Install pinned NativeAOT-LLVM Emscripten toolchain
+        shell: bash
+        run: |
+          python3 - <<'PY' > "$RUNNER_TEMP/nativeaot-pins.env"
+          import json
+          from pathlib import Path
+          candidate = json.loads(Path('eng/upstream-sources.json').read_text())['nativeAotLlvmCandidate']
+          print(f"EMSDK_REVISION={candidate['emsdkRevision']}")
+          print(f"EMSCRIPTEN_VERSION={candidate['emscriptenVersion']}")
+          PY
+          source "$RUNNER_TEMP/nativeaot-pins.env"
+          git init "$RUNNER_TEMP/emsdk"
+          git -C "$RUNNER_TEMP/emsdk" remote add origin https://github.com/emscripten-core/emsdk.git
+          git -C "$RUNNER_TEMP/emsdk" fetch --depth=1 origin "$EMSDK_REVISION"
+          git -C "$RUNNER_TEMP/emsdk" checkout --detach FETCH_HEAD
+          "$RUNNER_TEMP/emsdk/emsdk" install "$EMSCRIPTEN_VERSION"
+          "$RUNNER_TEMP/emsdk/emsdk" activate "$EMSCRIPTEN_VERSION"
       - name: Build and qualify released browser toolchain
         env:
           NETWASM_RELEASED_WORK: ${{ runner.temp }}/netwasm-playground-released
+          NETWASM_NATIVEAOT_EMSDK: ${{ runner.temp }}/emsdk
         run: bash eng/qualify-released-toolchain.sh
       - name: Retain qualification evidence
         if: always()

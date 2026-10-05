@@ -4,7 +4,9 @@
 import { PlaygroundPipeline } from '/src/pipeline.ts';
 import { examples } from '/src/examples.ts';
 import { createNativeAotCompilerChannel } from '/src/workers/native-compiler-channel.mjs';
+import { createFrontendCache } from '/src/workers/frontend-cache.mjs';
 import { createNativeWasmOptChannel } from '/src/workers/native-wasm-opt-channel.mjs';
-globalThis.__netwasmBenchmark = { PlaygroundPipeline, examples, createNativeAotCompilerChannel, createNativeWasmOptChannel };
+globalThis.__netwasmBenchmark = { PlaygroundPipeline, examples, createNativeAotCompilerChannel,
+  createFrontendCache, createNativeWasmOptChannel };
 </script>
 </body></html>

@@ -9,7 +9,9 @@ evidence="$work/evidence"
 rm -rf "$work"
 mkdir -p "$evidence"
 
-python3 "$root/eng/build-release-compiler.py" --output "$framework"
+python3 "$root/eng/build-nativeaot-compiler.py" \
+  --emsdk "${NETWASM_NATIVEAOT_EMSDK:?NETWASM_NATIVEAOT_EMSDK is required}" \
+  --output "$framework"
 python3 "$root/eng/rebuild-public-toolchain.py" \
   --compiler-framework "$framework" \
   --output "$root/public/toolchain"
@@ -35,6 +37,10 @@ done
 curl --fail --silent http://127.0.0.1:4173/ >/dev/null
 
 export PLAYGROUND_URL=http://127.0.0.1:4173/
+PLAYGROUND_BROWSER=chromium PLAYGROUND_EVIDENCE="$evidence/cross-origin-isolation" \
+  node eng/browser-smoke/cross-origin-isolation.mjs
+PLAYGROUND_BROWSER=chromium PLAYGROUND_EVIDENCE="$evidence/native-wasm-opt" \
+  node eng/browser-smoke/native-wasm-opt.mjs
 PLAYGROUND_EVIDENCE="$evidence/settings" node eng/browser-smoke/csharp15-settings.mjs
 PLAYGROUND_BROWSERS=chromium PLAYGROUND_CSHARP15_OPTIMIZATION=none \
   node eng/browser-smoke/csharp15-runtime.mjs

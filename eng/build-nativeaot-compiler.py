@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build the experimental NativeAOT-LLVM browser compiler in an x64 Linux container."""
+"""Build the NativeAOT-LLVM browser compiler in an x64 Linux container."""
 import argparse
 import hashlib
 import json

@@ -1,8 +1,11 @@
-# NativeAOT-LLVM compiler host experiment
+# NativeAOT-LLVM compiler host
 
-This host compiles the same browser compiler program as the released Mono host through a small UTF-8 JSON C ABI. It is an experimental performance candidate and is not selected by the production playground.
+This host compiles the browser compiler program through a small UTF-8 JSON C ABI.
+The Playground release pipeline builds it from the pinned NativeAOT-LLVM,
+Emscripten, SDK-container, compiler-package, and generator inputs.
 
-The current NativeAOT-LLVM toolchain publishes only from Linux x64. Build it from macOS through the pinned container and Emscripten toolchain:
+The current NativeAOT-LLVM toolchain publishes only from Linux x64. Build it
+from macOS through the pinned container and Emscripten toolchain:
 
 ```sh
 python3 eng/build-nativeaot-compiler.py \

@@ -6,8 +6,20 @@
     "commit": "527a565752062b20bb9693eea6c884b34ecce7bf",
     "packageVersion": "10.0.0-rc.1.26357.1",
     "roslynSdkVersion": "11.0.100-rc.1.26425.128",
+    "emsdkRevision": "e10826f9196bb0e704014af2252ef58fb4ba261b",
     "emscriptenVersion": "3.1.56",
     "sdkImage": "mcr.microsoft.com/dotnet/sdk@sha256:e70cdb7f80b0348f5cb85f19a8f670fca061f033d57eed12fa003d58b0e06317"
+  },
+  "browserWasmOpt": {
+    "repository": "https://github.com/zion-sati/NetWasm.NativeTools",
+    "tag": "binaryen-wasm-opt-v132-browser.1",
+    "sourceCommit": "4da3952dd65d38e5f45483a812d7378ca595055d",
+    "asset": "binaryen-wasm-opt-132-browser.1.zip",
+    "url": "https://github.com/zion-sati/NetWasm.NativeTools/releases/download/binaryen-wasm-opt-v132-browser.1/binaryen-wasm-opt-132-browser.1.zip",
+    "bytes": 2460250,
+    "sha256": "621dfab0798518994a011d0d283141a01109b1e6116f70b57278262b2d50231a",
+    "binaryenVersion": "132",
+    "effectiveVersion": "132+browser.1"
   },
   "sources": {
     "netwasm": {

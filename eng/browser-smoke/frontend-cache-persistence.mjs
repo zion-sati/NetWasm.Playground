@@ -34,10 +34,10 @@ try {
     const status = await page.locator('#status').textContent();
     if (status !== 'Compilation complete') throw Error(`Compilation failed: ${status}`);
     const stages = await page.locator('#stages li').evaluateAll(items => Object.fromEntries(
-      items.filter(item => ['cache-read', 'cache-write'].includes(item.dataset.stage))
+      items.filter(item => ['cache-lookup', 'cache-hydrate', 'cache-write'].includes(item.dataset.stage))
         .map(item => [item.dataset.stage, item.dataset.state])));
     const metrics = await page.evaluate(() => globalThis.frontendCacheMetrics.at(-1));
-    if (stages['cache-read'] !== 'complete' || !metrics)
+    if (stages['cache-lookup'] !== 'complete' || stages['cache-hydrate'] !== 'complete' || !metrics)
       throw Error(`Compiler cache evidence is missing: ${JSON.stringify({ stages, metrics })}`);
     return { stages, metrics };
   };

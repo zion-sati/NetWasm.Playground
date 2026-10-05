@@ -1,0 +1,29 @@
+{
+  "schemaVersion": 1,
+  "compression": "Brotli quality 11; .bin and .wasm payloads use sidecars, other files use their original bytes",
+  "scope": "complete content-addressed toolchain directory; application shell excluded",
+  "baseline": {
+    "release": "0.6.0",
+    "toolchainId": "4809ad624b2d946e86eaecbd5ad7bdaaf908989ad67c0f29d50661ecfa0ab2f5",
+    "files": 63,
+    "rawBytes": 154752754,
+    "wireBytes": 38074938,
+    "bundleWireBytes": 35586175
+  },
+  "candidate": {
+    "toolchainId": "3d83689b9cfab72b11593b9d9735f92416b98030c68b09dacb942ffb02fc2df2",
+    "files": 68,
+    "rawBytes": 151633456,
+    "initialWireBytes": 29592133,
+    "lazyNativeWasmOptWireBytes": 1575620,
+    "completeWireBytes": 31167753,
+    "bundleWireBytes": 27441356
+  },
+  "comparison": {
+    "completeWireBytesReduction": 6907185,
+    "completeWirePercentReduction": 18.141027570419155,
+    "initialWireBytesReduction": 8482805,
+    "initialWirePercentReduction": 22.2792352281703,
+    "bundleWirePercentReduction": 22.887593285875763
+  }
+}

@@ -43,6 +43,10 @@ class PublicPackageBoundaryTests(unittest.TestCase):
                 'wasm-opt.js': b'tool-script',
                 'workers/worker.mjs': b'export {};',
                 'notices/LICENSE.txt': b'license',
+                'native-wasm-opt/wasm-opt.js': b'native-tool-script',
+                'native-wasm-opt/wasm-opt.wasm': b'native-tool-module',
+                'native-wasm-opt/build-receipt.json': b'{}',
+                'native-wasm-opt/LICENSE.upstream': b'license',
             }
             for relative, payload in fixtures.items():
                 path = stage / relative
@@ -62,6 +66,8 @@ class PublicPackageBoundaryTests(unittest.TestCase):
             self.assertFalse((stage / 'wasm-opt.js').exists())
             self.assertTrue((stage / 'workers/worker.mjs').exists())
             self.assertTrue((stage / 'notices/LICENSE.txt').exists())
+            self.assertTrue((stage / 'native-wasm-opt/wasm-opt.js').exists())
+            self.assertTrue((stage / 'native-wasm-opt/wasm-opt.wasm').exists())
 
             (stage / bundles['compiler']['path']).write_bytes(b'corrupt')
             with self.assertRaisesRegex(ValueError, 'Staged bundle mismatch'):
@@ -123,6 +129,22 @@ class PublicPackageBoundaryTests(unittest.TestCase):
         self.assertIn("candidate['sdkImage']", builder)
         self.assertIn('emcc --version', builder)
 
+    def test_threaded_browser_wasm_opt_is_pinned_as_a_lazy_release_asset(self):
+        upstream = json.loads((ROOT / 'eng/upstream-sources.json').read_text())
+        candidate = upstream['browserWasmOpt']
+        self.assertEqual('https://github.com/zion-sati/NetWasm.NativeTools',
+                         candidate['repository'])
+        self.assertRegex(candidate['sourceCommit'], r'^[0-9a-f]{40}$')
+        self.assertRegex(candidate['sha256'], r'^[0-9a-f]{64}$')
+        self.assertEqual(132, int(candidate['binaryenVersion']))
+        self.assertIn(candidate['tag'], candidate['url'])
+        self.assertIn(candidate['asset'], candidate['url'])
+        script = (ROOT / 'eng/rebuild-public-toolchain.py').read_text()
+        self.assertIn('add_browser_wasm_opt(stage', script)
+        self.assertIn("pins['browserWasmOpt']", script)
+        self.assertIn("{'wasm-opt.js', 'wasm-opt.wasm', 'build-receipt.json', 'LICENSE.upstream'}", script)
+        self.assertIsNone(PREPARE_WEB.bundle_role('native-wasm-opt/wasm-opt.wasm'))
+
     def test_candidate_compiler_feed_is_explicit_and_not_the_release_default(self):
         help_text = subprocess.check_output(
             ["python3", str(ROOT / "eng/build-release-compiler.py"), "--help"],
@@ -139,7 +161,8 @@ class PublicPackageBoundaryTests(unittest.TestCase):
         self.assertNotIn("qualify-csharp15-candidate.sh", ci)
         self.assertNotIn("candidate/netwasm", ci)
         qualifier = (ROOT / "eng/qualify-released-toolchain.sh").read_text()
-        self.assertIn("eng/build-release-compiler.py", qualifier)
+        self.assertIn("eng/build-nativeaot-compiler.py", qualifier)
+        self.assertIn("NETWASM_NATIVEAOT_EMSDK", qualifier)
         self.assertIn("eng/rebuild-public-toolchain.py", qualifier)
         self.assertNotIn("--candidate-feed", qualifier)
 
