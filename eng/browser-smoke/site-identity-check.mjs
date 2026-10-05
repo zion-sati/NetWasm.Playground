@@ -8,13 +8,10 @@ const expected = expectedSiteIdentity();
 const browser = await browserType.launch({ headless: true });
 try {
   const page = await browser.newPage();
-  const documentResponse = await page.request.get(url);
-  if (!documentResponse.ok()) throw Error(`Playground document fetch failed: ${documentResponse.status()}`);
-  const documentBytes = await documentResponse.body();
   const navigation = await page.goto(url, { waitUntil: 'commit' });
   if (!navigation?.ok()) throw Error(`Playground navigation failed: ${navigation?.status()}`);
   await page.waitForFunction(() => crossOriginIsolated, undefined, { timeout: 30_000 });
-  const observed = await observeSiteIdentity(page, url, documentBytes, expected);
+  const observed = await observeSiteIdentity(page, url, expected);
   console.log(`PASS: site ${observed.siteIdentitySha256} and toolchain ${observed.index.id}`);
 } finally {
   await browser.close();

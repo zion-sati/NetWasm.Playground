@@ -1,7 +1,6 @@
-import { expectedSiteIdentity, observedIndexHtml, validateObservedSiteIdentity } from '../site-identity.mjs';
+import { expectedSiteIdentity, validateObservedSiteIdentity } from '../site-identity.mjs';
 
-export async function observeSiteIdentity(page, url, indexHtmlBytes, expected = expectedSiteIdentity()) {
-  const navigation = observedIndexHtml(indexHtmlBytes);
+export async function observeSiteIdentity(page, url, expected = expectedSiteIdentity()) {
   const observed = await page.evaluate(async baseUrl => {
     const digest = async bytes => [...new Uint8Array(await crypto.subtle.digest('SHA-256', bytes))]
       .map(value => value.toString(16).padStart(2, '0')).join('');
@@ -46,6 +45,5 @@ export async function observeSiteIdentity(page, url, indexHtmlBytes, expected = 
       entrypointFailures,
     };
   }, new URL('./', url).href);
-  return validateObservedSiteIdentity({ ...observed,
-    indexHtmlSha256: navigation.sha256, edgeTransform: navigation.edgeTransform }, expected);
+  return validateObservedSiteIdentity(observed, expected);
 }
