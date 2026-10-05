@@ -1,3 +1,5 @@
+import releaseContract from '../eng/release-contract.json' with { type: 'json' };
+
 export interface ExampleRecipe {
   id: string;
   name: string;
@@ -8,11 +10,32 @@ export interface ExampleRecipe {
 
 export const examples: readonly ExampleRecipe[] = [
   {
-    id: 'hello',
+    id: releaseContract.helloWorld42.exampleId,
     name: 'Hello World',
+    source: releaseContract.helloWorld42.source,
+  },
+  {
+    id: 'span-memory-unsafe',
+    name: 'Span, Memory & unsafe pointers',
     source: `using System;
 
-Console.WriteLine(42);
+Span<int> stackValues = stackalloc int[] { 20, 22 };
+Console.WriteLine($"stackalloc span: {stackValues[0] + stackValues[1]}");
+
+Memory<int> memory = new int[] { 40, 2 };
+unsafe
+{
+    Span<int> memoryView = memory.Span;
+    fixed (int* pointer = memoryView)
+    {
+        int first = *pointer;
+        Console.WriteLine($"pointer dereference: {first}");
+        pointer[0] += pointer[1];
+        Console.WriteLine($"raw pointer mutation: {pointer[0]}");
+    }
+}
+
+Console.WriteLine($"memory view: {memory.Span[0]}");
 `,
   },
   {

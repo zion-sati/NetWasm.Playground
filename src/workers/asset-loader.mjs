@@ -72,9 +72,7 @@ export function createAssetLoader(report = () => {}) {
       if (bytes.byteLength !== receipt.bytes || await digest(bytes) !== receipt.sha256) throw Error(`Tool bundle integrity failed: ${name}`);
       if (!reportedBundles.has(name)) {
         reportedBundles.add(name);
-        const timing = performance.getEntriesByName(response.url).at(-1);
-        report({ name, rawBytes: receipt.rawBytes,
-          transferBytes: timing?.encodedBodySize > 0 ? timing.encodedBodySize : bytes.byteLength });
+        report({ name, rawBytes: receipt.rawBytes });
       }
       return bytes;
     })().catch(error => { bundleCache.delete(name); throw error; }));
@@ -97,9 +95,7 @@ export function createAssetLoader(report = () => {}) {
       const response = await originalFetch(new URL(name, assetRoot), { cache: 'force-cache' });
       const bytes = await boundedBytes(response, entry.bytes);
       if (bytes.byteLength !== entry.bytes || await digest(bytes) !== entry.sha256) throw Error(`Tool asset integrity failed: ${name}`);
-      const timing = performance.getEntriesByName(response.url).at(-1);
-      report({ name, rawBytes: bytes.byteLength,
-        transferBytes: timing?.encodedBodySize > 0 ? timing.encodedBodySize : bytes.byteLength });
+      report({ name, rawBytes: bytes.byteLength });
       return bytes;
     })().catch(error => { cache.delete(name); throw error; }));
     return (await cache.get(name)).slice();

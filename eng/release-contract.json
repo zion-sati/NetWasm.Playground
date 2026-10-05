@@ -1,0 +1,10 @@
+{
+  "schemaVersion": 1,
+  "helloWorld42": {
+    "exampleId": "hello",
+    "optimization": "Oz",
+    "source": "using System;\n\nConsole.WriteLine(42);\n",
+    "stdout": "42\n",
+    "componentBytes": 84653
+  }
+}

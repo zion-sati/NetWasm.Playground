@@ -3,12 +3,23 @@ import { WorkerChannel } from './worker-channel';
 import { optimizationArguments, optimizationModes } from './optimization';
 import { createFrontendCache } from './workers/frontend-cache.mjs';
 import { createNativeWasmOptChannel, supportsNativeWasmOpt } from './workers/native-wasm-opt-channel.mjs';
+import { materializeRuntimeLinkPlan } from './runtime-link-plan.mjs';
 const basename = (path: string) => path.slice(path.lastIndexOf('/') + 1);
 const compilerTimeoutMilliseconds = 300_000;
 type AssetReceipt = { sha256: string; bytes: number; bundle?: string; offset?: number };
 type BundleRole = 'compiler' | 'linker' | 'tools' | 'guest';
 type BundleReceipt = { path: string; sha256: string; bytes: number; rawBytes: number; assets: number };
 type ToolchainManifest = { schemaVersion: number; assets: Record<string, AssetReceipt>; bundles: Record<string, BundleReceipt> };
+type CompressionReceipt = { rawBytes: number; compressedBytes: number };
+type ToolchainCompressionReceipt = {
+  schemaVersion: number;
+  toolchainId: string;
+  toolchainManifestSha256: string;
+  compression: string;
+  rawBytes: number;
+  compressedBytes: number;
+  files: Record<string, CompressionReceipt>;
+};
 type NativeWasmOptChannel = ReturnType<typeof createNativeWasmOptChannel>;
 export class PlaygroundPipeline {
   private channels = new Map<string, WorkerChannel>();
@@ -16,12 +27,14 @@ export class PlaygroundPipeline {
   private root?: URL;
   private rootInitialization?: Promise<void>;
   private manifest?: ToolchainManifest;
+  private compressionReceipt?: ToolchainCompressionReceipt;
   private toolchainId?: string;
   private runtimeCache?: ReturnType<typeof createFrontendCache>;
   private channelInitializations = new Map<string, Promise<void>>();
   private abort?: AbortController;
   private epoch = 0;
-  private assets = { rawBytes: 0, transferBytes: 0 };
+  private assets: { rawBytes: number; compressedBytes?: number } = { rawBytes: 0, compressedBytes: 0 };
+  private compressionComplete = true;
   private measuredResources = new Set<string>();
   private bundleProgress = new Map<string, number>();
   private bundleDownloads = new Map<string, Promise<void>>();
@@ -56,13 +69,19 @@ export class PlaygroundPipeline {
     this.bundleProgress.set(name, loadedBytes);
     this.reportPreloadProgress();
   }
-  private recordResource(name: string, rawBytes: number, transferBytes: number) {
+  private recordResource(name: string, rawBytes: number) {
     if (this.measuredResources.has(name)) return;
     this.measuredResources.add(name);
     const bundle = this.manifest?.bundles[name];
     if (bundle) this.bundleProgress.set(name, bundle.bytes);
     this.assets.rawBytes += rawBytes;
-    this.assets.transferBytes += transferBytes;
+    const compressed = this.compressionReceipt?.files[bundle?.path ?? name];
+    if (!compressed || compressed.rawBytes !== rawBytes) {
+      this.compressionComplete = false;
+      this.assets.compressedBytes = undefined;
+    } else if (this.compressionComplete) {
+      this.assets.compressedBytes = (this.assets.compressedBytes ?? 0) + compressed.compressedBytes;
+    }
     this.emit({ type: 'assets', ...this.assets });
     this.reportPreloadProgress();
   }
@@ -88,6 +107,27 @@ export class PlaygroundPipeline {
           !manifest.bundles || Array.isArray(manifest.bundles) ||
           Object.keys(manifest.bundles).sort().join(',') !== 'compiler,guest,linker,tools')
         throw new Error('Invalid toolchain manifest');
+      const compressionResponse = await fetch(new URL('compression-receipt.json', base),
+        { signal, cache: 'no-cache' });
+      if (compressionResponse.ok &&
+          compressionResponse.headers.get('content-type')?.includes('application/json')) {
+        const compression = await compressionResponse.json() as ToolchainCompressionReceipt;
+        const entries = Object.entries(compression.files ?? {});
+        if (compression.schemaVersion !== 1 || compression.toolchainId !== index.id ||
+            compression.toolchainManifestSha256 !== index.manifestSha256 || entries.length > 2048 ||
+            compression.compression !== 'Brotli quality 11 sidecars for .wasm and .bin; original bytes for other files' ||
+            !Number.isSafeInteger(compression.rawBytes) || compression.rawBytes < 0 ||
+            !Number.isSafeInteger(compression.compressedBytes) || compression.compressedBytes < 0 ||
+            entries.some(([name, receipt]) => !name || name.startsWith('/') ||
+              name.split('/').some(part => !part || part === '.' || part === '..') ||
+              !Number.isSafeInteger(receipt.rawBytes) || receipt.rawBytes < 0 || receipt.rawBytes > 134217728 ||
+              !Number.isSafeInteger(receipt.compressedBytes) || receipt.compressedBytes < 0 ||
+              receipt.compressedBytes > 134217728) ||
+            entries.reduce((total, [, receipt]) => total + receipt.rawBytes, 0) !== compression.rawBytes ||
+            entries.reduce((total, [, receipt]) => total + receipt.compressedBytes, 0) !== compression.compressedBytes)
+          throw new Error('Invalid toolchain compression receipt');
+        this.compressionReceipt = compression;
+      }
       this.manifest = manifest;
       this.root = root;
     })().catch(error => { this.rootInitialization = undefined; throw error; }));
@@ -127,8 +167,7 @@ export class PlaygroundPipeline {
     for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.byteLength; }
     if (bytes.byteLength !== entry.bytes) throw new Error(`Toolchain bundle length failed: ${name}`);
     await this.verify(bytes, entry.sha256);
-    const timing = performance.getEntriesByName(response.url).at(-1) as PerformanceResourceTiming | undefined;
-    this.recordResource(name, entry.rawBytes, timing?.encodedBodySize || entry.bytes);
+    this.recordResource(name, entry.rawBytes);
     return bytes;
   }
   private preloadBundle(name: string, entry: BundleReceipt) {
@@ -155,8 +194,7 @@ export class PlaygroundPipeline {
       const response = await fetch(new URL(name, this.root!), { signal: this.abort!.signal, cache: 'force-cache' });
       if (!response.ok) throw new Error(`Toolchain asset unavailable: ${name}`);
       bytes = new Uint8Array(await response.arrayBuffer());
-      const timing = performance.getEntriesByName(response.url).at(-1) as PerformanceResourceTiming | undefined;
-      this.recordResource(name, entry.bytes, timing?.encodedBodySize || entry.bytes);
+      this.recordResource(name, entry.bytes);
     }
     if (bytes.byteLength !== entry.bytes) throw new Error(`Toolchain asset length failed: ${name}`);
     await this.verify(bytes, entry.sha256);
@@ -183,7 +221,7 @@ export class PlaygroundPipeline {
         if (data.assets?.loadedBytes !== undefined)
           this.recordBundleProgress(data.assets.name, data.assets.loadedBytes, data.assets.totalBytes);
         else if (data.assets)
-          this.recordResource(data.assets.name, data.assets.rawBytes, data.assets.transferBytes);
+          this.recordResource(data.assets.name, data.assets.rawBytes);
       });
       this.channels.set(name, channel);
     }
@@ -282,7 +320,7 @@ export class PlaygroundPipeline {
       language: snapshot.language, updatedMemorySafetyRules: snapshot.updatedMemorySafetyRules,
       diagnostics: [], timings };
     try {
-      if (!['hello', 'csharp15-tour', 'datetime', 'http',
+      if (!['hello', 'span-memory-unsafe', 'csharp15-tour', 'datetime', 'http',
         'allocation', 'linq', 'async-linq', 'pipelines', 'web-encoding', 'xml', 'json-dom',
         'json-generated', 'tunit', 'regex', 'di', 'logging', 'hashing',
         'fluentvalidation'].includes(snapshot.recipeId)) throw new Error('Unknown compilation recipe');
@@ -303,7 +341,8 @@ export class PlaygroundPipeline {
         stage: compilation.stage, error: compilation.error, assets: { ...this.assets } };
       if (compilation.timings) timings.push(...compilation.timings);
       const args = (invocation: any) => invocation.Arguments.map((arg: string) => arg.startsWith('/netwasm-link/') ? basename(arg) : arg);
-      const runtimePlan = compilation.runtimeLinkPlan;
+      const runtimePlan = await materializeRuntimeLinkPlan(
+        compilation.runtimeLinkPlan, compilation.runtimeFeatures);
       const runtimeLookup = await this.stage('runtime-cache-read', timings,
         () => this.runtimeCache!.loadRuntime(runtimePlan.Cache));
       let runtimeBytes: Uint8Array;

@@ -76,6 +76,10 @@ let runOnly = false;
 const formatBytes = (bytes: number) => `${bytes.toLocaleString()} bytes`;
 const formatMegabytes = (bytes: number) => `${(bytes / 1_000_000).toFixed(1)} MB`;
 const errorSummary = (error: unknown) => String(error).split('\n')[0].slice(0, 300);
+const formatAssets = (assets: { rawBytes: number; compressedBytes?: number }) =>
+  assets.compressedBytes === undefined
+    ? `Tool assets: ${formatBytes(assets.rawBytes)} uncompressed · Brotli-11 size unavailable`
+    : `Tool assets: ${formatBytes(assets.compressedBytes)} Brotli-11 · ${formatBytes(assets.rawBytes)} uncompressed`;
 function setCompilationSuccess(visible: boolean) { el('compilation-success').hidden = !visible; }
 function invalidateDownload() { compilation = undefined; setCompilationSuccess(false); downloadButton.disabled = true; if (downloadUrl) URL.revokeObjectURL(downloadUrl); downloadUrl = undefined; el('size').textContent = 'No current component'; }
 function showComparisons() {
@@ -106,7 +110,7 @@ function showOptimizer(result: CompilationResult) {
 function onEvent(event: PipelineEvent) {
   if (!active || stopped || event.requestId !== active.requestId || event.revision !== revision) return;
   if (event.type === 'console') el('output').textContent += event.text;
-  if (event.type === 'assets') el('assets').textContent = `Tool assets: ${formatBytes(event.transferBytes)} transfer cost · ${formatBytes(event.rawBytes)} uncompressed`;
+  if (event.type === 'assets') el('assets').textContent = formatAssets(event);
   if (event.type === 'stage') { const activeOptimization = active.optimization ?? 'Oz'; const optimized = activeOptimization !== 'none'; const label = ['optimize', 'runtime-optimize'].includes(event.stage) ? `${stageLabels[event.stage]} (-${activeOptimization})` : stageLabels[event.stage] ?? event.stage; let item = stages.get(event.stage); if (!item) { item = document.createElement('li'); item.textContent = label; item.dataset.stage = event.stage; stages.set(event.stage, item); el('stages').append(item); } item.dataset.state = event.state; let step = runOnly ? 1 : progressSteps[event.stage]; if (!optimized && step && step >= 7) step--; if (step && event.state === 'running') el('status').textContent = `Step ${step} of ${progressTotal} · ${label}`; }
 }
 function showPreloadProgress(progress: ToolchainPreloadProgress) {
@@ -199,7 +203,7 @@ else {
   // without waiting for the user to choose Compile or Run.
   setTimeout(() => void pipeline!.preload(showPreloadProgress).then(assets => {
     (document.querySelector('.workbench') as HTMLElement).dataset.toolchainPreload = 'complete';
-    el('assets').textContent = `Tool assets: ${formatBytes(assets.transferBytes)} transfer cost · ${formatBytes(assets.rawBytes)} uncompressed`;
+    el('assets').textContent = formatAssets(assets);
     el('toolchain-progress').hidden = true;
     if (!active && el('status').textContent.startsWith('Preparing toolchain')) el('status').textContent = 'Ready · toolchain preloaded';
   }).catch(() => {

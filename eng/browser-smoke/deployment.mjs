@@ -164,7 +164,11 @@ try {
   await page.locator('[data-toolchain-preload="complete"]').waitFor({ timeout: 240000 });
   const stdout = await page.locator('#output').textContent();
   const status = await page.locator('#status').textContent();
+  const assetSummary = await page.locator('#assets').textContent();
   if (stdout !== '42\n' || status !== 'Run complete') throw Error(`Browser run failed: ${status} ${JSON.stringify(stdout)}`);
+  const assetSizes = assetSummary?.match(/^Tool assets: ([\d,]+) bytes Brotli-11 · ([\d,]+) bytes uncompressed$/);
+  if (!assetSizes || Number(assetSizes[1].replaceAll(',', '')) >= Number(assetSizes[2].replaceAll(',', '')))
+    throw Error(`Tool asset compression receipt was not displayed: ${assetSummary}`);
   const event = page.waitForEvent('download');
   await page.locator('#download').click();
   const download = await event;
@@ -183,8 +187,11 @@ try {
   const expectedBundles = Object.values(toolchainManifest.bundles).map(receipt => receipt.path).sort();
   if (bundleRequests.map(request => request.slice(request.indexOf('/bundles/') + 1)).sort().join(',') !== expectedBundles.join(','))
     throw Error(`Unexpected bundle requests: ${JSON.stringify(bundleRequests)}`);
+  // These three JSON requests are bounded metadata. Other direct Wasm, assembly,
+  // archive, data or JSON payloads would bypass the verified bundle graph.
   const directPayloads = toolchainRequests.filter(request => /\.(?:wasm|dll|a|dat|json)$/.test(request) &&
-    !request.endsWith('/index.json') && !request.endsWith('/asset-manifest.json'));
+    !request.endsWith('/index.json') && !request.endsWith('/asset-manifest.json') &&
+    !request.endsWith('/compression-receipt.json'));
   // The separately bundled Preview 2 guest provider and component host add two
   // verified module requests outside the four payload bundles.
   if (directPayloads.length || toolchainRequests.length > 22)
@@ -205,6 +212,7 @@ try {
       toolchainManifestSha256: finalSiteIdentity.toolchainManifestSha256 },
     toolchainRequests: { unique: toolchainRequests.length, bundles: bundleRequests, parallelStartSpreadMs: bundleStartSpreadMs,
       responses: Object.fromEntries(bundleResponses) }, toolbarLayout, pageContract, errors, consoleErrors };
+  result.assetSummary = assetSummary;
   writeFileSync(`${output}/results.json`, JSON.stringify(result, null, 2));
   console.log('PASS: deployed browser compile/run/download and Wasmtime execution');
 } finally {
