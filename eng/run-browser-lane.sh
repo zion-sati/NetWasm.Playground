@@ -25,6 +25,8 @@ run_step cross-origin-isolation env PLAYGROUND_EVIDENCE="$evidence/cross-origin-
   node eng/browser-smoke/cross-origin-isolation.mjs
 run_step deployment env PLAYGROUND_EVIDENCE="$evidence/deployment" \
   node eng/browser-smoke/deployment.mjs
+run_step multifile env PLAYGROUND_EVIDENCE="$evidence/multifile" \
+  node eng/browser-smoke/multifile.mjs
 run_step native-wasm-opt env PLAYGROUND_EVIDENCE="$evidence/native-wasm-opt" \
   node eng/browser-smoke/native-wasm-opt.mjs
 run_step csharp15 env PLAYGROUND_BROWSERS="$browser" PLAYGROUND_CSHARP15_OPTIMIZATION=none \

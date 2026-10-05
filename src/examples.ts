@@ -4,6 +4,7 @@ export interface ExampleRecipe {
   id: string;
   name: string;
   source: string;
+  files?: readonly { path: string; text: string }[];
   language?: '15' | 'preview';
   updatedMemorySafetyRules?: boolean;
 }
@@ -13,6 +14,15 @@ export const examples: readonly ExampleRecipe[] = [
     id: releaseContract.helloWorld42.exampleId,
     name: 'Hello World',
     source: releaseContract.helloWorld42.source,
+  },
+  {
+    id: 'multi-file',
+    name: 'Multi-file project',
+    source: `using System;\nConsole.WriteLine(Answer.Value);\n`,
+    files: [
+      { path: 'Program.cs', text: `using System;\nConsole.WriteLine(Answer.Value);\n` },
+      { path: 'Answer.cs', text: `public static class Answer\n{\n    public const int Value = 42;\n}\n` },
+    ],
   },
   {
     id: 'span-memory-unsafe',

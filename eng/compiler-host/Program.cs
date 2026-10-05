@@ -44,6 +44,8 @@ internal sealed class NativeAotExportAttribute : Attribute { }
 public static partial class Program
 {
     public sealed record SupportSource(string path, string text);
+    public sealed record UserSource(string path, string text);
+    public sealed record UserSourceSet(int schemaVersion, UserSource[] files);
     private sealed record StageTiming(string stage, double milliseconds);
     private sealed record GeneratedSource(string producer, string hintName, string? text, int bytes, string sha256);
     private sealed record DiagnosticInfo(string code, string message, string severity, string? path = null,
@@ -120,6 +122,7 @@ public static partial class Program
 
     [JsonSourceGenerationOptions(DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull)]
     [JsonSerializable(typeof(SupportSource[]))]
+    [JsonSerializable(typeof(UserSourceSet))]
     [JsonSerializable(typeof(RuntimeSystemLibrary[]))]
     [JsonSerializable(typeof(Dictionary<string, string>))]
     [JsonSerializable(typeof(CompilerHostResponse))]
@@ -129,6 +132,9 @@ public static partial class Program
     private sealed partial class CompilerHostJsonContext : JsonSerializerContext;
     private const int MaximumGeneratedSources = 128;
     private const int MaximumGeneratedBytes = 512 * 1024;
+    private const int MaximumUserSources = 32;
+    private const int MaximumUserSourceBytes = 64 * 1024;
+    private const int MaximumUserSourceSetBytes = 256 * 1024;
     private static bool progressEnabled;
     private static long? guestMemoryMaximum;
 #if FRONTEND_CACHE_TRANSPORT
@@ -326,7 +332,9 @@ public static partial class Program
                 preprocessorSymbols: ["TRACE", "NETWASM", "NETWASM0_1", "RELEASE"]);
             if (updatedMemorySafetyRules)
                 parse = parse.WithFeatures([new("updated-memory-safety-rules", "true")]);
-            var trees = new[] { CSharpSyntaxTree.ParseText(SourceText.From(source, Encoding.UTF8), parse, tunit ? "Tests.cs" : "Program.cs") }
+            var userSources = ParseUserSources(source, tunit ? "Tests.cs" : "Program.cs");
+            var trees = userSources
+                .Select(file => CSharpSyntaxTree.ParseText(SourceText.From(file.text, Encoding.UTF8), parse, file.path))
                 .Concat(JsonSerializer.Deserialize(supportJson, CompilerHostJsonContext.Default.SupportSourceArray)!
                     .Select(file => CSharpSyntaxTree.ParseText(SourceText.From(file.text, Encoding.UTF8), parse, file.path)));
             if (tunit) trees = trees.Append(CSharpSyntaxTree.ParseText(SourceText.From(TrustedGeneratorAssets.TUnitProgram, Encoding.UTF8), parse, "NetWasm.TUnit.Program.cs"));
@@ -471,6 +479,38 @@ public static partial class Program
             return Serialize(new(1, false, "compiler-host", "host-error", true, error: Bound(error.ToString())));
         }
     }
+
+    private static UserSource[] ParseUserSources(string value, string legacyPath)
+    {
+        // Keep the exported ABI stable while the browser protocol moves from one
+        // source string to an ordered source-set document. Older tool hosts still
+        // send raw source and remain valid during the transition.
+        if (!value.StartsWith("{\"schemaVersion\":", StringComparison.Ordinal)) return [new(legacyPath, value)];
+        var sourceSet = JsonSerializer.Deserialize(value, CompilerHostJsonContext.Default.UserSourceSet)
+            ?? throw new InvalidOperationException("The source set is missing.");
+        if (sourceSet.schemaVersion != 1 || sourceSet.files is not { Length: > 0 and <= MaximumUserSources })
+            throw new InvalidOperationException("The source set schema or file count is invalid.");
+        var paths = new HashSet<string>(StringComparer.Ordinal);
+        var totalBytes = 0;
+        foreach (var file in sourceSet.files)
+        {
+            if (!IsSafeUserSourcePath(file.path) || !paths.Add(file.path))
+                throw new InvalidOperationException("The source set contains an invalid or duplicate path.");
+            var bytes = Encoding.UTF8.GetByteCount(file.text);
+            if (bytes > MaximumUserSourceBytes)
+                throw new InvalidOperationException($"Source file '{file.path}' exceeds 64 KiB.");
+            totalBytes += bytes;
+        }
+        if (totalBytes > MaximumUserSourceSetBytes)
+            throw new InvalidOperationException("The source set exceeds 256 KiB.");
+        return sourceSet.files;
+    }
+
+    private static bool IsSafeUserSourcePath(string path) =>
+        !string.IsNullOrWhiteSpace(path) && path.Length <= 240 && path.EndsWith(".cs", StringComparison.Ordinal) &&
+        path[0] != '/' && !path.Contains('\\') && !path.Any(character =>
+            character < ' ' || character is '<' or '>' or ':' or '"' or '|' or '?' or '*') &&
+        path.Split('/').All(segment => segment.Length > 0 && segment is not "." and not "..");
 
 #if FRONTEND_CACHE_TRANSPORT
     [JSExport]

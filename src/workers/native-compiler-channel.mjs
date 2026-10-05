@@ -7,7 +7,7 @@ const toBase64 = bytes => {
   return btoa(text);
 };
 const fromBase64 = text => Uint8Array.from(atob(text), character => character.charCodeAt(0));
-const coreRecipes = new Set(['hello', 'span-memory-unsafe', 'datetime', 'csharp15-tour']);
+const coreRecipes = new Set(['hello', 'multi-file', 'span-memory-unsafe', 'datetime', 'csharp15-tour']);
 const generatedRecipes = new Set(['json-generated', 'tunit', 'di', 'logging']);
 const validStringArray = (value, maximumLength = 256) => Array.isArray(value) &&
   value.length <= maximumLength && value.every(item => typeof item === 'string' && item.length <= 4096);
@@ -248,15 +248,15 @@ export function createNativeAotCompilerChannel(options = {}) {
         const operation = generated ? 'prepareGeneratedRecipe'
           : data.recipe === 'http' ? 'prepareHttpRecipe' : 'prepareRecipe';
         const arguments_ = generated
-          ? [data.source, ...compilerInputs, ...images, trustedRecipe, ...settings]
-          : [data.source, ...compilerInputs, ...images, ...settings];
+          ? [data.sourceSet, ...compilerInputs, ...images, trustedRecipe, ...settings]
+          : [data.sourceSet, ...compilerInputs, ...images, ...settings];
         result = await compileWithFrontendCache(operation, arguments_);
       } else {
         const operation = generated ? 'compileGeneratedRecipe'
           : data.recipe === 'http' ? 'compileHttpRecipe' : 'compileRecipe';
         const arguments_ = generated
-          ? [data.source, ...compilerInputs, ...images, trustedRecipe, false, ...settings]
-          : [data.source, ...compilerInputs, ...images, ...settings];
+          ? [data.sourceSet, ...compilerInputs, ...images, trustedRecipe, false, ...settings]
+          : [data.sourceSet, ...compilerInputs, ...images, ...settings];
         result = JSON.parse(invoke(operation, arguments_));
       }
       if (typeof result.application === 'string') result.application = fromBase64(result.application);

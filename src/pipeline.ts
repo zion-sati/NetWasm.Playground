@@ -1,4 +1,5 @@
 import type { CompilationResult, PipelineEvent, RunResult, SourceSnapshot, StageTiming, ToolchainPreloadProgress } from './contracts';
+import { createProject, serializeSourceSet, validateProjectFiles } from './workspace';
 import { WorkerChannel } from './worker-channel';
 import { optimizationArguments, optimizationModes } from './optimization';
 import { createFrontendCache } from './workers/frontend-cache.mjs';
@@ -320,7 +321,7 @@ export class PlaygroundPipeline {
       language: snapshot.language, updatedMemorySafetyRules: snapshot.updatedMemorySafetyRules,
       diagnostics: [], timings };
     try {
-      if (!['hello', 'span-memory-unsafe', 'csharp15-tour', 'datetime', 'http',
+      if (!['hello', 'multi-file', 'span-memory-unsafe', 'csharp15-tour', 'datetime', 'http',
         'allocation', 'linq', 'async-linq', 'pipelines', 'web-encoding', 'xml', 'json-dom',
         'json-generated', 'tunit', 'regex', 'di', 'logging', 'hashing',
         'fluentvalidation'].includes(snapshot.recipeId)) throw new Error('Unknown compilation recipe');
@@ -328,11 +329,15 @@ export class PlaygroundPipeline {
       if (!['15', 'preview'].includes(snapshot.language) ||
           (snapshot.updatedMemorySafetyRules && snapshot.language !== 'preview'))
         throw new Error('Unknown C# language settings');
-      if (snapshot.source.length > 65536 || new TextEncoder().encode(snapshot.source).byteLength > 65536) throw new Error('Source limit exceeded (64 KiB)');
+      const projectFiles = snapshot.files?.length
+        ? snapshot.files
+        : createProject('Legacy project', [{ path: snapshot.recipeId === 'tunit' ? 'Tests.cs' : 'Program.cs', text: snapshot.source ?? '' }]).files;
+      validateProjectFiles(projectFiles);
+      const sourceSet = serializeSourceSet(projectFiles);
       await this.stage('download', timings, () => this.initialize());
       await this.stage('compiler-initialize', timings, () => this.initializeChannel('compiler'));
       const compilation = await this.stage('compile', timings, () => this.channel('compiler').request({
-        operation: 'compile', recipe: snapshot.recipeId, source: snapshot.source,
+        operation: 'compile', recipe: snapshot.recipeId, sourceSet,
         language: snapshot.language, updatedMemorySafetyRules: snapshot.updatedMemorySafetyRules,
         optimization,
       }, [], compilerTimeoutMilliseconds));

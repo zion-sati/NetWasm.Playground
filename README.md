@@ -93,10 +93,17 @@ npm run typecheck
 PLAYGROUND_URL=http://127.0.0.1:5173/playground/ PLAYGROUND_EVIDENCE=.cache/ui-smoke node eng/browser-smoke/ui.mjs
 ```
 
-Compile and Run disable while a job is active; Stop remains available. A
-spinner and numbered status show the current operation across eight steps for
-Compile + Run, seven for Compile, or one for an unchanged component rerun.
+Publish and Run disable while a job is active; Stop remains available. The
+status bar names the active phase and reports its elapsed time instead of
+guessing a fixed step number. Run uses the fastest profile; Publish uses the
+selected optimization and enables the component download.
 `eng/browser-smoke/progress.mjs` checks these states and Stop recovery.
+
+The workbench stores one bounded project in IndexedDB. Its Explorer supports
+new files, multi-file import, drag and drop, rename, and delete. Every C# file
+is compiled as a separate Roslyn syntax tree, so diagnostics retain their
+project path. `eng/browser-smoke/multifile.mjs` qualifies a two-file run,
+publish, and path-aware compiler error.
 
 After the editor mounts, the Playground starts the compiler, linker and tools
 in background workers and fetches four phase-specific binary bundles for the

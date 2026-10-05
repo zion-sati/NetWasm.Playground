@@ -10,10 +10,33 @@ const compiler = createNativeAotCompilerChannel({
   report: event => report(event),
 });
 const recipes = new Set([
-  'hello', 'span-memory-unsafe', 'datetime', 'csharp15-tour', 'http', 'allocation', 'linq', 'async-linq',
+  'hello', 'multi-file', 'span-memory-unsafe', 'datetime', 'csharp15-tour', 'http', 'allocation', 'linq', 'async-linq',
   'pipelines', 'web-encoding', 'xml', 'json-dom', 'json-generated', 'tunit', 'regex',
   'di', 'logging', 'hashing', 'fluentvalidation',
 ]);
+const encoder = new TextEncoder();
+
+function validSourceSet(value) {
+  if (typeof value !== 'string' || value.length > 300000) return false;
+  let sourceSet;
+  try { sourceSet = JSON.parse(value); } catch { return false; }
+  if (sourceSet?.schemaVersion !== 1 || !Array.isArray(sourceSet.files) ||
+      sourceSet.files.length < 1 || sourceSet.files.length > 32) return false;
+  const paths = new Set();
+  let totalBytes = 0;
+  for (const file of sourceSet.files) {
+    if (!file || typeof file.path !== 'string' || typeof file.text !== 'string' ||
+        file.path.length > 240 || !file.path.endsWith('.cs') || file.path.startsWith('/') ||
+        file.path.includes('\\') || /[<>:"|?*\x00-\x1f]/.test(file.path) ||
+        file.path.split('/').some(part => !part || part === '.' || part === '..') ||
+        paths.has(file.path)) return false;
+    paths.add(file.path);
+    const bytes = encoder.encode(file.text).byteLength;
+    if (bytes > 65536) return false;
+    totalBytes += bytes;
+  }
+  return totalBytes <= 262144;
+}
 
 serveWorker(async (data, emit) => {
   report = emit;
@@ -23,9 +46,13 @@ serveWorker(async (data, emit) => {
     if (typeof data.toolchainId !== 'string' || !/^[a-f0-9]{64}$/.test(data.toolchainId))
       throw Error('Invalid compiler toolchain identity');
   }
+  if (data.operation === 'compile' && data.sourceSet === undefined && typeof data.source === 'string' &&
+      encoder.encode(data.source).byteLength <= 65536) {
+    data = { ...data, sourceSet: JSON.stringify({ schemaVersion: 1,
+      files: [{ path: data.recipe === 'tunit' ? 'Tests.cs' : 'Program.cs', text: data.source }] }) };
+  }
   if (data.operation === 'compile' &&
-      (!recipes.has(data.recipe) || typeof data.source !== 'string' ||
-       data.source.length > 65536 || new TextEncoder().encode(data.source).length > 65536 ||
+      (!recipes.has(data.recipe) || !validSourceSet(data.sourceSet) ||
        !['15', 'preview'].includes(data.language) ||
        !['none', 'O0', 'O1', 'O2', 'O3', 'Os', 'Oz'].includes(data.optimization) ||
        typeof data.updatedMemorySafetyRules !== 'boolean' ||

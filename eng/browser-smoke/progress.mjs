@@ -38,7 +38,8 @@ try {
       cacheStages['cache-write'] !== 'complete')
     throw Error(`Cache stages did not complete: ${JSON.stringify(cacheStages)}`);
   const statuses = await page.evaluate(() => window.progressStatuses);
-  if (!statuses.some(text => text.startsWith('Step 3 of 8')) || !statuses.some(text => text.startsWith('Step 6 of 8')) || !statuses.some(text => text.startsWith('Step 8 of 8'))) throw Error(JSON.stringify(statuses));
+  for (const phase of ['Compiling C#', 'Compiling WebAssembly', 'Running program'])
+    if (!statuses.some(text => text.startsWith(phase))) throw Error(`Missing ${phase}: ${JSON.stringify(statuses)}`);
   const cacheStatus = statuses.findIndex(text => text.includes('Hydrating compiler cache'));
   const compileStatus = statuses.findIndex((text, index) => index > cacheStatus && text.includes('Compiling WebAssembly'));
   if (cacheStatus < 0 || compileStatus < 0)
@@ -53,14 +54,19 @@ try {
   await page.locator('#run').click();
   await busy();
   await idle();
+  await page.evaluate(() => { window.progressStatuses = []; });
+  await page.locator('#run').click();
+  await busy();
+  await idle();
   const rerun = await page.evaluate(() => window.progressStatuses);
-  if (!rerun.some(text => text.startsWith('Step 1 of 1'))) throw Error('Cached run denominator incorrect');
+  if (!rerun.some(text => text.startsWith('Running program')) || rerun.some(text => text.startsWith('Checking C#')))
+    throw Error(`Cached run did not remain run-only: ${JSON.stringify(rerun)}`);
   await page.locator('#compile').click();
   await busy();
-  if (!(await page.locator('#status').textContent()).includes('of 7')) throw Error('Compile denominator incorrect');
+  if ((await page.locator('#status').textContent()) === 'Ready') throw Error('Publish phase was not reported');
   await page.locator('#stop').click();
   await idle();
   if (await page.locator('#status').textContent() !== 'Stopped' || errors.length) throw Error(JSON.stringify(errors));
   writeFileSync(`${output}/results.json`, JSON.stringify({ passed: true, statuses, rerun, cacheStages, warmCacheStages, stopped: true, errors }, null, 2));
-  console.log('PASS: numbered progress, disabled actions, cached run and Stop recovery');
+  console.log('PASS: named progress phases, disabled actions, cached run and Stop recovery');
 } finally { await browser.close(); }
