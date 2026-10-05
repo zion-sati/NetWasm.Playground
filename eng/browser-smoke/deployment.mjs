@@ -187,8 +187,11 @@ try {
   const expectedBundles = Object.values(toolchainManifest.bundles).map(receipt => receipt.path).sort();
   if (bundleRequests.map(request => request.slice(request.indexOf('/bundles/') + 1)).sort().join(',') !== expectedBundles.join(','))
     throw Error(`Unexpected bundle requests: ${JSON.stringify(bundleRequests)}`);
+  // These three JSON requests are bounded metadata. Other direct Wasm, assembly,
+  // archive, data or JSON payloads would bypass the verified bundle graph.
   const directPayloads = toolchainRequests.filter(request => /\.(?:wasm|dll|a|dat|json)$/.test(request) &&
-    !request.endsWith('/index.json') && !request.endsWith('/asset-manifest.json'));
+    !request.endsWith('/index.json') && !request.endsWith('/asset-manifest.json') &&
+    !request.endsWith('/compression-receipt.json'));
   // The separately bundled Preview 2 guest provider and component host add two
   // verified module requests outside the four payload bundles.
   if (directPayloads.length || toolchainRequests.length > 22)
