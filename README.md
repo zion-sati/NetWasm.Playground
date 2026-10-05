@@ -78,6 +78,13 @@ sets for 14 days. A manual Pages dispatch remains available for recovery.
 Configure Pages with **GitHub Actions** as its source; publishing directly from
 the repository root does not build this Vite project.
 
+The pinned NativeAOT-LLVM toolchain does not currently guarantee byte-identical
+compiler-host WebAssembly across clean rebuilds. The SHA-256 recorded for a
+published toolchain identifies those exact release bytes; it is an artifact
+integrity check, not a requirement that a later rebuild produce the same SHA.
+If deployment must be retried after the asset is published, dispatch the Pages
+workflow so it reuses that release asset instead of rebuilding the compiler host.
+
 The `github-pages` environment must allow deployments from the `main` branch.
 The release workflow checks out the exact GitHub Release tag when it calls Pages.
 
