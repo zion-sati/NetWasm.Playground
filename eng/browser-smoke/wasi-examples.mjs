@@ -20,7 +20,7 @@ for (const name of selected) {
     await page.goto(url);
     await page.locator('#optimization').selectOption('none');
 
-    for (const example of ['datetime', 'http']) {
+    for (const example of ['datetime', 'http', 'span-memory-unsafe']) {
       await page.locator('#example').selectOption(example);
       await page.locator('#run').click();
       if (!await page.locator('#compile').isDisabled() || !await page.locator('#run').isDisabled())
@@ -39,8 +39,11 @@ for (const name of selected) {
             Math.abs(Date.parse(now) - Date.now()) > 120_000 ||
             Math.abs(Date.parse(utc) - Date.now()) > 120_000)
           throw Error(`${name}/datetime: implausible UTC output: ${output}`);
-      } else if (output !== 'HTTP 200\n{"message":"Hello from NetWasm Playground"}\n\n') {
+      } else if (example === 'http' && output !== 'HTTP 200\n{"message":"Hello from NetWasm Playground"}\n\n') {
         throw Error(`${name}/http: unexpected response: ${output}`);
+      } else if (example === 'span-memory-unsafe' && output !==
+          'stackalloc span: 42\npointer dereference: 40\nraw pointer mutation: 42\nmemory view: 42\n') {
+        throw Error(`${name}/span-memory-unsafe: unexpected output: ${output}`);
       }
       console.log(`PASS ${name}/${example}: ${output.trim().replaceAll('\n', ' · ')}`);
     }

@@ -164,7 +164,11 @@ try {
   await page.locator('[data-toolchain-preload="complete"]').waitFor({ timeout: 240000 });
   const stdout = await page.locator('#output').textContent();
   const status = await page.locator('#status').textContent();
+  const assetSummary = await page.locator('#assets').textContent();
   if (stdout !== '42\n' || status !== 'Run complete') throw Error(`Browser run failed: ${status} ${JSON.stringify(stdout)}`);
+  const assetSizes = assetSummary?.match(/^Tool assets: ([\d,]+) bytes Brotli-11 · ([\d,]+) bytes uncompressed$/);
+  if (!assetSizes || Number(assetSizes[1].replaceAll(',', '')) >= Number(assetSizes[2].replaceAll(',', '')))
+    throw Error(`Tool asset compression receipt was not displayed: ${assetSummary}`);
   const event = page.waitForEvent('download');
   await page.locator('#download').click();
   const download = await event;
@@ -205,6 +209,7 @@ try {
       toolchainManifestSha256: finalSiteIdentity.toolchainManifestSha256 },
     toolchainRequests: { unique: toolchainRequests.length, bundles: bundleRequests, parallelStartSpreadMs: bundleStartSpreadMs,
       responses: Object.fromEntries(bundleResponses) }, toolbarLayout, pageContract, errors, consoleErrors };
+  result.assetSummary = assetSummary;
   writeFileSync(`${output}/results.json`, JSON.stringify(result, null, 2));
   console.log('PASS: deployed browser compile/run/download and Wasmtime execution');
 } finally {

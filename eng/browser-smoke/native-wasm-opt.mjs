@@ -1,10 +1,29 @@
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
 import { browserName, browserType } from './engine.mjs';
 
 const url = process.env.PLAYGROUND_URL;
 const output = process.env.PLAYGROUND_EVIDENCE;
 if (!url || !output) throw Error('PLAYGROUND_URL and PLAYGROUND_EVIDENCE are required');
 mkdirSync(output, { recursive: true });
+const contract = JSON.parse(readFileSync(
+  new URL('../release-contract.json', import.meta.url), 'utf8'));
+if (contract.schemaVersion !== 1 || contract.helloWorld42?.componentBytes !== 84_653)
+  throw Error('Invalid Hello World release contract');
+
+async function downloadContractComponent(page, name) {
+  const event = page.waitForEvent('download');
+  await page.locator('#download').click();
+  const download = await event;
+  if (download.suggestedFilename() !== 'program-Oz.wasm')
+    throw Error(`Unexpected contract artifact name: ${download.suggestedFilename()}`);
+  const path = `${output}/${name}.wasm`;
+  await download.saveAs(path);
+  const bytes = readFileSync(path);
+  if (bytes.length !== contract.helloWorld42.componentBytes)
+    throw Error(`Hello World size regression: expected ${contract.helloWorld42.componentBytes}, got ${bytes.length}`);
+  return { bytes: bytes.length, sha256: createHash('sha256').update(bytes).digest('hex') };
+}
 
 const browser = await browserType.launch({ headless: true });
 try {
@@ -17,7 +36,8 @@ try {
   });
   await page.goto(url);
   await page.locator('.monaco-editor').waitFor();
-  await page.getByLabel('Optimization', { exact: true }).selectOption('Oz');
+  await page.getByLabel('Example', { exact: true }).selectOption(contract.helloWorld42.exampleId);
+  await page.getByLabel('Optimization', { exact: true }).selectOption(contract.helloWorld42.optimization);
   await page.evaluate(() => {
     window.nativeOptimizerStatuses = [];
     new MutationObserver(() => window.nativeOptimizerStatuses.push(document.querySelector('#status').textContent))
@@ -35,10 +55,11 @@ try {
     isolated: crossOriginIsolated,
     statuses: window.nativeOptimizerStatuses,
   }));
-  if (first.status !== 'Run complete' || first.stdout !== '42\n' ||
+  if (first.status !== 'Run complete' || first.stdout !== contract.helloWorld42.stdout ||
       !first.optimizer.startsWith('Optimizer: native WebAssembly') || !first.isolated ||
       !first.statuses.some(status => status.includes('Compiling WebAssembly')))
     throw Error(`Native optimizer did not complete: ${JSON.stringify(first)}`);
+  const component = await downloadContractComponent(page, `${browserName}-hello-oz-native`);
 
   await page.locator('#compile').click();
   await page.waitForFunction(() => document.querySelector('#status').textContent.includes('Optimizing WebAssembly'),
@@ -60,7 +81,7 @@ try {
   const requested = [...new Set(requests.map(value => new URL(value).pathname.split('/').at(-1)))];
   for (const required of ['build-receipt.json', 'wasm-opt.js', 'wasm-opt.wasm'])
     if (!requested.includes(required)) throw Error(`Native optimizer asset was not requested: ${required}`);
-  const result = { passed: true, browser: browserName, first, recovery,
+  const result = { passed: true, browser: browserName, first, recovery, component,
     nativeAssets: requested, errors };
 
   const fallbackContext = await browser.newContext({ serviceWorkers: 'block' });
@@ -68,7 +89,8 @@ try {
     const fallbackPage = await fallbackContext.newPage();
     await fallbackPage.goto(url);
     await fallbackPage.locator('.monaco-editor').waitFor();
-    await fallbackPage.getByLabel('Optimization', { exact: true }).selectOption('Oz');
+    await fallbackPage.getByLabel('Example', { exact: true }).selectOption(contract.helloWorld42.exampleId);
+    await fallbackPage.getByLabel('Optimization', { exact: true }).selectOption(contract.helloWorld42.optimization);
     await fallbackPage.locator('#run').click();
     await fallbackPage.waitForFunction(() => document.querySelector('#stop').disabled,
       undefined, { timeout: 300_000 });
@@ -78,10 +100,14 @@ try {
       optimizer: document.querySelector('#optimizer').textContent,
       isolated: crossOriginIsolated,
     }));
-    if (result.fallback.status !== 'Run complete' || result.fallback.stdout !== '42\n' ||
+    if (result.fallback.status !== 'Run complete' || result.fallback.stdout !== contract.helloWorld42.stdout ||
         result.fallback.isolated ||
         result.fallback.optimizer !== 'Optimizer: JavaScript fallback · native optimizer unavailable')
       throw Error(`Native optimizer fallback failed: ${JSON.stringify(result.fallback)}`);
+    result.fallback.component = await downloadContractComponent(
+      fallbackPage, `${browserName}-hello-oz-javascript`);
+    if (result.fallback.component.sha256 !== component.sha256)
+      throw Error('Native and JavaScript optimizer outputs differ');
   } finally { await fallbackContext.close(); }
   writeFileSync(`${output}/results.json`, JSON.stringify(result, null, 2) + '\n');
   console.log(`PASS: ${browserName} native wasm-opt, Stop recovery, and visible JavaScript fallback`);

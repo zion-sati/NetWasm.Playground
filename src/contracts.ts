@@ -22,7 +22,7 @@ export interface Diagnostic {
 }
 
 export interface StageTiming { stage: string; milliseconds: number }
-export interface AssetMeasurement { rawBytes: number; transferBytes: number }
+export interface AssetMeasurement { rawBytes: number; compressedBytes?: number }
 export interface ToolchainPreloadProgress extends AssetMeasurement {
   completedBundles: number;
   totalBundles: number;
@@ -55,7 +55,7 @@ export interface RuntimeCacheMetrics {
 export type PipelineEvent = { requestId: number; revision: number } & (
   | { type: 'stage'; stage: string; state: 'running' | 'complete'; milliseconds?: number }
   | { type: 'console'; stream: 'stdout' | 'stderr'; text: string }
-  | { type: 'assets'; rawBytes: number; transferBytes: number }
+  | { type: 'assets'; rawBytes: number; compressedBytes?: number }
 );
 
 export interface CompilationResult {

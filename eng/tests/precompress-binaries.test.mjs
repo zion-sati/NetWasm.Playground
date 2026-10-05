@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
 import { brotliDecompressSync } from 'node:zlib';
-import { precompressBinaries } from '../precompress-binaries.mjs';
+import { precompressBinaries, writeToolchainCompressionReceipt } from '../precompress-binaries.mjs';
 
 test('binary sidecars round trip without modifying originals or other assets', async t => {
   const root = await mkdtemp(join(tmpdir(), 'binary-sidecars-'));
@@ -42,4 +42,31 @@ test('writes sidecars for every binary, including tiny and empty files', async t
   assert.deepEqual(brotliDecompressSync(await readFile(join(root, 'tiny.wasm.br'))), Buffer.from([0, 1]));
   assert.deepEqual(brotliDecompressSync(await readFile(join(root, 'empty.bin.br'))), Buffer.alloc(0));
   assert.deepEqual((await readdir(root)).sort(), ['empty.bin', 'empty.bin.br', 'tiny.wasm', 'tiny.wasm.br']);
+});
+
+test('records provider-independent compressed and uncompressed toolchain sizes', async t => {
+  const root = await mkdtemp(join(tmpdir(), 'binary-receipt-'));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const id = 'a'.repeat(64), manifestSha256 = 'b'.repeat(64);
+  await mkdir(join(root, 'toolchain', id, 'bundles'), { recursive: true });
+  await writeFile(join(root, 'toolchain', 'index.json'),
+    JSON.stringify({ id, manifestSha256 }));
+  const binary = Buffer.from('compiler payload\0'.repeat(4096));
+  const script = Buffer.from('export const value = 42;');
+  await writeFile(join(root, 'toolchain', id, 'bundles', 'compiler.bin'), binary);
+  await writeFile(join(root, 'toolchain', id, 'worker.mjs'), script);
+
+  await precompressBinaries(root);
+  const receipt = await writeToolchainCompressionReceipt(root);
+  const compressed = (await readFile(
+    join(root, 'toolchain', id, 'bundles', 'compiler.bin.br'))).length;
+
+  assert.equal(receipt.rawBytes, binary.length + script.length);
+  assert.equal(receipt.compressedBytes, compressed + script.length);
+  assert.deepEqual(receipt.files['worker.mjs'], {
+    rawBytes: script.length,
+    compressedBytes: script.length,
+  });
+  assert.deepEqual(JSON.parse(await readFile(
+    join(root, 'toolchain', 'compression-receipt.json'), 'utf8')), receipt);
 });
