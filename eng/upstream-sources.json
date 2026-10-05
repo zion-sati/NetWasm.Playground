@@ -1,5 +1,14 @@
 {
   "schemaVersion": 1,
+  "nativeAotLlvmCandidate": {
+    "repository": "https://github.com/dotnet/runtimelab",
+    "branch": "feature/NativeAOT-LLVM",
+    "commit": "527a565752062b20bb9693eea6c884b34ecce7bf",
+    "packageVersion": "10.0.0-rc.1.26357.1",
+    "roslynSdkVersion": "11.0.100-rc.1.26425.128",
+    "emscriptenVersion": "3.1.56",
+    "sdkImage": "mcr.microsoft.com/dotnet/sdk@sha256:e70cdb7f80b0348f5cb85f19a8f670fca061f033d57eed12fa003d58b0e06317"
+  },
   "sources": {
     "netwasm": {
       "repository": "https://github.com/zion-sati/NetWasm",

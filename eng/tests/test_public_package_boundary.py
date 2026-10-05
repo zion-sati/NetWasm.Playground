@@ -90,9 +90,38 @@ class PublicPackageBoundaryTests(unittest.TestCase):
         self.assertIn("11.0.100-rc.1.26425.128", release_builder)
         self.assertIn("'-p:DefineConstants=FRONTEND_CACHE_TRANSPORT'", release_builder)
         self.assertIn("'-p:WasmBuildNative=true'", release_builder)
-        self.assertIn("'-p:RunAOTCompilation=false'", release_builder)
-        self.assertIn("'-p:PublishTrimmed=false'", release_builder)
+        self.assertIn("'interpreted': ('false', 'false', 'false')", release_builder)
+        self.assertIn("'trimmed': ('false', 'true', 'false')", release_builder)
+        self.assertIn("'aot': ('true', 'true', 'false')", release_builder)
+        self.assertIn("'aot-threads': ('true', 'true', 'true')", release_builder)
+        self.assertIn("f'-p:RunAOTCompilation={run_aot}'", release_builder)
+        self.assertIn("f'-p:PublishTrimmed={publish_trimmed}'", release_builder)
+        self.assertIn("f'-p:WasmEnableThreads={enable_threads}'", release_builder)
         self.assertIn("'-p:ILLinkTreatWarningsAsErrors=false'", release_builder)
+
+    def test_nativeaot_candidate_is_pinned_and_preserves_frontend_cache_transport(self):
+        upstream = json.loads((ROOT / 'eng/upstream-sources.json').read_text())
+        candidate = upstream['nativeAotLlvmCandidate']
+        self.assertEqual('https://github.com/dotnet/runtimelab', candidate['repository'])
+        self.assertRegex(candidate['commit'], r'^[0-9a-f]{40}$')
+        self.assertEqual('3.1.56', candidate['emscriptenVersion'])
+
+        project = ET.parse(
+            ROOT / 'eng/nativeaot-compiler-host/NativeAotCompilerHost.csproj').getroot()
+        constants = project.findtext('.//DefineConstants', default='').split(';')
+        self.assertIn('NATIVEAOT_LLVM', constants)
+        self.assertIn('FRONTEND_CACHE_TRANSPORT', constants)
+        packages = {item.attrib['Include']: item.attrib['Version']
+                    for item in project.findall('.//PackageReference')}
+        self.assertEqual('[$(NativeAotLlvmVersion)]',
+                         packages['Microsoft.DotNet.ILCompiler.LLVM'])
+        self.assertEqual('[$(NetWasmCompilerPackageVersion)]',
+                         packages['NetWasm.Compiler.Browser'])
+
+        builder = (ROOT / 'eng/build-nativeaot-compiler.py').read_text()
+        self.assertIn("upstream['nativeAotLlvmCandidate']", builder)
+        self.assertIn("candidate['sdkImage']", builder)
+        self.assertIn('emcc --version', builder)
 
     def test_candidate_compiler_feed_is_explicit_and_not_the_release_default(self):
         help_text = subprocess.check_output(

@@ -5,7 +5,11 @@ using System.IO;
 using System.Linq;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+#if NATIVEAOT_LLVM
+using JSExportAttribute = NetWasm.Playground.CompilerProbe.NativeAotExportAttribute;
+#else
 using System.Runtime.InteropServices.JavaScript;
+#endif
 using System.Runtime.Versioning;
 using System.Text;
 using System.Diagnostics;
@@ -31,6 +35,11 @@ using JsonSourceGenerator = jsonsourcegen::System.Text.Json.SourceGeneration.Jso
 [assembly: SupportedOSPlatform("browser")]
 
 namespace NetWasm.Playground.CompilerProbe;
+
+#if NATIVEAOT_LLVM
+[AttributeUsage(AttributeTargets.Method)]
+internal sealed class NativeAotExportAttribute : Attribute { }
+#endif
 
 public static partial class Program
 {
@@ -151,8 +160,12 @@ public static partial class Program
         guestMemoryMaximum = bytes;
     }
 
+#if NATIVEAOT_LLVM
+    private static void ReportStage(string stage) { }
+#else
     [JSImport("reportStage", "compiler-progress")]
     private static partial void ReportStage(string stage);
+#endif
 
     [JSExport]
     public static void EnableProgress() => progressEnabled = true;

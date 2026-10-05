@@ -45,6 +45,25 @@ def safe_path(value):
     return path
 
 
+def verify_nativeaot_compiler(folder, expected_toolchain, expected_netwasm_version):
+    receipt_path = folder / 'nativeaot-compiler-receipt.json'
+    receipt = json.loads(receipt_path.read_text())
+    if set(receipt) != {'schemaVersion', 'netwasmVersion', 'nativeAotLlvm', 'files'} or \
+            receipt['schemaVersion'] != 1 or receipt['netwasmVersion'] != expected_netwasm_version or \
+            receipt['nativeAotLlvm'] != expected_toolchain or not isinstance(receipt['files'], dict):
+        raise ValueError('NativeAOT compiler receipt does not match the pinned toolchain')
+    expected_files = set(receipt['files']) | {receipt_path.name}
+    actual_files = {path.name for path in folder.iterdir() if path.is_file()}
+    if actual_files != expected_files or not any(name.endswith('.wasm') for name in receipt['files']) or \
+            not any(name.endswith(('.js', '.mjs')) for name in receipt['files']):
+        raise ValueError('NativeAOT compiler output inventory is incomplete')
+    for name, expected in receipt['files'].items():
+        path = folder / name
+        if set(expected) != {'bytes', 'sha256'} or path.stat().st_size != expected['bytes'] or \
+                sha256(path.read_bytes()) != expected['sha256']:
+            raise ValueError(f'NativeAOT compiler output changed: {name}')
+
+
 def download(url, maximum):
     request = urllib.request.Request(url, headers={'User-Agent': 'NetWasm.Playground-release-builder'})
     with urllib.request.urlopen(request) as response:
@@ -528,7 +547,8 @@ def main():
             destination = stage.joinpath(*path.parts)
             destination.parent.mkdir(parents=True, exist_ok=True)
             destination.write_bytes(payload)
-        release_pins = json.loads((ROOT / 'eng/upstream-sources.json').read_text())['sources']
+        upstream = json.loads((ROOT / 'eng/upstream-sources.json').read_text())
+        release_pins = upstream['sources']
         pins = json.loads(json.dumps(release_pins))
         if CANDIDATE_FEED is not None:
             pins['netwasm']['packageVersion'] = CANDIDATE_VERSION
@@ -536,6 +556,9 @@ def main():
         if args.candidate_tunit_version:
             pins['tunit']['packageVersion'] = args.candidate_tunit_version
             pins['tunit']['commit'] = args.candidate_tunit_commit
+        verify_nativeaot_compiler(args.compiler_framework, upstream['nativeAotLlvmCandidate'],
+                                  pins['netwasm']['packageVersion'])
+        pins['nativeAotLlvmCompilerHost'] = upstream['nativeAotLlvmCandidate']
         refresh_public_assets(stage, pins, runtime_plan)
         rebind_notice_origins(stage, release_pins)
         add_guest_providers(stage, package_archive('netwasm.toolchain', pins['netwasm']['packageVersion']))

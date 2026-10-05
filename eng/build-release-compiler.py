@@ -45,6 +45,9 @@ def main():
                         help='Exact candidate version; required with --candidate-feed')
     parser.add_argument('--candidate-tunit-version',
                         help='Exact TUnit candidate version from the same temporary feed')
+    parser.add_argument('--compiler-mode', choices=('interpreted', 'trimmed', 'aot', 'aot-threads'),
+                        default='interpreted',
+                        help='Browser compiler deployment mode to build')
     args = parser.parse_args()
     if bool(args.candidate_feed) != bool(args.candidate_version):
         parser.error('--candidate-feed and --candidate-version must be supplied together')
@@ -121,13 +124,17 @@ def main():
         ET.SubElement(fallbacks, 'clear')
         ET.ElementTree(configuration).write(nuget, encoding='unicode')
         env = dict(os.environ, NUGET_PACKAGES=str(work / 'packages'), NUGET_HTTP_CACHE_PATH=str(work / 'http-cache'))
-        # Keep the Mono runtime native, but execute the compiler's managed IL in
-        # interpreter mode. Full browser AOT has produced method-layout-sensitive
-        # miscompilations in the compiler host; trimming would also remove IL that
-        # the interpreter needs.
+        mode_properties = {
+            'interpreted': ('false', 'false', 'false'),
+            'trimmed': ('false', 'true', 'false'),
+            'aot': ('true', 'true', 'false'),
+            'aot-threads': ('true', 'true', 'true'),
+        }
+        run_aot, publish_trimmed, enable_threads = mode_properties[args.compiler_mode]
         common = [f'-p:RuntimeFrameworkVersion={runtime}', f'-p:NetWasmCompilerPackageVersion={version}',
                   '-p:DefineConstants=FRONTEND_CACHE_TRANSPORT',
-                  '-p:WasmBuildNative=true', '-p:RunAOTCompilation=false', '-p:PublishTrimmed=false',
+                  '-p:WasmBuildNative=true', f'-p:RunAOTCompilation={run_aot}',
+                  f'-p:PublishTrimmed={publish_trimmed}', f'-p:WasmEnableThreads={enable_threads}',
                   '-p:ILLinkTreatWarningsAsErrors=false']
         subprocess.run(['dotnet', 'restore', *common, '--configfile', str(nuget),
                         '-p:DisableImplicitLibraryPacksFolder=true', '-p:DisableImplicitNuGetFallbackFolder=true',
@@ -144,7 +151,8 @@ def main():
         receipt = {path.relative_to(args.output).as_posix(): {'bytes': path.stat().st_size,
                    'sha256': sha256(path.read_bytes())} for path in sorted(args.output.rglob('*')) if path.is_file()}
         (args.output.parent / 'compiler-framework-receipt.json').write_text(json.dumps(receipt, indent=2) + '\n')
-        print(f'PASS: built {len(receipt)} compiler framework files from public packages')
+        print(f'PASS: built {len(receipt)} compiler framework files from public packages '
+              f'in {args.compiler_mode} mode')
 
 
 if __name__ == '__main__':
