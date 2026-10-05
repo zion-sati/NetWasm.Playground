@@ -1,4 +1,4 @@
-import releaseContract from '../eng/release-contract.json';
+import releaseContract from '../eng/release-contract.json' with { type: 'json' };
 
 export interface ExampleRecipe {
   id: string;
