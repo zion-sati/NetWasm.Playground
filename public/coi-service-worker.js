@@ -2,6 +2,7 @@ const isolationHeaders = {
   'Cross-Origin-Embedder-Policy': 'require-corp',
   'Cross-Origin-Opener-Policy': 'same-origin',
 };
+const nullBodyStatuses = new Set([204, 205, 304]);
 
 self.addEventListener('install', () => self.skipWaiting());
 self.addEventListener('activate', event => event.waitUntil(self.clients.claim()));
@@ -13,7 +14,8 @@ self.addEventListener('fetch', event => {
     if (response.type === 'opaque' || response.type === 'opaqueredirect') return response;
     const headers = new Headers(response.headers);
     for (const [name, value] of Object.entries(isolationHeaders)) headers.set(name, value);
-    return new Response(response.body, {
+    const body = event.request.method === 'HEAD' || nullBodyStatuses.has(response.status) ? null : response.body;
+    return new Response(body, {
       status: response.status,
       statusText: response.statusText,
       headers,
