@@ -70,3 +70,17 @@ test('records provider-independent compressed and uncompressed toolchain sizes',
   assert.deepEqual(JSON.parse(await readFile(
     join(root, 'toolchain', 'compression-receipt.json'), 'utf8')), receipt);
 });
+
+test('allows an application-shell build without a staged toolchain', async t => {
+  const root = await mkdtemp(join(tmpdir(), 'binary-shell-'));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  await writeFile(join(root, 'app.js'), 'console.log(42);');
+
+  assert.equal(await writeToolchainCompressionReceipt(root, { allowMissing: true }), null);
+  await assert.rejects(writeToolchainCompressionReceipt(root), { code: 'ENOENT' });
+  assert.deepEqual(await readdir(root), ['app.js']);
+
+  await mkdir(join(root, 'toolchain'));
+  await assert.rejects(
+    writeToolchainCompressionReceipt(root, { allowMissing: true }), { code: 'ENOENT' });
+});

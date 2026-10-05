@@ -36,8 +36,14 @@ export async function precompressBinaries(directory) {
   return results;
 }
 
-export async function writeToolchainCompressionReceipt(directory) {
+export async function writeToolchainCompressionReceipt(directory, { allowMissing = false } = {}) {
   const toolchain = join(directory, 'toolchain');
+  try {
+    await stat(toolchain);
+  } catch (error) {
+    if (allowMissing && error?.code === 'ENOENT') return null;
+    throw error;
+  }
   const index = JSON.parse(await readFile(join(toolchain, 'index.json'), 'utf8'));
   if (!/^[a-f0-9]{64}$/.test(index.id) || !/^[a-f0-9]{64}$/.test(index.manifestSha256))
     throw new Error('Invalid toolchain index for compression receipt');
@@ -81,5 +87,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1]
   const directory = process.argv[2];
   if (!directory) throw new Error('Usage: node precompress-binaries.mjs <site-output>');
   await precompressBinaries(directory);
-  await writeToolchainCompressionReceipt(directory);
+  // Pull-request shell builds intentionally have no staged toolchain. Release builds
+  // contain one and therefore emit the receipt consumed by the browser status UI.
+  await writeToolchainCompressionReceipt(directory, { allowMissing: true });
 }
