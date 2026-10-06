@@ -33,6 +33,8 @@ try {
     throw new Error(`Multi-file run failed: ${JSON.stringify({ output, status })}`);
   if (!await page.locator('.dock-tabs [data-panel="console"]').evaluate(button => button.classList.contains('active')))
     throw new Error('Successful Run did not activate the Console panel.');
+  if (!(await page.locator('#comparison').textContent())?.includes('None (fastest)'))
+    throw new Error('Run did not use its default no-optimization profile.');
   await page.locator('#compile').click();
   if (!await page.locator('.dock-tabs [data-panel="build"]').evaluate(button => button.classList.contains('active')))
     throw new Error('Publish did not activate the Build panel while compiling.');
@@ -40,6 +42,10 @@ try {
     document.querySelector('#diagnostics .diagnostic'), undefined, { timeout: 300_000 });
   if (!await page.locator('#download').isEnabled() || !(await page.locator('#size').textContent())?.includes('bytes'))
     throw new Error('Multi-file publish did not produce a downloadable component.');
+  if (!(await page.locator('#size').textContent())?.startsWith('-Oz (smallest)') ||
+      !(await page.locator('#comparison').textContent())?.includes('None (fastest)') ||
+      !(await page.locator('#comparison').textContent())?.includes('-Oz (smallest)'))
+    throw new Error('Run and Publish did not retain independent build profiles.');
   if (!await page.locator('.dock-tabs [data-panel="artifacts"]').evaluate(button => button.classList.contains('active')))
     throw new Error('Successful Publish did not activate the Artifacts panel.');
   if (process.env.PLAYGROUND_EVIDENCE) {

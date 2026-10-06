@@ -11,12 +11,13 @@ Editable examples cover Hello World, allocation and guest GC, LINQ, read-only
 JSON parsing, source-generated JSON serialization, regular expressions,
 constructor-based dependency injection, CRC32 hashing, and TUnit tests.
 
-The Optimization dropdown exposes Binaryen's `-O0` through `-O3`, `-Os` and
-`-Oz` settings, plus a None option that skips `wasm-opt` for the quickest
-iteration. The page retains each setting's build time and component size for
-the current source so the tradeoff can be compared directly. C# remains a
-Release compilation for every setting; this control changes the final
-WebAssembly optimization pass.
+The Settings dialog contains independent Run and Publish profiles. Run defaults
+to no final optimization for the quickest edit/test loop; Publish defaults to
+Binaryen `-Oz` for the smallest download. Both profiles also expose `-O0`
+through `-O3` and `-Os`. The page retains each setting's build time and
+component size for the current source so the tradeoff can be compared directly.
+C# remains a Release compilation for every setting; these controls change the
+final WebAssembly optimization pass.
 
 The browser compiler uses NativeAOT-LLVM in a dedicated worker. When the page
 has cross-origin isolation and shared WebAssembly memory, `wasm-opt` uses a
@@ -198,10 +199,20 @@ Focused development-server checks:
 
 ```sh
 NETWASM_VERSION="$(python3 -c 'import json; print(json.load(open("eng/upstream-sources.json"))["sources"]["netwasm"]["packageVersion"])')"
+PLAYGROUND_URL=http://127.0.0.1:5178/ node eng/browser-smoke/revamp-ui.mjs
+PLAYGROUND_URL=http://127.0.0.1:5178/ node eng/browser-smoke/multifile.mjs
+PLAYGROUND_URL=http://127.0.0.1:5178/ node eng/browser-smoke/native-library.mjs
+PLAYGROUND_URL=http://127.0.0.1:5178/ node eng/browser-smoke/web-worker.mjs
 PLAYGROUND_URL=http://127.0.0.1:5173/playground/ node eng/browser-smoke/worker-channel.mjs
 PLAYGROUND_URL=http://127.0.0.1:5173/playground/ PLAYGROUND_EVIDENCE=<evidence-dir> PLAYGROUND_WASM_TOOLS=<verified-baseline>/packages/netwasm.toolchain/$NETWASM_VERSION/tools/wasm-tools node eng/browser-smoke/reliability.mjs
 PLAYGROUND_URL=http://127.0.0.1:5173/playground/ PLAYGROUND_EVIDENCE=<evidence-dir> node eng/browser-smoke/resource.mjs
 ```
+
+The first four commands qualify this revamp against a local development server
+started with `npm run dev -- --port 5178`: the modal UI and separate profiles,
+multi-file compilation, uploaded/native `LibraryImport`, and the JSExport Web
+Worker execution path. They require the ignored `public/toolchain/` assets to
+have been prepared as described above.
 
 The resource check samples owned Chromium processes with `ps`. For a production
 preview, use `eng/browser-smoke/browsers.mjs` with `PLAYGROUND_URL` and
