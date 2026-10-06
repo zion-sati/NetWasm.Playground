@@ -66,8 +66,19 @@ try {
     return cases;
   });
 
-  await page.waitForTimeout(100);
+  await page.evaluate(async () => {
+    const { WorkerChannel } = await import(new URL('src/worker-channel.ts', location.href).href);
+    const delayedModule = URL.createObjectURL(new Blob([
+      `await new Promise(resolve => setTimeout(resolve, 1000));` +
+      `self.onmessage = ({ data }) => postMessage({ id: data.id, result: 42 });`,
+    ], { type: 'text/javascript' }));
+    const channel = new WorkerChannel(new URL(delayedModule), () => {});
+    void channel.request({ operation: 'initialize' }, [], 2000).catch(() => {});
+  });
+  await page.reload({ waitUntil: 'domcontentloaded' });
+  await page.waitForTimeout(500);
   if (pageErrors.length) throw Error(`${browserName} page errors: ${JSON.stringify(pageErrors)}`);
+  results.push({ operation: 'reload', pageErrors: [] });
   if (process.env.PLAYGROUND_CHANNEL_RESULT)
     await writeFile(process.env.PLAYGROUND_CHANNEL_RESULT, JSON.stringify(results, null, 2));
   console.log(JSON.stringify(results));

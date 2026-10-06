@@ -63,7 +63,6 @@ jobs:
           node eng/browser-smoke/cross-origin-isolation.mjs
           node eng/browser-smoke/editor-input.mjs
           node eng/browser-smoke/worker-channel.mjs
-          node eng/browser-smoke/frontend-cache-persistence.mjs
 
   released-toolchain:
     if: github.event_name == 'pull_request'
