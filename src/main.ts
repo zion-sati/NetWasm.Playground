@@ -597,13 +597,23 @@ clearCacheButton.onclick = () => {
     el('status').textContent = errorSummary(error);
   }).finally(() => { clearCacheButton.disabled = false; });
 };
+function suspendPipeline() {
+  const current = pipeline;
+  pipeline = undefined;
+  current?.dispose();
+}
+document.addEventListener('visibilitychange', () => {
+  // WebKit begins freezing workers before pagehide during navigation. Stop an
+  // idle background preload at the earlier visibility transition, while an
+  // explicit user compilation remains allowed to finish in a background tab.
+  if (document.visibilityState === 'hidden' && !active) suspendPipeline();
+});
 window.addEventListener('pagehide', event => {
   // Suspend compiler and tool workers before either a normal navigation or a
   // back/forward-cache transition. WebKit can otherwise tear down in-flight
   // module imports itself and surface them as unhandled promise rejections.
   // A restored page creates a fresh pipeline on its next compilation.
-  pipeline?.dispose();
-  pipeline = undefined;
+  suspendPipeline();
   // A persisted page is only being frozen for browser back/forward navigation.
   // Its JavaScript heap is restored as-is, so disposing Monaco here leaves the
   // restored page with a dead editor that cannot render later model changes.
