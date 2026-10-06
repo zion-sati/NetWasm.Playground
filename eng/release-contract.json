@@ -1,5 +1,8 @@
 {
   "schemaVersion": 1,
+  "toolchain": {
+    "maximumBackgroundBrotliBytes": 31457280
+  },
   "helloWorld42": {
     "exampleId": "hello",
     "optimization": "Oz",

@@ -348,7 +348,8 @@ export class PlaygroundPipeline {
   }
   private nativeWasmOptChannel() {
     return this.nativeWasmOpt ??= createNativeWasmOptChannel(
-      new URL('native-wasm-opt/', this.root!).href);
+      new URL('native-wasm-opt/', this.root!).href,
+      () => this.loadAsset('native-wasm-opt/wasm-opt.wasm'));
   }
   private async nativeLibraries(snapshot: SourceSnapshot) {
     const libraries: { LibraryName: string; Target: 'wasm32'; Path: string; Sha256: string }[] = [];

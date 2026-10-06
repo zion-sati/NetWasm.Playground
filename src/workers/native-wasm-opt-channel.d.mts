@@ -16,6 +16,7 @@ export function recommendedNativeWasmOptWorkers(): number;
 export function supportsNativeWasmOpt(): boolean;
 export function createNativeWasmOptChannel(
   candidateRoot: string,
+  wasmProvider: () => Uint8Array | Promise<Uint8Array>,
   workerCount?: number,
   signal?: (data: any) => void,
 ): NativeWasmOptChannel;

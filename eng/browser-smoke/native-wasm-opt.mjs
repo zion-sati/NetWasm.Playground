@@ -84,8 +84,10 @@ try {
       !/^Optimizer: (?:native WebAssembly|JavaScript fallback)/.test(recovery.optimizer) || errors.length)
     throw Error(`Native optimizer did not recover: ${JSON.stringify({ recovery, errors })}`);
   const requested = [...new Set(requests.map(value => new URL(value).pathname.split('/').at(-1)))];
-  for (const required of ['build-receipt.json', 'wasm-opt.js', 'wasm-opt.wasm'])
+  for (const required of ['build-receipt.json', 'wasm-opt.js'])
     if (!requested.includes(required)) throw Error(`Native optimizer asset was not requested: ${required}`);
+  if (requested.includes('wasm-opt.wasm'))
+    throw Error('Native optimizer module bypassed the background tools bundle');
   const result = { passed: true, browser: browserName, first, recovery, component,
     nativeAssets: requested, errors };
 
