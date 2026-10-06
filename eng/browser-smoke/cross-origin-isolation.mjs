@@ -18,8 +18,13 @@ try {
   });
   const response = await page.goto(url);
   if (!response?.ok()) throw Error(`Playground navigation failed: ${response?.status()}`);
+  // The activating worker claims the first page immediately before the
+  // isolation bootstrap reloads it. Wait through that short intermediate
+  // state: sampling the page while its reload guard is still set makes a valid
+  // two-navigation startup look like a failed bootstrap.
   await page.waitForFunction(() => crossOriginIsolated &&
-    typeof SharedArrayBuffer === 'function' && navigator.serviceWorker.controller,
+    typeof SharedArrayBuffer === 'function' && navigator.serviceWorker.controller &&
+    sessionStorage.getItem('netwasm-coi-reload-v1') === null,
   undefined, { timeout: 30_000 });
   const state = await page.evaluate(() => ({
     crossOriginIsolated,
