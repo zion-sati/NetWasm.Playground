@@ -63,8 +63,8 @@ try {
 
   await page.locator('#file-tree .file-item', { hasText: 'Answer.cs' }).click();
   await page.locator('.monaco-editor').click();
-  await page.keyboard.press(process.platform === 'darwin' ? 'Meta+A' : 'Control+A');
-  await page.keyboard.type('public static class Answer { public const int Value = Missing; }');
+  await page.keyboard.press('ControlOrMeta+A');
+  await page.keyboard.insertText('public static class Answer { public const int Value = Missing; }');
   await page.locator('#compile').click();
   await page.waitForFunction(() => document.querySelector('#diagnostics .diagnostic'), undefined, { timeout: 300_000 });
   if (!await page.locator('.dock-tabs [data-panel="problems"]').evaluate(button => button.classList.contains('active')))
