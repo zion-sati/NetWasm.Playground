@@ -110,8 +110,17 @@ class ToolchainReleaseVersionTests(unittest.TestCase):
         self.assertIn("needs: [build-site, predeploy]", pages)
         self.assertEqual(2, pages.count("bash eng/run-browser-lane.sh"))
         self.assertNotIn("rebuild-public-toolchain.py", pages)
-        self.assertIn("import { browserType } from './engine.mjs';", multifile)
+        self.assertIn("import { browserName, browserType } from './engine.mjs';", multifile)
         self.assertNotIn("import { chromium } from 'playwright';", multifile)
+
+    def test_pull_request_qualifies_monaco_input_across_browser_engines(self):
+        ci = (ROOT / ".github/workflows/ci.yml").read_text()
+        editor_input = (ROOT / "eng/browser-smoke/editor-input.mjs").read_text()
+
+        self.assertIn("browser: [chromium, firefox, webkit]", ci)
+        self.assertIn("PLAYGROUND_BROWSER: ${{ matrix.browser }}", ci)
+        self.assertIn("node eng/browser-smoke/editor-input.mjs", ci)
+        self.assertIn("browserName === 'webkit' ? 'Meta+A' : 'ControlOrMeta+A'", editor_input)
 
 if __name__ == "__main__":
     unittest.main()

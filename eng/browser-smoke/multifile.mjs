@@ -1,5 +1,5 @@
 import { openSample } from './playground-ui.mjs';
-import { browserType } from './engine.mjs';
+import { browserName, browserType } from './engine.mjs';
 import { mkdirSync } from 'node:fs';
 
 const url = process.env.PLAYGROUND_URL ?? 'http://127.0.0.1:5174/';
@@ -63,7 +63,7 @@ try {
 
   await page.locator('#file-tree .file-item', { hasText: 'Answer.cs' }).click();
   await page.locator('.monaco-editor').click();
-  await page.keyboard.press('ControlOrMeta+A');
+  await page.keyboard.press(browserName === 'webkit' ? 'Meta+A' : 'ControlOrMeta+A');
   await page.keyboard.insertText('public static class Answer { public const int Value = Missing; }');
   await page.locator('#compile').click();
   await page.waitForFunction(() => document.querySelector('#diagnostics .diagnostic'), undefined, { timeout: 300_000 });
