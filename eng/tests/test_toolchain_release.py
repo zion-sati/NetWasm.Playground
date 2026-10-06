@@ -98,6 +98,7 @@ class ToolchainReleaseVersionTests(unittest.TestCase):
 
     def test_pages_qualifies_one_site_in_three_parallel_browser_lanes(self):
         pages = (ROOT / ".github/workflows/pages.yml").read_text()
+        multifile = (ROOT / "eng/browser-smoke/multifile.mjs").read_text()
 
         self.assertEqual(2, pages.count("browser: [chromium, firefox, webkit]"))
         self.assertIn("name: Retain exact production site", pages)
@@ -105,6 +106,8 @@ class ToolchainReleaseVersionTests(unittest.TestCase):
         self.assertIn("needs: [build-site, predeploy]", pages)
         self.assertEqual(2, pages.count("bash eng/run-browser-lane.sh"))
         self.assertNotIn("rebuild-public-toolchain.py", pages)
+        self.assertIn("import { browserType } from './engine.mjs';", multifile)
+        self.assertNotIn("import { chromium } from 'playwright';", multifile)
 
 if __name__ == "__main__":
     unittest.main()
