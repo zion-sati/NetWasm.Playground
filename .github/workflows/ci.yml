@@ -29,7 +29,7 @@ jobs:
       - name: Build application shell
         run: npm run build
 
-  editor-input:
+  browser-compatibility:
     runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
@@ -46,9 +46,10 @@ jobs:
       - run: npm ci
       - name: Install ${{ matrix.browser }}
         run: npx playwright install --with-deps "${{ matrix.browser }}"
-      - name: Qualify Monaco input
+      - name: Qualify browser bootstrap and Monaco input
         env:
           PLAYGROUND_BROWSER: ${{ matrix.browser }}
+          PLAYGROUND_EVIDENCE: ${{ runner.temp }}/browser-compatibility
           PLAYGROUND_URL: http://127.0.0.1:5173/
         run: |
           npm run dev -- --port 5173 --strictPort > "$RUNNER_TEMP/playground.log" 2>&1 &
@@ -59,6 +60,7 @@ jobs:
             sleep 1
           done
           curl --fail --silent "$PLAYGROUND_URL" >/dev/null
+          node eng/browser-smoke/cross-origin-isolation.mjs
           node eng/browser-smoke/editor-input.mjs
 
   released-toolchain:

@@ -113,14 +113,19 @@ class ToolchainReleaseVersionTests(unittest.TestCase):
         self.assertIn("import { browserName, browserType } from './engine.mjs';", multifile)
         self.assertNotIn("import { chromium } from 'playwright';", multifile)
 
-    def test_pull_request_qualifies_monaco_input_across_browser_engines(self):
+    def test_pull_request_qualifies_browser_bootstrap_and_monaco_input(self):
         ci = (ROOT / ".github/workflows/ci.yml").read_text()
         editor_input = (ROOT / "eng/browser-smoke/editor-input.mjs").read_text()
+        bootstrap = (ROOT / "public/coi-bootstrap.js").read_text()
+        main = (ROOT / "src/main.ts").read_text()
 
         self.assertIn("browser: [chromium, firefox, webkit]", ci)
         self.assertIn("PLAYGROUND_BROWSER: ${{ matrix.browser }}", ci)
+        self.assertIn("node eng/browser-smoke/cross-origin-isolation.mjs", ci)
         self.assertIn("node eng/browser-smoke/editor-input.mjs", ci)
         self.assertIn("browserName === 'webkit' ? 'Meta+A' : 'ControlOrMeta+A'", editor_input)
+        self.assertIn("window.netWasmIsolationReady = new Promise", bootstrap)
+        self.assertIn("netWasmIsolationReady?: Promise<void>", main)
 
 if __name__ == "__main__":
     unittest.main()
