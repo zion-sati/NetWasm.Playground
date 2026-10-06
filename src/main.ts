@@ -1,5 +1,5 @@
 import * as monaco from 'monaco-editor/editor';
-import 'monaco-editor/languages/definitions/csharp/register';
+import { conf as csharpConfiguration, language as csharpTokens } from 'monaco-editor/languages/definitions/csharp/csharp';
 import 'monaco-editor/features/bracketMatching/register';
 import 'monaco-editor/features/clipboard/register';
 import 'monaco-editor/features/find/register';
@@ -22,6 +22,14 @@ import { buildProjectArchive, projectArchiveName } from './project-archive';
 declare const __PLAYGROUND_VERSION__: string;
 
 (globalThis as typeof globalThis & { MonacoEnvironment: unknown }).MonacoEnvironment = { getWorker: () => new EditorWorker() };
+// Register C# eagerly. Monaco's stock contribution loads its tokenizer through
+// two uncaught dynamic-import consumers; WebKit reports both as unhandled when
+// navigation cancels the lazy chunk. The definitions are only a few kilobytes
+// and are required by every Playground project, so loading them with the shell
+// removes that navigation race without adding optional language payload.
+monaco.languages.register({ id: 'csharp', extensions: ['.cs', '.csx', '.cake'], aliases: ['C#', 'csharp'] });
+monaco.languages.setMonarchTokensProvider('csharp', csharpTokens);
+monaco.languages.setLanguageConfiguration('csharp', csharpConfiguration);
 const icon = (body: string) => `<svg class="icon" aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${body}</svg>`;
 const icons = {
   newFile: icon('<path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><path d="M14 3v6h6M12 13v6m-3-3h6"/>'),

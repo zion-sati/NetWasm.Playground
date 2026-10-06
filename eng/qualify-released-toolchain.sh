@@ -51,7 +51,8 @@ node eng/browser-smoke/web-worker.mjs
 PLAYGROUND_EVIDENCE="$evidence/tunit-failure" node eng/browser-smoke/tunit-failure.mjs
 PLAYGROUND_EVIDENCE="$evidence/progress" node eng/browser-smoke/progress.mjs
 PLAYGROUND_EVIDENCE="$evidence/lifecycle" node eng/browser-smoke/compiler-lifecycle.mjs
-node eng/browser-smoke/back-navigation.mjs
+PLAYGROUND_BROWSER=chromium node eng/browser-smoke/back-navigation.mjs
+PLAYGROUND_BROWSER=webkit node eng/browser-smoke/back-navigation.mjs
 PLAYGROUND_EVIDENCE="$evidence/deployment" node eng/browser-smoke/deployment.mjs
 
 python3 - "$evidence/released-receipt.json" <<'PY'
