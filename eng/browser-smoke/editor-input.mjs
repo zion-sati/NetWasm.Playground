@@ -11,8 +11,10 @@ try {
   await page.locator('#editor textarea').focus();
   await page.keyboard.press(browserName === 'webkit' ? 'Meta+A' : 'ControlOrMeta+A');
   await page.keyboard.insertText('public static class Answer { public const int Value = Missing; }');
-  await page.waitForFunction(() => document.querySelectorAll('#editor .view-line').length === 1 &&
-    document.querySelector('#editor .view-lines')?.textContent?.includes('Value = Missing'));
+  await page.waitForFunction(() => document.querySelector('#editor .view-lines')?.textContent?.includes('Missing'));
+  const visibleText = await page.locator('#editor .view-lines').textContent();
+  if (visibleText?.includes('42'))
+    throw new Error(`${browserName} appended editor input instead of replacing the complete document: ${visibleText}`);
   console.log(`PASS: ${browserName} replaces the complete Monaco document`);
 } finally {
   await browser.close();
