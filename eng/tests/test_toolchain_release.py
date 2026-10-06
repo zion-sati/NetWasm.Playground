@@ -75,6 +75,10 @@ class ToolchainReleaseVersionTests(unittest.TestCase):
 
         self.assertIn("release:\n    types: [published]", release)
         self.assertIn("Existing published GitHub Release tag to retry", release)
+        self.assertIn("Reuse published browser toolchain when resuming", release)
+        self.assertIn("--output source/public/toolchain", release)
+        self.assertGreaterEqual(release.count("steps.published.outputs.found != 'true'"), 6)
+        self.assertNotIn("Published toolchain asset differs from this release build", release)
         self.assertIn("python3 source/eng/build-nativeaot-compiler.py", release)
         self.assertIn("nativeaot-compiler-receipt.json", release)
         self.assertNotIn("dotnet workload install wasm-tools", release)

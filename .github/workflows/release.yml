@@ -74,11 +74,32 @@ jobs:
           source_commit="$(git -C source rev-parse HEAD)"
           test "$(git -C source rev-parse "refs/tags/${RELEASE_TAG}^{commit}")" = "$source_commit"
           git -C source merge-base --is-ancestor "$source_commit" "refs/remotes/origin/${DEFAULT_BRANCH}"
+      - name: Reuse published browser toolchain when resuming
+        id: published
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ steps.release.outputs.tag }}
+        run: |
+          set -euo pipefail
+          asset="netwasm-playground-toolchain-${RELEASE_TAG}.tar.gz"
+          mkdir -p .cache/release/output
+          if gh release download "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" \
+              --pattern "$asset" --dir .cache/release/output >/dev/null 2>&1; then
+            python3 source/eng/toolchain-release.py install \
+              --archive ".cache/release/output/$asset" \
+              --output source/public/toolchain
+            echo "found=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "found=false" >> "$GITHUB_OUTPUT"
+          fi
       - name: Set up .NET
+        if: steps.published.outputs.found != 'true'
         uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6
         with:
           dotnet-version: 11.0.100-rc.1.26425.128
       - name: Install pinned NativeAOT-LLVM Emscripten toolchain
+        if: steps.published.outputs.found != 'true'
         shell: bash
         run: |
           python3 - <<'PY' > "$RUNNER_TEMP/nativeaot-pins.env"
@@ -96,19 +117,23 @@ jobs:
           "$RUNNER_TEMP/emsdk/emsdk" install "$EMSCRIPTEN_VERSION"
           "$RUNNER_TEMP/emsdk/emsdk" activate "$EMSCRIPTEN_VERSION"
       - name: Set up Node.js
+        if: steps.published.outputs.found != 'true'
         uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
           node-version: 26.7.0
           cache: npm
           cache-dependency-path: source/package-lock.json
-      - run: npm ci
+      - if: steps.published.outputs.found != 'true'
+        run: npm ci
         working-directory: source
       - name: Build NativeAOT-LLVM compiler host from pinned public inputs
+        if: steps.published.outputs.found != 'true'
         run: |
           python3 source/eng/build-nativeaot-compiler.py \
             --emsdk "$RUNNER_TEMP/emsdk" \
             --output .cache/release/compiler-framework
       - name: Build content-addressed browser toolchain manifest
+        if: steps.published.outputs.found != 'true'
         run: python3 source/eng/rebuild-public-toolchain.py --compiler-framework .cache/release/compiler-framework --output source/public/toolchain
       - name: Package reproducible release asset
         id: release_archive
@@ -119,9 +144,11 @@ jobs:
           asset="netwasm-playground-toolchain-${RELEASE_TAG}.tar.gz"
           artifact="browser-toolchain-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
           mkdir -p .cache/release/output
-          python3 source/eng/toolchain-release.py pack \
-            --source source/public/toolchain \
-            --output ".cache/release/output/$asset"
+          if [[ ! -f ".cache/release/output/$asset" ]]; then
+            python3 source/eng/toolchain-release.py pack \
+              --source source/public/toolchain \
+              --output ".cache/release/output/$asset"
+          fi
           python3 source/eng/toolchain-release.py install \
             --archive ".cache/release/output/$asset" \
             --output .cache/release/install-check
@@ -148,24 +175,15 @@ jobs:
           if-no-files-found: error
           retention-days: 90
       - name: Attach toolchain to GitHub Release
+        if: steps.published.outputs.found != 'true'
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ steps.release.outputs.tag }}
           ASSET: ${{ steps.release_archive.outputs.archive }}
         run: |
           set -euo pipefail
-          existing="$RUNNER_TEMP/existing-release-asset"
-          mkdir -p "$existing"
-          if gh release download "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" \
-              --pattern "$ASSET" --dir "$existing" >/dev/null 2>&1; then
-            cmp --silent ".cache/release/output/$ASSET" "$existing/$ASSET" || {
-              echo "Published toolchain asset differs from this release build." >&2
-              exit 1
-            }
-          else
-            gh release upload "$RELEASE_TAG" ".cache/release/output/$ASSET#Browser toolchain" \
-              --repo "$GITHUB_REPOSITORY"
-          fi
+          gh release upload "$RELEASE_TAG" ".cache/release/output/$ASSET#Browser toolchain" \
+            --repo "$GITHUB_REPOSITORY"
       - name: Retain release receipts
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:
