@@ -37,6 +37,9 @@ done
 curl --fail --silent http://127.0.0.1:4173/ >/dev/null
 
 export PLAYGROUND_URL=http://127.0.0.1:4173/
+for browser in chromium firefox webkit; do
+  PLAYGROUND_BROWSER="$browser" node eng/browser-smoke/editor-input.mjs
+done
 PLAYGROUND_BROWSER=chromium PLAYGROUND_EVIDENCE="$evidence/cross-origin-isolation" \
   node eng/browser-smoke/cross-origin-isolation.mjs
 PLAYGROUND_BROWSER=chromium PLAYGROUND_EVIDENCE="$evidence/native-wasm-opt" \

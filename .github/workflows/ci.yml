@@ -48,10 +48,10 @@ jobs:
           node-version: 26.7.0
           cache: npm
       - run: npm ci
-      - name: Install browser and Wasmtime
+      - name: Install browsers and Wasmtime
         shell: bash
         run: |
-          npx playwright install --with-deps chromium
+          npx playwright install --with-deps chromium firefox webkit
           archive="$RUNNER_TEMP/wasmtime.tar.xz"
           curl --fail --silent --show-error --location --retry 3 --retry-all-errors \
             --output "$archive" \
