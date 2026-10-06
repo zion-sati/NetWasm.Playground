@@ -17,18 +17,19 @@ import { cloneProjectFiles, createProject, inferNativeLibraryName, isTextProject
   projectFileKind, validateNativeLibraryName, validateProjectFiles, validateWasmArchive,
   type NativeArchiveProjectFile, type PlaygroundProject, type ProjectFile, type ProjectFileSource } from './workspace';
 import { loadProject, saveProject } from './workspace-store';
+import { buildProjectArchive, projectArchiveName } from './project-archive';
 
 declare const __PLAYGROUND_VERSION__: string;
 
 (globalThis as typeof globalThis & { MonacoEnvironment: unknown }).MonacoEnvironment = { getWorker: () => new EditorWorker() };
 document.querySelector<HTMLDivElement>('#app')!.innerHTML = `
 <section class="workbench" aria-label="C# playground">
-  <div class="ide-toolbar"><button id="open-samples" class="project-button"><span>Project</span><strong id="project-name">Hello World</strong><span aria-hidden="true">⌄</span></button><div class="actions"><button id="run" class="primary">Run <span aria-hidden="true">▶</span></button><button id="compile"><span class="compile-spinner" aria-hidden="true"></span>Publish</button><button id="stop" disabled>Stop</button><button id="download" disabled>Download</button><button id="settings-toggle">Settings</button></div></div>
+  <div class="ide-toolbar"><button id="open-samples" class="project-button"><span>Project</span><strong id="project-name">Hello World</strong><span aria-hidden="true">⌄</span></button><div class="actions"><button id="run" class="primary">Run <span aria-hidden="true">▶</span></button><button id="compile"><span class="compile-spinner" aria-hidden="true"></span>Publish</button><button id="stop" disabled>Stop</button><button id="download" disabled>Download</button><button id="save-project" title="Save project as ZIP">Save ZIP</button><button id="settings-toggle">Settings</button></div></div>
   <div class="ide-grid">
     <aside class="explorer"><div class="ide-heading"><strong>Explorer</strong><div><button id="new-file" title="New C# file">+</button><button id="import-files" title="Import project files">↑</button><button id="archive-properties" title="Native library settings" disabled>⚙</button><button id="rename-file" title="Rename selected file">✎</button><button id="delete-file" title="Delete selected file">×</button></div></div><input id="file-input" type="file" accept=".cs,.js,.mjs,.wit,.html,.htm,.txt,.a,text/plain,application/octet-stream" multiple hidden><div id="file-tree" role="tree" aria-label="Project files"></div></aside>
     <section class="editor-area"><div id="editor-tabs" class="editor-tabs" role="tablist"></div><div class="pane-heading"><h2 id="source-name">Program.cs</h2><span>C# · Release</span></div><div id="editor" aria-label="C# source editor"></div></section>
   </div>
-  <section id="bottom-dock" class="bottom-dock"><div id="dock-resize" class="dock-resize" aria-hidden="true"></div><div class="dock-tabs" role="tablist"><button data-panel="problems">Problems <span id="diagnostic-count">0</span></button><button data-panel="console" class="active">Console</button><button data-panel="build">Build</button><button data-panel="artifacts">Artifacts</button><span id="exit"></span><button id="dock-collapse" title="Collapse panel">⌄</button></div><div id="problems-panel" class="dock-panel"><div id="diagnostics" aria-label="Compiler diagnostics"><p class="empty">Run or publish to check your project.</p></div></div><div id="console-panel" class="dock-panel active"><pre id="output" tabindex="0" aria-label="Program output"></pre></div><div id="build-panel" class="dock-panel"><ol id="stages" aria-label="Pipeline progress"></ol><div id="timings"></div><div id="optimizer"></div></div><div id="artifacts-panel" class="dock-panel"><div id="size">No published component</div><div id="comparison"></div><div id="assets"></div></div></section>
+  <section id="bottom-dock" class="bottom-dock"><div id="dock-resize" class="dock-resize" aria-hidden="true"></div><div class="dock-tabs" role="tablist"><button data-panel="problems">Problems <span id="diagnostic-count">0</span></button><button data-panel="console" class="active">Console</button><button data-panel="build">Build</button><button data-panel="artifacts">Artifacts</button><span id="exit"></span><button id="dock-collapse" title="Collapse panel" aria-label="Collapse bottom panel" aria-expanded="true">⌄</button></div><div id="problems-panel" class="dock-panel"><div id="diagnostics" aria-label="Compiler diagnostics"><p class="empty">Run or publish to check your project.</p></div></div><div id="console-panel" class="dock-panel active"><pre id="output" tabindex="0" aria-label="Program output"></pre></div><div id="build-panel" class="dock-panel"><ol id="stages" aria-label="Pipeline progress"></ol><div id="timings"></div><div id="optimizer"></div></div><div id="artifacts-panel" class="dock-panel"><div id="size">No published component</div><div id="comparison"></div><div id="assets"></div></div></section>
   <div id="toolchain-progress" class="toolchain-progress" role="status" aria-live="polite" hidden><div><strong>Preparing toolchain</strong><span id="toolchain-progress-detail">Reading manifest…</span></div><progress id="toolchain-progress-bar" aria-label="Toolchain preload progress"></progress></div>
   <footer class="status-bar"><div id="status" role="status" aria-live="polite">Ready</div><div id="project-status">1 file</div></footer><aside id="compilation-success" class="compilation-success" hidden><span>Compiled entirely in your browser with NetWasm.</span><a href="https://github.com/zion-sati/NetWasm" target="_blank" rel="noreferrer">Follow the project on GitHub →</a></aside>
 </section>`;
@@ -169,10 +170,20 @@ function replaceProject(next: PlaygroundProject) {
   comparisons.clear(); showComparisons(); invalidateDownload();
   renderFiles(); openFile(project.activeFileId); setDiagnostics([]); scheduleSave();
 }
+function setDockCollapsed(collapsed: boolean) {
+  const dock = el('bottom-dock');
+  const toggle = el<HTMLButtonElement>('dock-collapse');
+  dock.classList.toggle('collapsed', collapsed);
+  toggle.textContent = collapsed ? '⌃' : '⌄';
+  toggle.title = collapsed ? 'Expand panel' : 'Collapse panel';
+  toggle.setAttribute('aria-label', collapsed ? 'Expand bottom panel' : 'Collapse bottom panel');
+  toggle.setAttribute('aria-expanded', String(!collapsed));
+  editor.layout();
+}
 function selectDock(panel: string) {
   document.querySelectorAll<HTMLButtonElement>('.dock-tabs [data-panel]').forEach(button => button.classList.toggle('active', button.dataset.panel === panel));
   document.querySelectorAll<HTMLElement>('.dock-panel').forEach(element => element.classList.toggle('active', element.id === `${panel}-panel`));
-  el('bottom-dock').classList.remove('collapsed');
+  setDockCollapsed(false);
   localStorage.setItem('netwasm.dockPanel', panel);
 }
 function setCompilationSuccess(visible: boolean) { el('compilation-success').hidden = !visible; }
@@ -191,7 +202,7 @@ function setDiagnostics(diagnostics: Diagnostic[]) {
   if (!diagnostics.length) { const p = document.createElement('p'); p.className = 'empty'; p.textContent = 'No diagnostics.'; el('diagnostics').append(p); }
   for (const d of diagnostics) { const button = document.createElement('button'); button.className = 'diagnostic'; button.textContent = `${d.path ? `${d.path} · ` : ''}${d.line === undefined ? '' : `${d.line + 1}:${(d.column ?? 0) + 1} · `}${d.code} ${d.message}`; button.onclick = () => { const file = project.files.find(file => file.path === d.path); if (file) openFile(file.id); const position = { lineNumber: (d.line ?? 0) + 1, column: (d.column ?? 0) + 1 }; editor.setPosition(position); editor.revealPositionInCenter(position); editor.focus(); }; el('diagnostics').append(button); }
 }
-function showTimings(timings: StageTiming[]) { el('timings').textContent = timings.map(t => `${t.stage}: ${(t.milliseconds / 1000).toFixed(2)} s`).join(' · '); }
+function showTimings(timings: StageTiming[]) { el('timings').textContent = timings.map(t => `${t.stage}: ${(t.milliseconds / 1000).toFixed(2)} s`).join('\n'); }
 function showOptimizer(result: CompilationResult) {
   if (!result.optimizerHost) { el('optimizer').textContent = ''; return; }
   if (result.optimizerHost === 'native-threads') {
@@ -357,9 +368,28 @@ compileButton.onclick = () => request(false);
 runButton.onclick = () => request(true);
 stopButton.onclick = () => { stopped = true; queued = undefined; pipeline?.stop(); stopButton.disabled = true; el('status').textContent = 'Stopped'; };
 downloadButton.onclick = () => { if (!downloadUrl || publishedCompilation?.revision !== revision) return; const anchor = document.createElement('a'); anchor.href = downloadUrl; anchor.download = `program-${publishedCompilation.optimization ?? 'Oz'}.wasm`; anchor.click(); };
+el<HTMLButtonElement>('save-project').onclick = () => {
+  const archive = buildProjectArchive(project, {
+    language: languageSelect.value as LanguageMode,
+    updatedMemorySafetyRules: updatedMemorySafety.checked,
+    runOptimization: runOptimizationSelect.value as OptimizationMode,
+    publishOptimization: optimizationSelect.value as OptimizationMode,
+  });
+  const url = URL.createObjectURL(new Blob([archive.buffer as ArrayBuffer], { type: 'application/zip' }));
+  const anchor = document.createElement('a');
+  anchor.href = url;
+  anchor.download = projectArchiveName(project.name);
+  anchor.click();
+  setTimeout(() => URL.revokeObjectURL(url), 0);
+  el('status').textContent = `Saved ${anchor.download}`;
+};
 el<HTMLButtonElement>('settings-toggle').onclick = () => settingsDialog.showModal();
 for (const button of document.querySelectorAll<HTMLButtonElement>('.dock-tabs [data-panel]')) button.onclick = () => selectDock(button.dataset.panel!);
-el<HTMLButtonElement>('dock-collapse').onclick = () => el('bottom-dock').classList.toggle('collapsed');
+el<HTMLButtonElement>('dock-collapse').onclick = () => {
+  const collapsed = !el('bottom-dock').classList.contains('collapsed');
+  setDockCollapsed(collapsed);
+  localStorage.setItem('netwasm.dockCollapsed', String(collapsed));
+};
 el<HTMLButtonElement>('new-file').onclick = () => {
   const suggested = `File${project.files.length + 1}.cs`;
   const answer = prompt('New C# file path', suggested);
@@ -444,6 +474,7 @@ el('dock-resize').addEventListener('pointerdown', event => {
 });
 renderFiles();
 selectDock(localStorage.getItem('netwasm.dockPanel') ?? 'console');
+setDockCollapsed(localStorage.getItem('netwasm.dockCollapsed') === 'true');
 const savedProjectId = localStorage.getItem('netwasm.activeProject');
 if (savedProjectId) void loadProject(savedProjectId).then(saved => { if (saved) replaceProject(saved); }).catch(() => {});
 clearCacheButton.onclick = () => {

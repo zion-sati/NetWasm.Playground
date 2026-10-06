@@ -46,6 +46,14 @@ try {
       !(await page.locator('#comparison').textContent())?.includes('None (fastest)') ||
       !(await page.locator('#comparison').textContent())?.includes('-Oz (smallest)'))
     throw new Error('Run and Publish did not retain independent build profiles.');
+  const timingLayout = await page.locator('#timings').evaluate(element => ({
+    text: element.textContent,
+    whiteSpace: getComputedStyle(element).whiteSpace,
+  }));
+  if (!timingLayout.text?.includes('\n') || timingLayout.whiteSpace !== 'pre-line')
+    throw new Error(`Build timings are not displayed one per line: ${JSON.stringify(timingLayout)}`);
+  if (await page.locator('#stages').evaluate(element => getComputedStyle(element).display) !== 'grid')
+    throw new Error('Build stages are not displayed one per line.');
   if (!await page.locator('.dock-tabs [data-panel="artifacts"]').evaluate(button => button.classList.contains('active')))
     throw new Error('Successful Publish did not activate the Artifacts panel.');
   if (process.env.PLAYGROUND_EVIDENCE) {

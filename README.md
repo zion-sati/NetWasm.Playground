@@ -106,6 +106,13 @@ is compiled as a separate Roslyn syntax tree, so diagnostics retain their
 project path. `eng/browser-smoke/multifile.mjs` qualifies a two-file run,
 publish, and path-aware compiler error.
 
+Compiler preferences, independent Run and Publish optimization profiles, and
+the bottom-dock layout are stored in browser local storage. **Save ZIP** writes
+the current project to disk without compilation. The deterministic ZIP contains
+every text and binary project file plus `netwasm-project.json`, which records
+the project kind, native-library metadata, language options, and build profiles.
+No project source or archive bytes are uploaded.
+
 Native archives remain binary project assets and are validated as WebAssembly
 archives before entering the workspace. The LZ4 sample compiles a real `.a`
 library through `LibraryImport`; `eng/browser-smoke/native-library.mjs` covers
