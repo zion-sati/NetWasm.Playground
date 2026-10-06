@@ -8,11 +8,20 @@ export class WorkerChannel {
     if (!this.worker) {
       const generation = this.generation;
       // Blob workers inherit the page's CSP, including its network policy.
-      const bootstrap = URL.createObjectURL(new Blob([`import ${JSON.stringify(this.url.href)};`], { type: 'text/javascript' }));
+      // Catch module-loading failures inside the bootstrap worker. WebKit otherwise
+      // reports an unhandled rejection when navigation tears down an in-flight
+      // module import, even though the owning channel is being disposed normally.
+      const bootstrap = URL.createObjectURL(new Blob([
+        `void import(${JSON.stringify(this.url.href)}).catch(error => postMessage({ workerBootstrapError: String(error?.message ?? error) }));`,
+      ], { type: 'text/javascript' }));
       try { this.worker = new Worker(bootstrap, { type: 'module' }); }
       finally { URL.revokeObjectURL(bootstrap); }
       this.worker.onmessage = ({ data }) => {
         if (generation !== this.generation) return;
+        if (data?.workerBootstrapError) {
+          this.reset(new Error(`Worker module failed: ${data.workerBootstrapError}`));
+          return;
+        }
         const call = this.pending.get(data.id);
         if (!call) return;
         if (data.guestEntered && call.executionTimeout && !call.entered) {
