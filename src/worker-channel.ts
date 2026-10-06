@@ -12,7 +12,11 @@ export class WorkerChannel {
       // reports an unhandled rejection when navigation tears down an in-flight
       // module import, even though the owning channel is being disposed normally.
       const bootstrap = URL.createObjectURL(new Blob([
-        `void import(${JSON.stringify(this.url.href)}).catch(error => postMessage({ workerBootstrapError: String(error?.message ?? error) }));`,
+        `const queued=[];const queue=event=>queued.push(event);self.onmessage=queue;` +
+        `void import(${JSON.stringify(this.url.href)}).then(()=>{const handler=self.onmessage;` +
+        `if(handler===queue)throw Error('Worker module did not register a message handler');` +
+        `for(const event of queued)handler.call(self,event);}).catch(error=>` +
+        `postMessage({workerBootstrapError:String(error?.message??error)}));`,
       ], { type: 'text/javascript' }));
       try { this.worker = new Worker(bootstrap, { type: 'module' }); }
       finally { URL.revokeObjectURL(bootstrap); }
