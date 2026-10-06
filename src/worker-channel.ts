@@ -1,5 +1,6 @@
 export class WorkerChannel {
   private worker?: Worker;
+  private bootstrapUrl?: string;
   private sequence = 0;
   private generation = 0;
   private pending = new Map<number, { resolve: (value: any) => void; reject: (error: Error) => void; timer: ReturnType<typeof setTimeout>; executionTimeout?: number; entered?: boolean }>();
@@ -15,13 +16,16 @@ export class WorkerChannel {
         `const queued=[];const queue=event=>queued.push(event);self.onmessage=queue;` +
         `void import(${JSON.stringify(this.url.href)}).then(()=>{const handler=self.onmessage;` +
         `if(handler===queue)throw Error('Worker module did not register a message handler');` +
+        `postMessage({workerBootstrapReady:true});` +
         `for(const event of queued)handler.call(self,event);}).catch(error=>` +
         `postMessage({workerBootstrapError:String(error?.message??error)}));`,
       ], { type: 'text/javascript' }));
+      this.bootstrapUrl = bootstrap;
       try { this.worker = new Worker(bootstrap, { type: 'module' }); }
-      finally { URL.revokeObjectURL(bootstrap); }
+      catch (error) { this.releaseBootstrap(); throw error; }
       this.worker.onmessage = ({ data }) => {
         if (generation !== this.generation) return;
+        if (data?.workerBootstrapReady) { this.releaseBootstrap(); return; }
         if (data?.workerBootstrapError) {
           this.reset(new Error(`Worker module failed: ${data.workerBootstrapError}`));
           return;
@@ -54,7 +58,13 @@ export class WorkerChannel {
   }
   reset(reason = new Error('Stopped')): void {
     this.generation++; this.worker?.terminate(); this.worker = undefined;
+    this.releaseBootstrap();
     for (const call of this.pending.values()) { clearTimeout(call.timer); call.reject(reason); }
     this.pending.clear();
+  }
+  private releaseBootstrap(): void {
+    if (!this.bootstrapUrl) return;
+    URL.revokeObjectURL(this.bootstrapUrl);
+    this.bootstrapUrl = undefined;
   }
 }

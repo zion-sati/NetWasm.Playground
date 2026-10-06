@@ -5,20 +5,8 @@ const base = process.argv[2] ?? process.env.PLAYGROUND_URL ?? 'http://127.0.0.1:
 const browser = await browserType.launch({ headless: true });
 try {
   const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
-  await page.addInitScript(() => {
-    const audit = [];
-    const NativeWorker = globalThis.Worker;
-    globalThis.__netWasmWorkerAudit = audit;
-    globalThis.Worker = class extends NativeWorker {
-      constructor(specifier, options) {
-        super(specifier, options);
-        const entry = { specifier: String(specifier), type: options?.type ?? 'classic', name: options?.name ?? '' };
-        audit.push(entry);
-        this.addEventListener('error', event => audit.push({ ...entry, error: event.message || 'worker error' }));
-        this.addEventListener('messageerror', () => audit.push({ ...entry, error: 'worker message error' }));
-      }
-    };
-  });
+  const workerUrls = [];
+  page.on('worker', worker => workerUrls.push(worker.url()));
   const pageErrors = [];
   page.on('pageerror', error => pageErrors.push(String(error)));
   await page.route('**/toolchain/**', route => route.abort());
@@ -53,8 +41,7 @@ try {
   if (!restored.source.includes('Regex') || restored.width <= 0 || restored.height <= 0)
     throw Error(`Editor did not render after back navigation: ${JSON.stringify(restored)}`);
   if (pageErrors.length) {
-    const workerAudit = await page.evaluate(() => globalThis.__netWasmWorkerAudit ?? []);
-    throw Error(`Browser errors: ${pageErrors.join('\n')}\nWorkers: ${JSON.stringify(workerAudit)}`);
+    throw Error(`Browser errors: ${pageErrors.join('\n')}\nWorkers: ${JSON.stringify(workerUrls)}`);
   }
   console.log('PASS: editor renders and responds after browser back navigation');
 } finally {
