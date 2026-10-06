@@ -598,11 +598,16 @@ clearCacheButton.onclick = () => {
   }).finally(() => { clearCacheButton.disabled = false; });
 };
 window.addEventListener('pagehide', event => {
+  // Suspend compiler and tool workers before either a normal navigation or a
+  // back/forward-cache transition. WebKit can otherwise tear down in-flight
+  // module imports itself and surface them as unhandled promise rejections.
+  // A restored page creates a fresh pipeline on its next compilation.
+  pipeline?.dispose();
+  pipeline = undefined;
   // A persisted page is only being frozen for browser back/forward navigation.
   // Its JavaScript heap is restored as-is, so disposing Monaco here leaves the
   // restored page with a dead editor that cannot render later model changes.
   if (event.persisted) return;
-  pipeline?.dispose();
   if (downloadUrl) URL.revokeObjectURL(downloadUrl);
   for (const model of models.values()) model.dispose();
   editor.dispose();
