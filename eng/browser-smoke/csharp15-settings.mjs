@@ -1,4 +1,4 @@
-import { openSample, setOptimizations } from './playground-ui.mjs';
+import { closeSettings, openSample, openSettings, setOptimizations } from './playground-ui.mjs';
 import { chromium } from 'playwright';
 import { mkdirSync, writeFileSync } from 'node:fs';
 
@@ -30,11 +30,17 @@ try {
     return result;
   }
 
+  await openSettings(page);
   await page.getByLabel('Language', { exact: true }).selectOption('15');
+  await closeSettings(page);
   const stable = await compileExpecting(false);
+  await openSettings(page);
   await page.getByLabel('Language', { exact: true }).selectOption('preview');
+  await closeSettings(page);
   const previewWithoutRules = await compileExpecting(true);
+  await openSettings(page);
   await page.locator('#updated-memory-safety').check();
+  await closeSettings(page);
   const recovered = await compileExpecting(true);
   if (stable.diagnostics === 'No diagnostics.' || previewWithoutRules.diagnostics !== 'No diagnostics.' ||
       recovered.diagnostics !== 'No diagnostics.' || errors.length)

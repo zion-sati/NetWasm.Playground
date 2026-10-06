@@ -1,4 +1,4 @@
-import { openSample, setOptimizations } from './playground-ui.mjs';
+import { closeSettings, openSample, openSettings, setOptimizations } from './playground-ui.mjs';
 import { browserType } from './engine.mjs';
 import { execFileSync } from 'node:child_process';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
@@ -63,36 +63,29 @@ try {
       throw Error(`Bundle is not content addressed: ${JSON.stringify({ role, receipt })}`);
   }
   const inspectToolbar = () => page.evaluate(() => {
-    const toolbar = document.querySelector('.toolbar');
-    const options = document.querySelector('.options');
-    const optionControls = [...document.querySelectorAll('.options > *:not([hidden])')].map(control => {
+    const toolbar = document.querySelector('.ide-toolbar');
+    const controls = [...document.querySelectorAll('.ide-toolbar button')].map(control => {
       const box = control.getBoundingClientRect();
       return { id: control.id, className: control.className, left: box.left, right: box.right, width: box.width };
     });
-    const controls = [...document.querySelectorAll('.actions button')].map(button => {
-      const box = button.getBoundingClientRect();
-      return { id: button.id, left: box.left, right: box.right, width: box.width };
-    });
     return { viewport: innerWidth, scrollWidth: document.documentElement.scrollWidth,
       toolbar: toolbar ? { left: toolbar.getBoundingClientRect().left, right: toolbar.getBoundingClientRect().right,
-        clientWidth: toolbar.clientWidth, scrollWidth: toolbar.scrollWidth } : null,
-      options: options ? { left: options.getBoundingClientRect().left, right: options.getBoundingClientRect().right,
-        clientWidth: options.clientWidth, scrollWidth: options.scrollWidth } : null, optionControls, controls };
+        clientWidth: toolbar.clientWidth, scrollWidth: toolbar.scrollWidth } : null, controls };
   });
   const assertToolbar = toolbarLayout => {
     const subpixelTolerance = 0.5;
-    if (!toolbarLayout.toolbar || !toolbarLayout.options || toolbarLayout.scrollWidth > toolbarLayout.viewport ||
+    const expectedControls = ['open-samples', 'run', 'compile', 'stop', 'download', 'export-project', 'settings-toggle'];
+    if (!toolbarLayout.toolbar || toolbarLayout.scrollWidth > toolbarLayout.viewport ||
         toolbarLayout.toolbar.scrollWidth > toolbarLayout.toolbar.clientWidth ||
-        toolbarLayout.optionControls.some(control => control.width <= 0 ||
-          control.left < toolbarLayout.options.left - subpixelTolerance ||
-          control.right > toolbarLayout.options.right + subpixelTolerance) ||
-        toolbarLayout.controls.length !== 4 || toolbarLayout.controls.some(control =>
+        toolbarLayout.controls.map(control => control.id).join(',') !== expectedControls.join(',') ||
+        toolbarLayout.controls.some(control =>
           control.width <= 0 || control.left < toolbarLayout.toolbar.left - subpixelTolerance ||
           control.right > toolbarLayout.toolbar.right + subpixelTolerance))
       throw Error(`Responsive toolbar overflow: ${JSON.stringify(toolbarLayout)}`);
   };
   await page.setViewportSize({ width: 1440, height: 900 });
   await openSample(page, 'csharp15-tour');
+  await openSettings(page);
   await page.getByLabel('Language', { exact: true }).selectOption('preview');
   const intermediateToolbarLayout = await inspectToolbar();
   assertToolbar(intermediateToolbarLayout);
@@ -101,12 +94,12 @@ try {
       await memorySafetyLink.getAttribute('href') !== 'https://learn.microsoft.com/dotnet/csharp/language-reference/proposals/unsafe-evolution')
     throw Error('Updated memory-safety documentation link is missing');
   await page.screenshot({ path: `${output}/responsive-toolbar-intermediate.png`, fullPage: false });
+  await closeSettings(page);
   await page.setViewportSize({ width: 780, height: 900 });
   const toolbarLayout = await inspectToolbar();
   await page.screenshot({ path: `${output}/responsive-toolbar.png`, fullPage: false });
   assertToolbar(toolbarLayout);
   await openSample(page, 'hello');
-  await page.getByLabel('Language', { exact: true }).selectOption('15');
   await page.setViewportSize({ width: 1280, height: 900 });
   const pageContract = await page.evaluate(async () => {
     const icons = [...document.querySelectorAll('link[rel="icon"]')].map(link => link.href);
@@ -170,6 +163,10 @@ try {
   const assetSizes = assetSummary?.match(/^Tool assets: ([\d,]+) bytes Brotli-11 · ([\d,]+) bytes uncompressed$/);
   if (!assetSizes || Number(assetSizes[1].replaceAll(',', '')) >= Number(assetSizes[2].replaceAll(',', '')))
     throw Error(`Tool asset compression receipt was not displayed: ${assetSummary}`);
+  await page.locator('#compile').click();
+  await page.waitForFunction(() => document.querySelector('#stop').disabled, undefined, { timeout: 240000 });
+  if (await page.locator('#status').textContent() !== 'Compilation complete')
+    throw Error('Publish did not complete after the successful Run');
   const event = page.waitForEvent('download');
   await page.locator('#download').click();
   const download = await event;
@@ -193,10 +190,11 @@ try {
   const directPayloads = toolchainRequests.filter(request => /\.(?:wasm|dll|a|dat|json)$/.test(request) &&
     !request.endsWith('/index.json') && !request.endsWith('/asset-manifest.json') &&
     !request.endsWith('/compression-receipt.json'));
-  // The separately bundled Preview 2 guest provider and component host add two
-  // verified module requests outside the four payload bundles.
-  if (directPayloads.length || toolchainRequests.length > 22)
-    throw Error(`Toolchain request graph was not bundled: ${JSON.stringify({ count: toolchainRequests.length, directPayloads })}`);
+  // The separately bundled Preview 2 guest provider, component host and raw
+  // Web Worker runtime add three verified module requests outside the four
+  // payload bundles.
+  if (directPayloads.length || toolchainRequests.length > 23)
+    throw Error(`Toolchain request graph was not bundled: ${JSON.stringify({ count: toolchainRequests.length, directPayloads, toolchainRequests })}`);
   const finalUrl = new URL(url);
   finalUrl.searchParams.set('site-identity', expectedIdentity.siteIdentitySha256);
   const finalNavigation = await page.goto(finalUrl.href, { waitUntil: 'commit' });

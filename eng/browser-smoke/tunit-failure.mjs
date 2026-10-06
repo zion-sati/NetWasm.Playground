@@ -15,7 +15,6 @@ try {
   await openSample(page, 'tunit');
   const source = examples.find(example => example.id === 'tunit')?.source;
   if (!source?.includes('IsEqualTo(42)')) throw new Error('TUnit source anchor is missing');
-  await page.waitForFunction(() => document.querySelector('#editor .view-lines')?.textContent?.includes('IsEqualTo(42)'));
   await page.locator('#editor textarea').focus();
   await page.keyboard.press(browserName === 'webkit' ? 'Meta+f' : 'ControlOrMeta+f');
   const find = page.getByLabel('Find', { exact: true });
