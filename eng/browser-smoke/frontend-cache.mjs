@@ -1,4 +1,5 @@
 import { browserType } from './engine.mjs';
+import { clearCompilationCache } from './playground-ui.mjs';
 
 const base = process.env.PLAYGROUND_URL ?? 'http://127.0.0.1:5174/playground/';
 const browser = await browserType.launch({ headless: true });
@@ -157,9 +158,7 @@ try {
     return { mergedEntries: 3, runtimeReplacement: true,
       runtimeCorruptionMiss: true, pressureBytes: loaded.totalBytes, blockedFallback: true };
   });
-  await page.locator('#clear-cache').click();
-  await page.locator('#status').filter({ hasText: 'Compilation cache cleared' })
-    .waitFor();
+  await clearCompilationCache(page);
   console.log(JSON.stringify({ passed: true, ...result }));
 } finally {
   await browser.close();

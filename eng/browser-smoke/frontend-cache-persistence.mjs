@@ -1,4 +1,4 @@
-import { setOptimizations } from './playground-ui.mjs';
+import { clearCompilationCache, setOptimizations } from './playground-ui.mjs';
 import { browserType } from './engine.mjs';
 import { mkdirSync, writeFileSync } from 'node:fs';
 
@@ -74,8 +74,7 @@ try {
 
   await page.goto(url);
   await page.locator('.monaco-editor').waitFor();
-  await page.locator('#clear-cache').click();
-  await page.locator('#status').filter({ hasText: 'Compilation cache cleared' }).waitFor();
+  await clearCompilationCache(page);
   const cold = await compile();
   const afterCold = await storage();
   if (afterCold.entries < 1 || afterCold.totalBytes < 1)

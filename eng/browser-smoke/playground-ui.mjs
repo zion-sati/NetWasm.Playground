@@ -27,3 +27,10 @@ export async function openSettings(page) {
 export async function closeSettings(page) {
   await page.locator('#settings-dialog footer button').click();
 }
+
+export async function clearCompilationCache(page) {
+  await openSettings(page);
+  await page.locator('#clear-cache').click();
+  await page.locator('#status').filter({ hasText: 'Compilation cache cleared' }).waitFor();
+  await closeSettings(page);
+}
