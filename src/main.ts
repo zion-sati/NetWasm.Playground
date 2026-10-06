@@ -405,9 +405,12 @@ else {
   pipeline = new PlaygroundPipeline(onEvent);
   (document.querySelector('.workbench') as HTMLElement).dataset.toolchainPreload = 'loading';
   el('status').textContent = 'Preparing toolchain in background…';
-  // Let the editor paint, then begin fetching and initializing the heavy toolchain
-  // without waiting for the user to choose Compile or Run.
-  setTimeout(() => void pipeline!.preload(showPreloadProgress).then(assets => {
+  // The isolation bootstrap may reload the first visit after its service worker
+  // activates. Wait for that decision so WebKit does not abort in-flight module
+  // imports and the browser does not download toolchain bundles it will discard.
+  const isolationReady = (window as Window & { netWasmIsolationReady?: Promise<void> })
+    .netWasmIsolationReady ?? Promise.resolve();
+  setTimeout(() => void isolationReady.then(() => pipeline!.preload(showPreloadProgress)).then(assets => {
     (document.querySelector('.workbench') as HTMLElement).dataset.toolchainPreload = 'complete';
     el('assets').textContent = formatAssets(assets);
     el('toolchain-progress').hidden = true;
