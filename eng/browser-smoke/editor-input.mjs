@@ -8,7 +8,7 @@ try {
   await page.locator('.monaco-editor').waitFor();
   await openSample(page, 'multi-file');
   await page.locator('#file-tree .file-item', { hasText: 'Answer.cs' }).click();
-  await page.locator('#editor textarea').focus();
+  await page.locator('.monaco-editor').click();
   await page.keyboard.press(browserName === 'webkit' ? 'Meta+A' : 'ControlOrMeta+A');
   await page.keyboard.insertText('public static class Answer { public const int Value = Missing; }');
   await page.waitForFunction(() => document.querySelector('#editor .view-lines')?.textContent?.includes('Missing'));
