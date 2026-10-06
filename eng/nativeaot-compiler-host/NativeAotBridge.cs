@@ -47,6 +47,7 @@ public static unsafe class NativeAotBridge
                 "compileRecipe" => CompileRecipe(arguments),
                 "compileHttpRecipe" => CompileHttpRecipe(arguments),
                 "compileGeneratedRecipe" => CompileGeneratedRecipe(arguments),
+                "compileProject" => CompileProject(arguments),
                 "prepareRecipe" => PrepareRecipe(arguments),
                 "prepareHttpRecipe" => PrepareHttpRecipe(arguments),
                 "prepareGeneratedRecipe" => PrepareGeneratedRecipe(arguments),
@@ -113,6 +114,13 @@ public static unsafe class NativeAotBridge
         return Program.CompileGeneratedRecipe(value[0], value[1], value[2], value[3], value[4], value[5], value[6], value[7],
             value[8], value[9], value[10], value[11], value[12], bool.Parse(value[13]), value[14],
             bool.Parse(value[15]), value[16]);
+    }
+
+    private static string CompileProject(string[] value)
+    {
+        RequireCount(value, 17);
+        return Program.CompileProject(value[0], value[1], value[2], value[3], value[4], value[5], value[6], value[7],
+            value[8], value[9], value[10], value[11], value[12], value[13], value[14], bool.Parse(value[15]), value[16]);
     }
 
     private static string PrepareRecipe(string[] value)

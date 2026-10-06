@@ -312,6 +312,18 @@ export class PlaygroundPipeline {
     return this.nativeWasmOpt ??= createNativeWasmOptChannel(
       new URL('native-wasm-opt/', this.root!).href);
   }
+  private async nativeLibraries(snapshot: SourceSnapshot) {
+    const libraries: { LibraryName: string; Target: 'wasm32'; Path: string; Sha256: string }[] = [];
+    const files: Record<string, Uint8Array> = {};
+    for (const [index, file] of snapshot.files.filter(file => file.kind === 'native-archive').entries()) {
+      const path = `/netwasm-link/user-native/archive-${index}.a`;
+      const digest = new Uint8Array(await crypto.subtle.digest('SHA-256', file.bytes.slice().buffer));
+      const sha256 = Array.from(digest, byte => byte.toString(16).padStart(2, '0')).join('');
+      libraries.push({ LibraryName: file.libraryName, Target: file.target, Path: path, Sha256: sha256 });
+      files[path] = file.bytes.slice();
+    }
+    return { json: JSON.stringify(libraries), files };
+  }
   async compile(snapshot: SourceSnapshot): Promise<CompilationResult> {
     const optimization = snapshot.optimization ?? 'Oz';
     const epoch = this.epoch; this.context = snapshot; const timings: StageTiming[] = [];
@@ -324,7 +336,7 @@ export class PlaygroundPipeline {
       if (!['hello', 'multi-file', 'span-memory-unsafe', 'csharp15-tour', 'datetime', 'http',
         'allocation', 'linq', 'async-linq', 'pipelines', 'web-encoding', 'xml', 'json-dom',
         'json-generated', 'tunit', 'regex', 'di', 'logging', 'hashing',
-        'fluentvalidation'].includes(snapshot.recipeId)) throw new Error('Unknown compilation recipe');
+        'fluentvalidation', 'native-lz4'].includes(snapshot.recipeId)) throw new Error('Unknown compilation recipe');
       if (!optimizationModes.includes(optimization)) throw new Error('Unknown optimization mode');
       if (!['15', 'preview'].includes(snapshot.language) ||
           (snapshot.updatedMemorySafetyRules && snapshot.language !== 'preview'))
@@ -334,10 +346,12 @@ export class PlaygroundPipeline {
         : createProject('Legacy project', [{ path: snapshot.recipeId === 'tunit' ? 'Tests.cs' : 'Program.cs', text: snapshot.source ?? '' }]).files;
       validateProjectFiles(projectFiles);
       const sourceSet = serializeSourceSet(projectFiles);
+      const nativeLibraries = await this.nativeLibraries(snapshot);
       await this.stage('download', timings, () => this.initialize());
       await this.stage('compiler-initialize', timings, () => this.initializeChannel('compiler'));
       const compilation = await this.stage('compile', timings, () => this.channel('compiler').request({
         operation: 'compile', recipe: snapshot.recipeId, sourceSet,
+        projectKind: snapshot.projectKind ?? 'command', nativeLibrariesJson: nativeLibraries.json,
         language: snapshot.language, updatedMemorySafetyRules: snapshot.updatedMemorySafetyRules,
         optimization,
       }, [], compilerTimeoutMilliseconds));
@@ -357,7 +371,17 @@ export class PlaygroundPipeline {
         await this.stage('linker-initialize', timings, () => this.initializeChannel('lld'));
         await this.stage('tools-initialize', timings, () => this.initializeChannel('tools'));
         const runtime = await this.stage('link', timings,
-          () => this.channel('lld').request({ operation: 'link', plan: runtimePlan }));
+          () => {
+            const selected = Object.fromEntries((runtimePlan.Inputs as { Path: string }[])
+              .filter((input: { Path: string }) => input.Path.startsWith('/netwasm-link/user-native/'))
+              .map((input: { Path: string }) => {
+                const bytes = nativeLibraries.files[input.Path];
+                if (!bytes) throw new Error(`Selected native archive is unavailable: ${input.Path}`);
+                return [input.Path, bytes.slice()];
+              }));
+            return this.channel('lld').request({ operation: 'link', plan: runtimePlan, files: selected },
+              Object.values(selected).map(bytes => bytes.buffer));
+          });
         if (!runtime.success) throw new Error(runtime.error || runtime.stderr || 'Runtime link failed');
         runtimeBytes = runtime.bytes;
         if (optimization !== 'none') {

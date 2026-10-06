@@ -12,10 +12,22 @@ import shutil
 import subprocess
 import threading
 import time
+import urllib.request
 import zipfile
 import xml.etree.ElementTree as ET
 
 ROOT = Path(__file__).resolve().parent.parent
+INTEROP_GENERATOR_VERSION = "10.0.12"
+INTEROP_GENERATORS = {
+    "Microsoft.Interop.LibraryImportGenerator": (
+        "analyzers/dotnet/cs/Microsoft.Interop.LibraryImportGenerator.dll",
+        "de58417fe04b0bec752a775ebac17d9fa0dfd6027eabe9310dc5c9d93e6c7ed5",
+    ),
+    "Microsoft.Interop.SourceGeneration": (
+        "analyzers/dotnet/cs/Microsoft.Interop.SourceGeneration.dll",
+        "448cddcdccd7db7ba1e5de80234c137a6d1fcf0ed90687245109a6dc09dfe82b",
+    ),
+}
 
 
 def fingerprint(path):
@@ -113,6 +125,20 @@ def verified_package_member(directory, relative):
     return path
 
 
+def download_interop_generator(member, expected_sha256):
+    package = "microsoft.netcore.app.ref"
+    url = (f"https://api.nuget.org/v3-flatcontainer/{package}/{INTEROP_GENERATOR_VERSION}/"
+           f"{package}.{INTEROP_GENERATOR_VERSION}.nupkg")
+    request = urllib.request.Request(url, headers={"User-Agent": "NetWasm.Playground-roslyn-worker"})
+    with urllib.request.urlopen(request) as response:
+        archive = response.read()
+    with zipfile.ZipFile(__import__("io").BytesIO(archive)) as package_zip:
+        payload = package_zip.read(member)
+    if hashlib.sha256(payload).hexdigest() != expected_sha256:
+        raise RuntimeError(f"Public interop generator changed: {member}")
+    return payload
+
+
 def prepare_trusted_inputs(json_run, tunit_run, run, di_run=None):
     """Snapshot only approved package executables and separately identify guest metadata."""
     for directory in (json_run, tunit_run, *([di_run] if di_run else [])):
@@ -138,6 +164,10 @@ def prepare_trusted_inputs(json_run, tunit_run, run, di_run=None):
     for name, path in list(generators.items()):
         shutil.copyfile(path, approved / (name + ".dll"))
         generators[name] = approved / (name + ".dll")
+    for name, (member, expected_sha256) in INTEROP_GENERATORS.items():
+        destination = approved / (name + ".dll")
+        destination.write_bytes(download_interop_generator(member, expected_sha256))
+        generators[name] = destination
     program = verified_package_member(tunit_run, tunit_recipe["generatedProgram"])
     json_libraries = {name: verified_package_member(json_run, relative) for name, relative in json_recipe["libraries"].items()}
     tunit_references = {}
@@ -403,7 +433,9 @@ def main():
             'throw new global::System.InvalidOperationException("Trusted DI generator is not configured.")'
         (app / "TrustedGeneratorAssets.cs").write_text("namespace NetWasm.Playground.CompilerProbe;\ninternal static class TrustedGeneratorAssets { internal const string TUnitProgram = " + json.dumps(trusted["program"]) + ";\n" +
             "internal const bool DependencyInjectionAvailable = " + str(di_available).lower() + ";\n" +
-            "internal static global::Microsoft.CodeAnalysis.IIncrementalGenerator CreateDependencyInjectionGenerator() => " + di_factory + "; }\n")
+            "internal static global::Microsoft.CodeAnalysis.IIncrementalGenerator CreateDependencyInjectionGenerator() => " + di_factory + ";\n" +
+            "internal static global::Microsoft.CodeAnalysis.IIncrementalGenerator CreateLoggingGenerator() => throw new global::System.InvalidOperationException(\"Trusted logging generator is not configured.\");\n" +
+            "internal static global::Microsoft.CodeAnalysis.IIncrementalGenerator CreateLibraryImportGenerator() => new global::Microsoft.Interop.LibraryImportGenerator(); }\n")
     (app / "global.json").write_text(json.dumps({"sdk": {
         "version": receipt["toolchain"]["dotnetSdk"], "rollForward": "disable"}}, indent=2))
     package_cache_owner = run if package_mode or reused_host is None else reused_host

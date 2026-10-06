@@ -1,4 +1,4 @@
-import type { PlaygroundProject } from './workspace';
+import type { PlaygroundProject, ProjectFile } from './workspace';
 import { validateProjectFiles } from './workspace';
 
 const databaseName = 'netwasm-playground-projects';
@@ -21,9 +21,12 @@ export async function loadProject(id: string): Promise<PlaygroundProject | undef
       request.onsuccess = () => resolve(request.result as PlaygroundProject | undefined);
       request.onerror = () => reject(request.error);
     });
-    if (!value || value.schemaVersion !== 1) return undefined;
-    validateProjectFiles(value.files);
-    return { ...value, recipeId: value.recipeId ?? 'hello' };
+    if (!value || ![1, 2].includes(value.schemaVersion)) return undefined;
+    const files = value.files.map(file => ({ ...file,
+      ...(file.kind === 'native-archive' ? { bytes: new Uint8Array(file.bytes) } : {}),
+    })) as ProjectFile[];
+    validateProjectFiles(files);
+    return { ...value, schemaVersion: 2, files, recipeId: value.recipeId ?? 'hello' };
   } finally { database.close(); }
 }
 

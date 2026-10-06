@@ -7,7 +7,7 @@ const toBase64 = bytes => {
   return btoa(text);
 };
 const fromBase64 = text => Uint8Array.from(atob(text), character => character.charCodeAt(0));
-const coreRecipes = new Set(['hello', 'multi-file', 'span-memory-unsafe', 'datetime', 'csharp15-tour']);
+const coreRecipes = new Set(['hello', 'multi-file', 'span-memory-unsafe', 'datetime', 'csharp15-tour', 'native-lz4']);
 const generatedRecipes = new Set(['json-generated', 'tunit', 'di', 'logging']);
 const validStringArray = (value, maximumLength = 256) => Array.isArray(value) &&
   value.length <= maximumLength && value.every(item => typeof item === 'string' && item.length <= 4096);
@@ -240,11 +240,14 @@ export function createNativeAotCompilerChannel(options = {}) {
       const compilerInputs = inputs.slice();
       if (supportJson !== undefined) compilerInputs[1] = supportJson;
       const settings = [data.language, data.updatedMemorySafetyRules, data.optimization];
+      const projectKind = data.projectKind ?? 'command';
+      const nativeLibrariesJson = data.nativeLibrariesJson ?? '[]';
+      const projectCompilation = projectKind !== 'command' || nativeLibrariesJson !== '[]';
       const generated = generatedRecipes.has(data.recipe);
       const trustedRecipe = data.recipe === 'tunit' ? 'tunit'
         : data.recipe === 'di' ? 'di' : data.recipe === 'logging' ? 'logging' : 'json';
       let result;
-      if (data.frontendCache !== false && frontendCache) {
+      if (!projectCompilation && data.frontendCache !== false && frontendCache) {
         const operation = generated ? 'prepareGeneratedRecipe'
           : data.recipe === 'http' ? 'prepareHttpRecipe' : 'prepareRecipe';
         const arguments_ = generated
@@ -252,9 +255,12 @@ export function createNativeAotCompilerChannel(options = {}) {
           : [data.sourceSet, ...compilerInputs, ...images, ...settings];
         result = await compileWithFrontendCache(operation, arguments_);
       } else {
-        const operation = generated ? 'compileGeneratedRecipe'
+        const operation = projectCompilation ? 'compileProject' : generated ? 'compileGeneratedRecipe'
           : data.recipe === 'http' ? 'compileHttpRecipe' : 'compileRecipe';
-        const arguments_ = generated
+        const arguments_ = projectCompilation
+          ? [data.sourceSet, projectKind, ...compilerInputs, ...images,
+            nativeLibrariesJson, ...settings]
+          : generated
           ? [data.sourceSet, ...compilerInputs, ...images, trustedRecipe, false, ...settings]
           : [data.sourceSet, ...compilerInputs, ...images, ...settings];
         result = JSON.parse(invoke(operation, arguments_));

@@ -332,7 +332,7 @@ def add_compiler_wit_inventories(stage, version):
             (stage / 'compiler' / name).write_bytes(result.stdout)
 
 
-def refresh_public_assets(stage, pins, runtime_plan=None):
+def refresh_public_assets(stage, pins, runtime_plan=None, candidate_toolchain=None):
     """Replace every versioned compiler input in the pinned reusable browser base."""
     core = pins['netwasm']['packageVersion']
     libraries = pins['libraries']['packageVersion']
@@ -382,22 +382,26 @@ def refresh_public_assets(stage, pins, runtime_plan=None):
                 not re.fullmatch(r'[a-f0-9]{64}', asset['sha256'])):
             raise ValueError(f'Public runtime pack has an invalid {field}')
         relative = safe_path(asset['path'])
-        if relative.parent != PurePosixPath('wasm32'):
+        if len(relative.parts) < 2 or relative.parts[0] != 'wasm32':
             raise ValueError(f'Public runtime pack has an invalid wasm32 asset path: {asset["path"]}')
         payload = public_member('netwasm.runtime.pack', core, f'runtime/{relative.as_posix()}')
         if sha256(payload) != asset['sha256']:
             raise ValueError(f'Public runtime pack asset changed: {asset["path"]}')
-        runtime_files[relative.name] = payload
+        runtime_files[PurePosixPath(*relative.parts[1:])] = payload
     for existing in runtime_directory.iterdir():
         if existing.name == 'system':
             if not existing.is_dir():
                 raise ValueError('Public base runtime system-library entry is not a directory')
-        elif not existing.is_file():
-            raise ValueError(f'Unexpected public base runtime entry: {existing.name}')
-        elif existing.name not in runtime_files:
+        elif existing.is_dir():
+            shutil.rmtree(existing)
+        elif existing.is_file():
             existing.unlink()
-    for name, payload in runtime_files.items():
-        (runtime_directory / name).write_bytes(payload)
+        else:
+            raise ValueError(f'Unexpected public base runtime entry: {existing.name}')
+    for relative, payload in runtime_files.items():
+        destination = runtime_directory.joinpath(*relative.parts)
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination.write_bytes(payload)
     system_names = target['systemLibraries']['names']
     system_assets = target['systemLibraries'].get('assets')
     if len(system_names) != len(set(system_names)):
@@ -470,7 +474,7 @@ def refresh_public_assets(stage, pins, runtime_plan=None):
     inputs = json.loads(inputs_path.read_text())
     inputs['referenceSha256'] = sha256((stage / 'compiler/target-reference.dll').read_bytes())
     inputs['browserCompilerPackage']['version'] = core
-    inputs['toolchain'] = json.loads(download(
+    inputs['toolchain'] = candidate_toolchain or json.loads(download(
         f"https://raw.githubusercontent.com/zion-sati/NetWasm/{pins['netwasm']['commit']}/eng/toolchain.json",
         128 * 1024))
     inputs.pop('desktopReceiptSha256', None)
@@ -524,6 +528,8 @@ def main():
     parser.add_argument('--candidate-tunit-commit')
     parser.add_argument('--runtime-plan', type=Path,
                         help='Actual candidate compiler runtime plan captured from a preliminary toolchain')
+    parser.add_argument('--candidate-toolchain-manifest', type=Path,
+                        help='Local eng/toolchain.json paired with a local compiler candidate')
     args = parser.parse_args()
     candidate_values = (args.candidate_feed, args.candidate_version, args.candidate_commit)
     if any(candidate_values) != all(candidate_values):
@@ -543,9 +549,13 @@ def main():
         parser.error('--candidate-feed must be an existing directory')
     if args.runtime_plan and not args.candidate_feed:
         parser.error('--runtime-plan is only valid with a candidate feed')
+    if args.candidate_toolchain_manifest and not args.candidate_feed:
+        parser.error('--candidate-toolchain-manifest is only valid with a candidate feed')
     CANDIDATE_FEED = args.candidate_feed.resolve() if args.candidate_feed else None
     CANDIDATE_VERSION = args.candidate_version
     runtime_plan = json.loads(args.runtime_plan.read_text()) if args.runtime_plan else None
+    candidate_toolchain = (json.loads(args.candidate_toolchain_manifest.read_text())
+                           if args.candidate_toolchain_manifest else None)
     base = json.loads((ROOT / 'eng/toolchain-base.json').read_text())
     archive = base.get('archive', {})
     if base.get('schemaVersion') != 2 or not isinstance(archive.get('bytes'), int) or archive['bytes'] < 1 or \
@@ -607,7 +617,7 @@ def main():
         pins['nativeAotLlvmCompilerHost'] = upstream['nativeAotLlvmCandidate']
         add_browser_wasm_opt(stage, upstream['browserWasmOpt'])
         pins['browserWasmOpt'] = upstream['browserWasmOpt']
-        refresh_public_assets(stage, pins, runtime_plan)
+        refresh_public_assets(stage, pins, runtime_plan, candidate_toolchain)
         rebind_notice_origins(stage, release_pins)
         add_guest_providers(stage, package_archive('netwasm.toolchain', pins['netwasm']['packageVersion']))
         add_component_host(stage)

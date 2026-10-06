@@ -9,6 +9,8 @@ export interface ExampleRecipe {
   kind?: ProjectKind;
   source: string;
   files?: readonly { path: string; text: string }[];
+  assets?: readonly ({ path: string; publicPath: string; kind: 'text' } |
+    { path: string; publicPath: string; kind: 'native-archive'; libraryName: string; target: 'wasm32' })[];
   language?: '15' | 'preview';
   updatedMemorySafetyRules?: boolean;
 }
@@ -33,6 +35,7 @@ const descriptions: Readonly<Record<string, { description: string; category: Non
   di: { description: 'Resolve services with Microsoft.Extensions.DependencyInjection.', category: 'Libraries' },
   hashing: { description: 'Compute non-cryptographic hashes with System.IO.Hashing.', category: 'Libraries' },
   logging: { description: 'Use source-generated Microsoft.Extensions.Logging messages.', category: 'Libraries' },
+  'native-lz4': { description: 'Call the upstream LZ4 C library through LibraryImport and a WebAssembly .a archive.', category: 'Interop and workers' },
   tunit: { description: 'Compile and run an asynchronous TUnit test project.', category: 'Testing' },
 };
 
@@ -455,6 +458,97 @@ public static partial class Log
         ILogger logger, int count, double elapsedMs);
 }
 `,
+  },
+  {
+    id: 'native-lz4',
+    name: 'Native library · LZ4',
+    source: `using System;
+
+namespace Lz4Sample;
+
+internal static class Program
+{
+    private static unsafe void Main()
+    {
+        byte[] source = new byte[257];
+        for (int index = 0; index < source.Length; index++)
+            source[index] = (byte)(index % 17);
+
+        byte[] compressed = new byte[Native.CompressBound(source.Length)];
+        byte[] restored = new byte[source.Length];
+        fixed (byte* sourcePointer = source, compressedPointer = compressed, restoredPointer = restored)
+        {
+            int compressedLength = Native.Compress(
+                sourcePointer, compressedPointer, source.Length, compressed.Length);
+            if (compressedLength <= 0)
+                throw new InvalidOperationException("LZ4 compression failed.");
+
+            int restoredLength = Native.Decompress(
+                compressedPointer, restoredPointer, compressedLength, restored.Length);
+            if (restoredLength != source.Length)
+                throw new InvalidOperationException("LZ4 decompression returned the wrong length.");
+        }
+
+        Console.WriteLine($"LZ4 compressed {source.Length} bytes to {compressed.Length} bytes of capacity.");
+        Console.WriteLine($"Round trip: {source.AsSpan().SequenceEqual(restored)}");
+    }
+}
+`,
+    files: [
+      { path: 'Program.cs', text: `using System;
+
+namespace Lz4Sample;
+
+internal static class Program
+{
+    private static unsafe void Main()
+    {
+        byte[] source = new byte[257];
+        for (int index = 0; index < source.Length; index++)
+            source[index] = (byte)(index % 17);
+
+        byte[] compressed = new byte[Native.CompressBound(source.Length)];
+        byte[] restored = new byte[source.Length];
+        int compressedLength;
+        fixed (byte* sourcePointer = source, compressedPointer = compressed, restoredPointer = restored)
+        {
+            compressedLength = Native.Compress(
+                sourcePointer, compressedPointer, source.Length, compressed.Length);
+            if (compressedLength <= 0)
+                throw new InvalidOperationException("LZ4 compression failed.");
+
+            int restoredLength = Native.Decompress(
+                compressedPointer, restoredPointer, compressedLength, restored.Length);
+            if (restoredLength != source.Length)
+                throw new InvalidOperationException("LZ4 decompression returned the wrong length.");
+        }
+
+        Console.WriteLine($"LZ4 compressed {source.Length} bytes to {compressedLength} bytes.");
+        Console.WriteLine($"Round trip: {source.AsSpan().SequenceEqual(restored)}");
+    }
+}
+` },
+      { path: 'Native.cs', text: `using System.Runtime.InteropServices;
+
+namespace Lz4Sample;
+
+internal static unsafe partial class Native
+{
+    [LibraryImport("lz4", EntryPoint = "LZ4_compressBound")]
+    internal static partial int CompressBound(int length);
+
+    [LibraryImport("lz4", EntryPoint = "LZ4_compress_default")]
+    internal static partial int Compress(byte* source, byte* destination, int length, int capacity);
+
+    [LibraryImport("lz4", EntryPoint = "LZ4_decompress_safe")]
+    internal static partial int Decompress(byte* source, byte* destination, int length, int capacity);
+}
+` },
+    ],
+    assets: [
+      { path: 'native/liblz4.a', publicPath: 'examples/lz4/liblz4.a', kind: 'native-archive', libraryName: 'lz4', target: 'wasm32' },
+      { path: 'native/LZ4-LICENSE.txt', publicPath: 'examples/lz4/LZ4-LICENSE.txt', kind: 'text' },
+    ],
   },
   {
     id: 'tunit',

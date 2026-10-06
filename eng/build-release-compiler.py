@@ -14,6 +14,13 @@ import zipfile
 
 ROOT = Path(__file__).resolve().parents[1]
 FEED = 'https://api.nuget.org/v3/index.json'
+INTEROP_GENERATOR_VERSION = '10.0.12'
+INTEROP_GENERATORS = {
+    'library-import': ('analyzers/dotnet/cs/Microsoft.Interop.LibraryImportGenerator.dll',
+                       'de58417fe04b0bec752a775ebac17d9fa0dfd6027eabe9310dc5c9d93e6c7ed5'),
+    'interop-support': ('analyzers/dotnet/cs/Microsoft.Interop.SourceGeneration.dll',
+                        '448cddcdccd7db7ba1e5de80234c137a6d1fcf0ed90687245109a6dc09dfe82b'),
+}
 
 
 def sha256(payload):
@@ -90,13 +97,22 @@ def main():
             destination = generators / Path(member).name
             destination.write_bytes(payload)
             extracted[key] = destination
+        for key, (member, expected) in INTEROP_GENERATORS.items():
+            payload, _ = package_member('microsoft.netcore.app.ref', INTEROP_GENERATOR_VERSION, member)
+            if sha256(payload) != expected:
+                raise RuntimeError(f'Public interop generator changed: {member}')
+            destination = generators / Path(member).name
+            destination.write_bytes(payload)
+            extracted[key] = destination
 
         project = ET.parse(app / 'CompilerProbe.csproj')
         group = ET.SubElement(project.getroot(), 'ItemGroup')
         for name, key in [('System.Text.Json.SourceGeneration', 'json'),
                           ('TUnit.Core.SourceGenerator', 'tunit-generator'),
                           ('NetWasm.Microsoft.Extensions.DependencyInjection.Generator', 'di'),
-                          ('NetWasm.Microsoft.Extensions.Logging.Generators', 'logging')]:
+                          ('NetWasm.Microsoft.Extensions.Logging.Generators', 'logging'),
+                          ('Microsoft.Interop.LibraryImportGenerator', 'library-import'),
+                          ('Microsoft.Interop.SourceGeneration', 'interop-support')]:
             reference = ET.SubElement(group, 'Reference', Include=name)
             ET.SubElement(reference, 'HintPath').text = str(extracted[key])
             if key == 'json':
@@ -110,7 +126,9 @@ def main():
             'internal static global::Microsoft.CodeAnalysis.IIncrementalGenerator CreateDependencyInjectionGenerator() => '
             'new global::NetWasm.Microsoft.Extensions.DependencyInjection.Generator.NetWasmDependencyInjectionGenerator();\n'
             'internal static global::Microsoft.CodeAnalysis.IIncrementalGenerator CreateLoggingGenerator() => '
-            'new global::Microsoft.Extensions.Logging.Generators.LoggerMessageGenerator(); }\n')
+            'new global::Microsoft.Extensions.Logging.Generators.LoggerMessageGenerator();\n'
+            'internal static global::Microsoft.CodeAnalysis.IIncrementalGenerator CreateLibraryImportGenerator() => '
+            'new global::Microsoft.Interop.LibraryImportGenerator(); }\n')
         (app / 'global.json').write_text(json.dumps({'sdk': {'version': '11.0.100-rc.1.26425.128', 'rollForward': 'disable',
                                                              'allowPrerelease': True}}, indent=2))
         nuget = work / 'NuGet.Config'

@@ -13,6 +13,7 @@ const recipes = new Set([
   'hello', 'multi-file', 'span-memory-unsafe', 'datetime', 'csharp15-tour', 'http', 'allocation', 'linq', 'async-linq',
   'pipelines', 'web-encoding', 'xml', 'json-dom', 'json-generated', 'tunit', 'regex',
   'di', 'logging', 'hashing', 'fluentvalidation',
+  'native-lz4',
 ]);
 const encoder = new TextEncoder();
 
@@ -53,6 +54,8 @@ serveWorker(async (data, emit) => {
   }
   if (data.operation === 'compile' &&
       (!recipes.has(data.recipe) || !validSourceSet(data.sourceSet) ||
+       !['command', 'wit-worker', 'jsexport-worker'].includes(data.projectKind ?? 'command') ||
+       typeof (data.nativeLibrariesJson ?? '[]') !== 'string' || (data.nativeLibrariesJson ?? '[]').length > 65536 ||
        !['15', 'preview'].includes(data.language) ||
        !['none', 'O0', 'O1', 'O2', 'O3', 'Os', 'Oz'].includes(data.optimization) ||
        typeof data.updatedMemorySafetyRules !== 'boolean' ||

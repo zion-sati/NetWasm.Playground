@@ -71,6 +71,7 @@ public static partial class Program
         int Kind, EntryPointAbiInfo? Abi);
     private sealed record RuntimeLinkAssetInfo(string Path, string Sha256);
     private sealed record RuntimeSystemLibrary(string Path, string Sha256);
+    private sealed record RuntimeNativeLibrary(string LibraryName, string Target, string Path, string Sha256);
     private sealed record RuntimeCacheInfo(string schema, string @namespace, string slot, string key);
     private sealed record RuntimeLinkPlanInfo(string[] Arguments, string[] OptimizationArguments,
         RuntimeLinkAssetInfo[] Inputs, string RuntimeAbi,
@@ -124,6 +125,7 @@ public static partial class Program
     [JsonSerializable(typeof(SupportSource[]))]
     [JsonSerializable(typeof(UserSourceSet))]
     [JsonSerializable(typeof(RuntimeSystemLibrary[]))]
+    [JsonSerializable(typeof(RuntimeNativeLibrary[]))]
     [JsonSerializable(typeof(Dictionary<string, string>))]
     [JsonSerializable(typeof(CompilerHostResponse))]
 #if FRONTEND_CACHE_TRANSPORT
@@ -270,6 +272,19 @@ public static partial class Program
             runtimeSystemLibrariesJson, additionalReferencesJson, additionalImplementationsJson, trustedRecipe, includeGeneratedSourceText,
             languageVersion, updatedMemorySafetyRules, optimization);
 
+    [JSExport]
+    public static string CompileProject(string source, string projectKind, string reference, string supportJson,
+        string implementation, string witJson, string witBytes, string syncWitInventory,
+        string asyncWitInventory, string runtimeManifest, string runtimeSystemLibrariesJson,
+        string additionalReferencesJson, string additionalImplementationsJson,
+        string nativeLibrariesJson, string languageVersion, bool updatedMemorySafetyRules,
+        string optimization)
+        => CompileCore(source, reference, supportJson, implementation, witJson, witBytes,
+            syncWitInventory, asyncWitInventory, runtimeManifest, runtimeSystemLibrariesJson,
+            additionalReferencesJson, additionalImplementationsJson, null, false,
+            languageVersion, updatedMemorySafetyRules, optimization,
+            projectKind: projectKind, nativeLibrariesJson: nativeLibrariesJson);
+
 #if FRONTEND_CACHE_TRANSPORT
     [JSExport]
     public static string PrepareRecipe(string source, string reference, string supportJson, string implementation, string witJson, string witBytes,
@@ -306,7 +321,9 @@ public static partial class Program
         string syncWitInventory, string asyncWitInventory, string runtimeManifest,
         string runtimeSystemLibrariesJson, string additionalReferencesJson, string additionalImplementationsJson, string? trustedRecipe, bool includeGeneratedSourceText,
         string languageVersion, bool updatedMemorySafetyRules, string optimization,
-        bool useAsyncPlatform = false
+        bool useAsyncPlatform = false,
+        string projectKind = "command",
+        string nativeLibrariesJson = "[]"
 #if FRONTEND_CACHE_TRANSPORT
         , bool prepareFrontendCache = false
 #endif
@@ -324,6 +341,8 @@ public static partial class Program
             if (languageVersion is not ("15" or "preview") ||
                 (updatedMemorySafetyRules && languageVersion != "preview"))
                 return Serialize(new(1, false, "request", "unsupported-language-settings", true, []));
+            if (projectKind != "command")
+                return Serialize(new(1, false, "request", "unsupported-project-kind", true, []));
             var runtimeOptimization = ParseOptimization(optimization);
             var tunit = trustedRecipe == "tunit";
             Stage("roslyn");
@@ -348,17 +367,18 @@ public static partial class Program
                     concurrentBuild: false, deterministic: true,
                     mainTypeName: tunit ? "NetWasm.TUnit.Generated.NetWasmTestProgram" : null));
             Compilation generatedCompilation = compilation;
-            if (trustedRecipe is not null)
             {
                 Stage("generator");
                 var generatorStarted = Stopwatch.GetTimestamp();
-                IIncrementalGenerator[] generators = trustedRecipe switch
+                var generators = new List<IIncrementalGenerator> { TrustedGeneratorAssets.CreateLibraryImportGenerator() };
+                generators.AddRange(trustedRecipe switch
                 {
                     "tunit" => [new TestMetadataGenerator(), new HookMetadataGenerator(), new AotConverterGenerator(), new PropertyInjectionSourceGenerator()],
                     "di" => [TrustedGeneratorAssets.CreateDependencyInjectionGenerator()],
                     "logging" => [TrustedGeneratorAssets.CreateLoggingGenerator()],
+                    null => [],
                     _ => [new JsonSourceGenerator()],
-                };
+                });
                 GeneratorDriver driver = CSharpGeneratorDriver.Create(generators.Select(generator => generator.AsSourceGenerator()),
                     parseOptions: parse, optionsProvider: new TrustedOptionsProvider(tunit));
                 driver = driver.RunGeneratorsAndUpdateCompilation(compilation, out generatedCompilation, out generatorDiagnostics);
@@ -443,14 +463,27 @@ public static partial class Program
             }
 #endif
             var compiled = BrowserCompiler.Compile(request);
+            if (compiled.NativeCallbackSupport is not null)
+                throw new InvalidOperationException("Browser native callbacks are not supported.");
             timings.Add(new("netwasm", Stopwatch.GetElapsedTime(started).TotalMilliseconds));
             var systemLibraries = JsonSerializer.Deserialize(runtimeSystemLibrariesJson,
                 CompilerHostJsonContext.Default.RuntimeSystemLibraryArray)!
                 .Select(asset => new RuntimeLinkPlanAsset(asset.Path, asset.Sha256)).ToImmutableArray();
+            var nativeLibraries = JsonSerializer.Deserialize(nativeLibrariesJson,
+                CompilerHostJsonContext.Default.RuntimeNativeLibraryArray)!;
             var runtimeLinkPlan = RuntimeLinkPlanner.Plan(new(runtimeManifest, "wasm32", compiled.StaticDataEnd,
                 AssetRoot: "/netwasm-link/runtime", OutputPath: "/netwasm-link/runtime.wasm",
                 MaximumMemorySizeBytes: guestMemoryMaximum, SystemLibraries: systemLibraries,
-                Optimization: runtimeOptimization));
+                Optimization: runtimeOptimization)
+            {
+                NativeImports = [.. compiled.NativeImports.Select(import => new RuntimeLinkPlanNativeImport(
+                    import.LibraryName,
+                    import.EntryPoint,
+                    [.. import.Parameters.Select(MapNativeType)],
+                    import.ReturnType is { } result ? MapNativeType(result) : null))],
+                NativeLibraries = [.. nativeLibraries.Select(library => new RuntimeLinkPlanNativeLibrary(
+                    library.LibraryName, library.Target, library.Path, library.Sha256))],
+            });
             var coreLinkPlan = BrowserComponentCoreModules.CreateLinkPlan(
                 new("/netwasm-link/application.wasm", "/netwasm-link/runtime.wasm", "/netwasm-link/linked.wasm",
                     ComponentTarget.Wasm32Wasi02, compiled.EntryPoint.Abi),
@@ -479,6 +512,15 @@ public static partial class Program
             return Serialize(new(1, false, "compiler-host", "host-error", true, error: Bound(error.ToString())));
         }
     }
+
+    private static RuntimeLinkPlanNativeValueType MapNativeType(WasmValueType value) => value switch
+    {
+        WasmValueType.I32 => RuntimeLinkPlanNativeValueType.I32,
+        WasmValueType.I64 => RuntimeLinkPlanNativeValueType.I64,
+        WasmValueType.F32 => RuntimeLinkPlanNativeValueType.F32,
+        WasmValueType.F64 => RuntimeLinkPlanNativeValueType.F64,
+        _ => throw new InvalidOperationException("Native import contains an unsupported value type."),
+    };
 
     private static UserSource[] ParseUserSources(string value, string legacyPath)
     {

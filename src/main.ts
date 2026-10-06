@@ -13,7 +13,9 @@ import './style.css';
 import { browserSupportMessage } from './browser-support';
 import { optimizationLabels, optimizationModes, type OptimizationMode } from './optimization';
 import { clearFrontendCache } from './workers/frontend-cache.mjs';
-import { createProject, normalizeProjectPath, validateProjectFiles, type PlaygroundProject, type ProjectFile } from './workspace';
+import { cloneProjectFiles, createProject, inferNativeLibraryName, isTextProjectFile, normalizeProjectPath,
+  projectFileKind, validateNativeLibraryName, validateProjectFiles, validateWasmArchive,
+  type NativeArchiveProjectFile, type PlaygroundProject, type ProjectFile, type ProjectFileSource } from './workspace';
 import { loadProject, saveProject } from './workspace-store';
 
 declare const __PLAYGROUND_VERSION__: string;
@@ -23,7 +25,7 @@ document.querySelector<HTMLDivElement>('#app')!.innerHTML = `
 <section class="workbench" aria-label="C# playground">
   <div class="ide-toolbar"><button id="open-samples" class="project-button"><span>Project</span><strong id="project-name">Hello World</strong><span aria-hidden="true">⌄</span></button><div class="actions"><button id="run" class="primary">Run <span aria-hidden="true">▶</span></button><button id="compile"><span class="compile-spinner" aria-hidden="true"></span>Publish</button><button id="stop" disabled>Stop</button><button id="download" disabled>Download</button><button id="settings-toggle">Settings</button></div></div>
   <div class="ide-grid">
-    <aside class="explorer"><div class="ide-heading"><strong>Explorer</strong><div><button id="new-file" title="New C# file">+</button><button id="import-files" title="Import C# files">↑</button><button id="rename-file" title="Rename selected file">✎</button><button id="delete-file" title="Delete selected file">×</button></div></div><input id="file-input" type="file" accept=".cs,text/plain" multiple hidden><div id="file-tree" role="tree" aria-label="Project files"></div></aside>
+    <aside class="explorer"><div class="ide-heading"><strong>Explorer</strong><div><button id="new-file" title="New C# file">+</button><button id="import-files" title="Import project files">↑</button><button id="archive-properties" title="Native library settings" disabled>⚙</button><button id="rename-file" title="Rename selected file">✎</button><button id="delete-file" title="Delete selected file">×</button></div></div><input id="file-input" type="file" accept=".cs,.js,.mjs,.wit,.html,.htm,.txt,.a,text/plain,application/octet-stream" multiple hidden><div id="file-tree" role="tree" aria-label="Project files"></div></aside>
     <section class="editor-area"><div id="editor-tabs" class="editor-tabs" role="tablist"></div><div class="pane-heading"><h2 id="source-name">Program.cs</h2><span>C# · Release</span></div><div id="editor" aria-label="C# source editor"></div></section>
   </div>
   <section id="bottom-dock" class="bottom-dock"><div id="dock-resize" class="dock-resize" aria-hidden="true"></div><div class="dock-tabs" role="tablist"><button data-panel="problems">Problems <span id="diagnostic-count">0</span></button><button data-panel="console" class="active">Console</button><button data-panel="build">Build</button><button data-panel="artifacts">Artifacts</button><span id="exit"></span><button id="dock-collapse" title="Collapse panel">⌄</button></div><div id="problems-panel" class="dock-panel"><div id="diagnostics" aria-label="Compiler diagnostics"><p class="empty">Run or publish to check your project.</p></div></div><div id="console-panel" class="dock-panel active"><pre id="output" tabindex="0" aria-label="Program output"></pre></div><div id="build-panel" class="dock-panel"><ol id="stages" aria-label="Pipeline progress"></ol><div id="timings"></div><div id="optimizer"></div></div><div id="artifacts-panel" class="dock-panel"><div id="size">No published component</div><div id="comparison"></div><div id="assets"></div></div></section>
@@ -33,6 +35,8 @@ document.querySelector<HTMLDivElement>('#app')!.innerHTML = `
 document.body.insertAdjacentHTML('beforeend', `
 <dialog id="samples-dialog" class="ide-dialog"><form method="dialog"><header><div><h2>Open a sample</h2><p>Choose a complete project to open in the Playground.</p></div><button value="cancel" aria-label="Close">×</button></header><div id="sample-list" class="sample-list"></div></form></dialog>
 <dialog id="settings-dialog" class="ide-dialog settings-dialog"><form method="dialog"><header><div><h2>Playground settings</h2><p>Run and Publish use independent build profiles.</p></div><button value="cancel" aria-label="Close">×</button></header><div class="settings-grid"><section><h3>Run</h3><p>Optimize for the shortest edit and test loop.</p><label>Optimization <select id="run-optimization" aria-label="Run optimization"></select></label></section><section><h3>Publish</h3><p>Optimize the downloadable artifact.</p><label>Optimization <select id="optimization" aria-label="Publish optimization"></select></label></section><section class="compiler-settings"><h3>Compiler</h3><label>Language <select id="language" aria-label="Language"><option value="15">C# 15</option><option value="preview">C# 15 preview</option></select></label><label id="memory-safety-setting" class="feature-setting" hidden><input id="updated-memory-safety" type="checkbox"><span>Updated memory safety rules</span></label><button id="clear-cache" type="button">Clear compilation cache</button></section></div><footer><button value="cancel" class="primary">Done</button></footer></form></dialog>`);
+document.body.insertAdjacentHTML('beforeend', `
+<dialog id="archive-dialog" class="ide-dialog archive-dialog"><form method="dialog"><header><div><h2>Native library settings</h2><p id="archive-path"></p></div><button value="cancel" aria-label="Close">×</button></header><div class="archive-settings"><label>LibraryImport name<input id="archive-library-name" autocomplete="off" spellcheck="false"></label><p>This must match the name used by <code>[LibraryImport("…")]</code>. The archive is linked only when a reachable import uses it.</p></div><footer><button value="cancel">Cancel</button><button id="save-archive-settings" value="default" class="primary">Save</button></footer></form></dialog>`);
 const el = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id)! as T;
 el('playground-version').textContent = `v${__PLAYGROUND_VERSION__}`;
 const compileButton = el<HTMLButtonElement>('compile');
@@ -42,6 +46,7 @@ const downloadButton = el<HTMLButtonElement>('download');
 const clearCacheButton = el<HTMLButtonElement>('clear-cache');
 const samplesDialog = el<HTMLDialogElement>('samples-dialog');
 const settingsDialog = el<HTMLDialogElement>('settings-dialog');
+const archiveDialog = el<HTMLDialogElement>('archive-dialog');
 const runOptimizationSelect = el<HTMLSelectElement>('run-optimization');
 const optimizationSelect = el<HTMLSelectElement>('optimization');
 const languageSelect = el<HTMLSelectElement>('language');
@@ -61,10 +66,14 @@ const initialExample = examples[0];
 let project = createProject(initialExample.name, initialExample.files ?? [{ path: 'Program.cs', text: initialExample.source }], initialExample.id);
 const models = new Map<string, monaco.editor.ITextModel>();
 let switchingModel = false;
+const editorLanguage = (file: ProjectFile) => file.kind === 'csharp' ? 'csharp'
+  : file.kind === 'javascript' ? 'javascript' : file.kind === 'html' ? 'html' : 'plaintext';
+const editorText = (file: ProjectFile) => isTextProjectFile(file) ? file.text
+  : `WebAssembly static library\n\nPath: ${file.path}\nLibraryImport name: ${file.libraryName}\nTarget: ${file.target}\nObject files: ${validateWasmArchive(file.bytes, file.path)}\nSize: ${file.bytes.byteLength.toLocaleString()} bytes\n\nUse the Explorer gear button to edit the LibraryImport name.\n`;
 const modelFor = (file: ProjectFile) => {
   let model = models.get(file.id);
   if (!model) {
-    model = monaco.editor.createModel(file.text, 'csharp', monaco.Uri.parse(`inmemory://netwasm/${file.path}`));
+    model = monaco.editor.createModel(editorText(file), editorLanguage(file), monaco.Uri.parse(`inmemory://netwasm/${file.path}`));
     models.set(file.id, model);
   }
   return model;
@@ -121,6 +130,7 @@ function openFile(id: string) {
   project.activeFileId = id;
   switchingModel = true;
   editor.setModel(modelFor(file));
+  editor.updateOptions({ readOnly: !isTextProjectFile(file) });
   switchingModel = false;
   el('source-name').textContent = file.path;
   renderFiles();
@@ -135,6 +145,7 @@ function renderFiles() {
       button.className = `${className}${file.id === project.activeFileId ? ' active' : ''}`;
       button.textContent = file.path;
       button.dataset.fileId = file.id;
+      button.dataset.kind = file.kind;
       button.setAttribute('role', role);
       if (role === 'tab') button.setAttribute('aria-selected', String(file.id === project.activeFileId));
       button.onclick = () => openFile(file.id);
@@ -143,7 +154,10 @@ function renderFiles() {
   };
   render(el('file-tree'), 'file-item', 'treeitem');
   render(el('editor-tabs'), 'editor-tab', 'tab');
-  el<HTMLButtonElement>('delete-file').disabled = project.files.length === 1;
+  const selected = activeFile();
+  el<HTMLButtonElement>('archive-properties').disabled = selected.kind !== 'native-archive';
+  el<HTMLButtonElement>('delete-file').disabled = selected.kind === 'csharp' &&
+    project.files.filter(file => file.kind === 'csharp').length === 1;
   updateProjectStatus();
 }
 function replaceProject(next: PlaygroundProject) {
@@ -215,16 +229,29 @@ function showPreloadProgress(progress: ToolchainPreloadProgress) {
   el('toolchain-progress-detail').textContent = `${percentage}% · ${progress.completedBundles} of ${progress.totalBundles} bundles · ${formatMegabytes(progress.loadedBundleBytes)} of ${formatMegabytes(progress.totalBundleBytes)} loaded`;
   if (!active && el('status').textContent.startsWith('Preparing toolchain')) el('status').textContent = `Preparing toolchain · ${percentage}%`;
 }
-editor.onDidChangeModelContent(() => { if (switchingModel) return; const file = activeFile(); file.text = editor.getValue(); revision++; comparisons.clear(); showComparisons(); invalidateDownload(); setDiagnostics([]); scheduleSave(); el('status').textContent = unsupported ?? (active ? 'Project changed · result pending for earlier revision' : 'Project changed'); });
-function loadExample(recipeId: string) {
+editor.onDidChangeModelContent(() => { if (switchingModel) return; const file = activeFile(); if (!isTextProjectFile(file)) return; file.text = editor.getValue(); revision++; comparisons.clear(); showComparisons(); invalidateDownload(); setDiagnostics([]); scheduleSave(); el('status').textContent = unsupported ?? (active ? 'Project changed · result pending for earlier revision' : 'Project changed'); });
+async function loadExample(recipeId: string) {
   comparisons.clear(); showComparisons();
   const example = examples.find(candidate => candidate.id === recipeId);
   if (!example) return;
+  el('status').textContent = `Opening ${example.name}…`;
+  const files: ProjectFileSource[] = [...(example.files ?? [
+    { path: example.id === 'tunit' ? 'Tests.cs' : 'Program.cs', text: example.source },
+  ])];
+  try {
+    for (const asset of example.assets ?? []) {
+      const response = await fetch(new URL(`${import.meta.env.BASE_URL}${asset.publicPath}`, location.origin));
+      if (!response.ok) throw new Error(`Unable to load ${asset.path} (${response.status}).`);
+      if (asset.kind === 'native-archive') files.push({ path: asset.path, kind: asset.kind,
+        bytes: new Uint8Array(await response.arrayBuffer()), libraryName: asset.libraryName, target: asset.target });
+      else files.push({ path: asset.path, kind: asset.kind, text: await response.text() });
+    }
+  } catch (error) { el('status').textContent = errorSummary(error); return; }
   const previousRevision = revision;
   languageSelect.value = example.language ?? '15';
   updatedMemorySafety.checked = example.updatedMemorySafetyRules ?? false;
   memorySafetySetting.hidden = languageSelect.value !== 'preview';
-  const next = createProject(example.name, example.files ?? [{ path: example.id === 'tunit' ? 'Tests.cs' : 'Program.cs', text: example.source }], example.id);
+  const next = createProject(example.name, files, example.id);
   next.kind = example.kind ?? 'command';
   replaceProject(next);
   // A recipe change must invalidate its artifact even when the source is equal.
@@ -251,7 +278,7 @@ for (const category of categories) {
     const description = document.createElement('span');
     description.textContent = example.description ?? 'Open this sample project.';
     button.append(name, description);
-    button.onclick = () => loadExample(example.id);
+    button.onclick = () => void loadExample(example.id);
     section.append(button);
   }
   el('sample-list').append(section);
@@ -277,7 +304,10 @@ updatedMemorySafety.onchange = () => {
     ? 'Updated memory safety rules enabled'
     : 'Updated memory safety rules disabled';
 };
-function snapshot(run: boolean): SourceSnapshot { return { requestId: ++nextRequest, revision, files: project.files.map(file => ({ ...file })), recipeId: project.recipeId, optimization: (run ? runOptimizationSelect.value : optimizationSelect.value) as OptimizationMode, language: languageSelect.value as LanguageMode, updatedMemorySafetyRules: updatedMemorySafety.checked }; }
+function snapshot(run: boolean): SourceSnapshot { return { requestId: ++nextRequest, revision,
+  files: cloneProjectFiles(project.files), projectKind: project.kind, recipeId: project.recipeId,
+  optimization: (run ? runOptimizationSelect.value : optimizationSelect.value) as OptimizationMode,
+  language: languageSelect.value as LanguageMode, updatedMemorySafetyRules: updatedMemorySafety.checked }; }
 function request(run: boolean) { const job = { snapshot: snapshot(run), run }; selectDock('build'); if (active) { queued = job; el('status').textContent = 'Latest request queued'; } else void execute(job); }
 async function execute(job: { snapshot: SourceSnapshot; run: boolean }) {
   runOnly = job.run && !!compilation?.success && compilation.revision === job.snapshot.revision && compilation.optimization === job.snapshot.optimization && compilation.language === job.snapshot.language && compilation.updatedMemorySafetyRules === job.snapshot.updatedMemorySafetyRules;
@@ -347,29 +377,55 @@ async function importProjectFiles(uploadedFiles: readonly File[]) {
   for (const uploaded of uploadedFiles) {
     try {
       const path = normalizeProjectPath(uploaded.name);
-      if (!path.endsWith('.cs') || project.files.some(file => file.path === path)) throw new Error(`Cannot import ${path}.`);
-      imported.push({ id: crypto.randomUUID(), path, kind: 'csharp', text: await uploaded.text() });
+      if (project.files.some(file => file.path === path) || imported.some(file => file.path === path))
+        throw new Error(`A file named ${path} already exists.`);
+      const kind = projectFileKind(path);
+      if (kind === 'native-archive') imported.push({ id: crypto.randomUUID(), path, kind,
+        bytes: new Uint8Array(await uploaded.arrayBuffer()), libraryName: inferNativeLibraryName(path), target: 'wasm32' });
+      else imported.push({ id: crypto.randomUUID(), path, kind, text: await uploaded.text() });
     } catch (error) { el('status').textContent = errorSummary(error); }
   }
-  try { validateProjectFiles([...project.files, ...imported]); project.files.push(...imported); revision++; renderFiles(); invalidateDownload(); scheduleSave(); }
+  if (!imported.length) return;
+  try { validateProjectFiles([...project.files, ...imported]); project.files.push(...imported); revision++; renderFiles(); openFile(imported[0].id); invalidateDownload(); scheduleSave(); el('status').textContent = `Imported ${imported.length} validated project file${imported.length === 1 ? '' : 's'}`; }
   catch (error) { el('status').textContent = errorSummary(error); }
 }
 el<HTMLInputElement>('file-input').onchange = event => { const input = event.currentTarget as HTMLInputElement; void importProjectFiles([...(input.files ?? [])]); input.value = ''; };
 function renameActiveFile() {
   const file = activeFile();
   if (!file) return;
-  const answer = prompt('Rename C# file', file.path);
+  const answer = prompt('Rename project file', file.path);
   if (!answer) return;
-  try { const path = normalizeProjectPath(answer); if (!path.endsWith('.cs')) throw new Error('C# file paths must end in .cs.'); if (project.files.some(candidate => candidate !== file && candidate.path === path)) throw new Error(`A file named ${path} already exists.`); file.path = path; models.get(file.id)?.dispose(); models.delete(file.id); revision++; renderFiles(); openFile(file.id); invalidateDownload(); scheduleSave(); } catch (error) { el('status').textContent = errorSummary(error); }
+  try { const path = normalizeProjectPath(answer); if (projectFileKind(path) !== file.kind) throw new Error('The renamed file must keep the same file type.'); if (project.files.some(candidate => candidate !== file && candidate.path === path)) throw new Error(`A file named ${path} already exists.`); file.path = path; models.get(file.id)?.dispose(); models.delete(file.id); revision++; renderFiles(); openFile(file.id); invalidateDownload(); scheduleSave(); } catch (error) { el('status').textContent = errorSummary(error); }
 }
 function deleteActiveFile() {
-  if (project.files.length === 1) return;
   const file = activeFile();
+  if (file.kind === 'csharp' && project.files.filter(candidate => candidate.kind === 'csharp').length === 1) return;
   if (!file || !confirm(`Delete ${file.path}?`)) return;
   models.get(file.id)?.dispose(); models.delete(file.id); project.files = project.files.filter(candidate => candidate !== file); project.activeFileId = project.files[0].id; revision++; renderFiles(); openFile(project.activeFileId); invalidateDownload(); scheduleSave();
 }
 el<HTMLButtonElement>('rename-file').onclick = renameActiveFile;
 el<HTMLButtonElement>('delete-file').onclick = deleteActiveFile;
+let archiveSettingsFile: NativeArchiveProjectFile | undefined;
+el<HTMLButtonElement>('archive-properties').onclick = () => {
+  const file = activeFile();
+  if (file.kind !== 'native-archive') return;
+  archiveSettingsFile = file;
+  el('archive-path').textContent = `${file.path} · ${file.bytes.byteLength.toLocaleString()} bytes`;
+  el<HTMLInputElement>('archive-library-name').value = file.libraryName;
+  archiveDialog.showModal();
+  el<HTMLInputElement>('archive-library-name').focus();
+};
+el<HTMLButtonElement>('save-archive-settings').onclick = event => {
+  event.preventDefault();
+  if (!archiveSettingsFile) return;
+  try {
+    archiveSettingsFile.libraryName = validateNativeLibraryName(el<HTMLInputElement>('archive-library-name').value);
+    models.get(archiveSettingsFile.id)?.dispose(); models.delete(archiveSettingsFile.id);
+    revision++; openFile(archiveSettingsFile.id); invalidateDownload(); scheduleSave();
+    el('status').textContent = `Native library name set to ${archiveSettingsFile.libraryName}`;
+    archiveDialog.close();
+  } catch (error) { el('status').textContent = errorSummary(error); }
+};
 el('file-tree').addEventListener('dblclick', event => { const button = (event.target as HTMLElement).closest<HTMLButtonElement>('[data-file-id]'); if (button) { openFile(button.dataset.fileId!); renameActiveFile(); } });
 el('file-tree').addEventListener('keydown', event => {
   if (event.key !== 'Delete') return;
