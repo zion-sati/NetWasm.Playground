@@ -46,7 +46,7 @@ jobs:
       - run: npm ci
       - name: Install ${{ matrix.browser }}
         run: npx playwright install --with-deps "${{ matrix.browser }}"
-      - name: Qualify browser bootstrap, workers, cache, and Monaco input
+      - name: Qualify browser startup, navigation, workers, and Monaco input
         env:
           PLAYGROUND_BROWSER: ${{ matrix.browser }}
           PLAYGROUND_EVIDENCE: ${{ runner.temp }}/browser-compatibility
@@ -63,6 +63,7 @@ jobs:
           node eng/browser-smoke/cross-origin-isolation.mjs
           node eng/browser-smoke/editor-input.mjs
           node eng/browser-smoke/worker-channel.mjs
+          node eng/browser-smoke/back-navigation.mjs
 
   released-toolchain:
     if: github.event_name == 'pull_request'
