@@ -22,11 +22,21 @@ import { buildProjectArchive, projectArchiveName } from './project-archive';
 declare const __PLAYGROUND_VERSION__: string;
 
 (globalThis as typeof globalThis & { MonacoEnvironment: unknown }).MonacoEnvironment = { getWorker: () => new EditorWorker() };
+const icon = (body: string) => `<svg class="icon" aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${body}</svg>`;
+const icons = {
+  newFile: icon('<path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><path d="M14 3v6h6M12 13v6m-3-3h6"/>'),
+  upload: icon('<path d="M12 16V4m-4 4 4-4 4 4"/><path d="M5 15v4h14v-4"/>'),
+  settings: icon('<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1-2.8 2.8-.1-.1a1.7 1.7 0 0 0-1.9-.3 1.7 1.7 0 0 0-1 1.6v.2h-4V21a1.7 1.7 0 0 0-1-1.6 1.7 1.7 0 0 0-1.9.3l-.1.1L4.2 17l.1-.1a1.7 1.7 0 0 0 .3-1.9A1.7 1.7 0 0 0 3 14H2.8v-4H3a1.7 1.7 0 0 0 1.6-1 1.7 1.7 0 0 0-.3-1.9L4.2 7 7 4.2l.1.1A1.7 1.7 0 0 0 9 4.6 1.7 1.7 0 0 0 10 3V2.8h4V3a1.7 1.7 0 0 0 1 1.6 1.7 1.7 0 0 0 1.9-.3l.1-.1L19.8 7l-.1.1a1.7 1.7 0 0 0-.3 1.9 1.7 1.7 0 0 0 1.6 1h.2v4H21a1.7 1.7 0 0 0-1.6 1z"/>'),
+  rename: icon('<path d="M4 20h4l11-11-4-4L4 16v4zM13.5 6.5l4 4"/>'),
+  trash: icon('<path d="M4 7h16M9 7V4h6v3m3 0-1 14H7L6 7m4 4v6m4-6v6"/>'),
+  export: icon('<path d="M12 4v11m-4-4 4 4 4-4"/><path d="M5 15v5h14v-5"/>'),
+  close: icon('<path d="m7 7 10 10M17 7 7 17"/>'),
+};
 document.querySelector<HTMLDivElement>('#app')!.innerHTML = `
 <section class="workbench" aria-label="C# playground">
-  <div class="ide-toolbar"><button id="open-samples" class="project-button"><span>Project</span><strong id="project-name">Hello World</strong><span aria-hidden="true">⌄</span></button><div class="actions"><button id="run" class="primary">Run <span aria-hidden="true">▶</span></button><button id="compile"><span class="compile-spinner" aria-hidden="true"></span>Publish</button><button id="stop" disabled>Stop</button><button id="download" disabled>Download</button><button id="save-project" title="Save project as ZIP">Save ZIP</button><button id="settings-toggle">Settings</button></div></div>
+  <div class="ide-toolbar"><button id="open-samples" class="project-button"><span>Project</span><strong id="project-name">Hello World</strong><span aria-hidden="true">⌄</span></button><div class="actions"><button id="run" class="primary">Run <span aria-hidden="true">▶</span></button><button id="compile"><span class="compile-spinner" aria-hidden="true"></span>Publish</button><button id="stop" disabled>Stop</button><button id="download" title="Download published WebAssembly artifact" disabled>${icons.export}<span>Artifact(s)</span></button><button id="export-project" title="Export project to a ZIP archive">${icons.export}<span>Project</span></button><button id="settings-toggle" class="icon-button" title="Playground settings" aria-label="Playground settings">${icons.settings}</button></div></div>
   <div class="ide-grid">
-    <aside class="explorer"><div class="ide-heading"><strong>Explorer</strong><div><button id="new-file" title="New C# file">+</button><button id="import-files" title="Import project files">↑</button><button id="archive-properties" title="Native library settings" disabled>⚙</button><button id="rename-file" title="Rename selected file">✎</button><button id="delete-file" title="Delete selected file">×</button></div></div><input id="file-input" type="file" accept=".cs,.js,.mjs,.wit,.html,.htm,.txt,.a,text/plain,application/octet-stream" multiple hidden><div id="file-tree" role="tree" aria-label="Project files"></div></aside>
+    <aside class="explorer"><div class="ide-heading"><strong>Explorer</strong><div><button id="new-file" title="New file" aria-label="New file">${icons.newFile}</button><button id="import-files" title="Upload project files" aria-label="Upload project files">${icons.upload}</button><button id="archive-properties" title="Native library settings" aria-label="Native library settings" disabled>${icons.settings}</button><button id="rename-file" title="Rename selected file" aria-label="Rename selected file">${icons.rename}</button><button id="delete-file" title="Delete selected file" aria-label="Delete selected file">${icons.trash}</button></div></div><input id="file-input" type="file" accept=".cs,.js,.mjs,.wit,.html,.htm,.txt,.a,text/plain,application/octet-stream" multiple hidden><div id="file-tree" role="tree" aria-label="Project files"></div></aside>
     <section class="editor-area"><div id="editor-tabs" class="editor-tabs" role="tablist"></div><div class="pane-heading"><h2 id="source-name">Program.cs</h2><span>C# · Release</span></div><div id="editor" aria-label="C# source editor"></div></section>
   </div>
   <section id="bottom-dock" class="bottom-dock"><div id="dock-resize" class="dock-resize" aria-hidden="true"></div><div class="dock-tabs" role="tablist"><button data-panel="problems">Problems <span id="diagnostic-count">0</span></button><button data-panel="console" class="active">Console</button><button data-panel="build">Build</button><button data-panel="artifacts">Artifacts</button><span id="exit"></span><button id="dock-collapse" title="Collapse panel" aria-label="Collapse bottom panel" aria-expanded="true">⌄</button></div><div id="problems-panel" class="dock-panel"><div id="diagnostics" aria-label="Compiler diagnostics"><p class="empty">Run or publish to check your project.</p></div></div><div id="console-panel" class="dock-panel active"><pre id="output" tabindex="0" aria-label="Program output"></pre></div><div id="build-panel" class="dock-panel"><ol id="stages" aria-label="Pipeline progress"></ol><div id="timings"></div><div id="optimizer"></div></div><div id="artifacts-panel" class="dock-panel"><div id="size">No published component</div><div id="comparison"></div><div id="assets"></div></div></section>
@@ -37,6 +47,7 @@ document.body.insertAdjacentHTML('beforeend', `
 <dialog id="samples-dialog" class="ide-dialog"><form method="dialog"><header><div><h2>Open a sample</h2><p>Choose a complete project to open in the Playground.</p></div><button value="cancel" aria-label="Close">×</button></header><div id="sample-list" class="sample-list"></div></form></dialog>
 <dialog id="settings-dialog" class="ide-dialog settings-dialog"><form method="dialog"><header><div><h2>Playground settings</h2><p>Run and Publish use independent build profiles.</p></div><button value="cancel" aria-label="Close">×</button></header><div class="settings-grid"><section><h3>Run</h3><p>Optimize for the shortest edit and test loop.</p><label>Optimization <select id="run-optimization" aria-label="Run optimization"></select></label></section><section><h3>Publish</h3><p>Optimize the downloadable artifact.</p><label>Optimization <select id="optimization" aria-label="Publish optimization"></select></label></section><section class="compiler-settings"><h3>Compiler</h3><label>Language <select id="language" aria-label="Language"><option value="15">C# 15</option><option value="preview">C# 15 preview</option></select></label><label id="memory-safety-setting" class="feature-setting" hidden><input id="updated-memory-safety" type="checkbox"><span>Updated memory safety rules</span></label><button id="clear-cache" type="button">Clear compilation cache</button></section></div><footer><button value="cancel" class="primary">Done</button></footer></form></dialog>`);
 document.body.insertAdjacentHTML('beforeend', `
+<dialog id="file-dialog" class="ide-dialog file-dialog"><form method="dialog"><header><div><h2 id="file-dialog-title">New file</h2><p>Enter a project-relative path. The extension selects the file type.</p></div><button value="cancel" aria-label="Close">×</button></header><div class="file-settings"><label>File path<input id="file-path" autocomplete="off" spellcheck="false" placeholder="Helpers/Value.cs"></label><p id="file-dialog-error" class="dialog-error" role="alert"></p></div><footer><button value="cancel" class="secondary">Cancel</button><button id="save-file" value="default" class="primary">Create</button></footer></form></dialog>
 <dialog id="archive-dialog" class="ide-dialog archive-dialog"><form method="dialog"><header><div><h2>Native library settings</h2><p id="archive-path"></p></div><button value="cancel" aria-label="Close">×</button></header><div class="archive-settings"><label>LibraryImport name<input id="archive-library-name" autocomplete="off" spellcheck="false"></label><p>This must match the name used by <code>[LibraryImport("…")]</code>. The archive is linked only when a reachable import uses it.</p></div><footer><button value="cancel">Cancel</button><button id="save-archive-settings" value="default" class="primary">Save</button></footer></form></dialog>`);
 const el = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id)! as T;
 el('playground-version').textContent = `v${__PLAYGROUND_VERSION__}`;
@@ -47,6 +58,7 @@ const downloadButton = el<HTMLButtonElement>('download');
 const clearCacheButton = el<HTMLButtonElement>('clear-cache');
 const samplesDialog = el<HTMLDialogElement>('samples-dialog');
 const settingsDialog = el<HTMLDialogElement>('settings-dialog');
+const fileDialog = el<HTMLDialogElement>('file-dialog');
 const archiveDialog = el<HTMLDialogElement>('archive-dialog');
 const runOptimizationSelect = el<HTMLSelectElement>('run-optimization');
 const optimizationSelect = el<HTMLSelectElement>('optimization');
@@ -66,6 +78,7 @@ const colorScheme = window.matchMedia('(prefers-color-scheme: dark)');
 const initialExample = examples[0];
 let project = createProject(initialExample.name, initialExample.files ?? [{ path: 'Program.cs', text: initialExample.source }], initialExample.id);
 const models = new Map<string, monaco.editor.ITextModel>();
+let openFileIds = [project.activeFileId];
 let switchingModel = false;
 const editorLanguage = (file: ProjectFile) => file.kind === 'csharp' ? 'csharp'
   : file.kind === 'javascript' ? 'javascript' : file.kind === 'html' ? 'html' : 'plaintext';
@@ -117,7 +130,7 @@ const formatAssets = (assets: { rawBytes: number; compressedBytes?: number }) =>
   assets.compressedBytes === undefined
     ? `Tool assets: ${formatBytes(assets.rawBytes)} uncompressed · Brotli-11 size unavailable`
     : `Tool assets: ${formatBytes(assets.compressedBytes)} Brotli-11 · ${formatBytes(assets.rawBytes)} uncompressed`;
-const activeFile = () => project.files.find(file => file.id === project.activeFileId) ?? project.files[0];
+const activeFile = () => project.files.find(file => file.id === project.activeFileId);
 function scheduleSave() {
   if (saveTimer) clearTimeout(saveTimer);
   saveTimer = window.setTimeout(() => void saveProject(project).then(() => {
@@ -128,6 +141,7 @@ function updateProjectStatus() { el('project-status').textContent = `${project.f
 function openFile(id: string) {
   const file = project.files.find(candidate => candidate.id === id);
   if (!file) return;
+  if (!openFileIds.includes(id)) openFileIds.push(id);
   project.activeFileId = id;
   switchingModel = true;
   editor.setModel(modelFor(file));
@@ -138,26 +152,64 @@ function openFile(id: string) {
   editor.focus();
   scheduleSave();
 }
+function closeFileTab(id: string) {
+  const index = openFileIds.indexOf(id);
+  if (index < 0) return;
+  openFileIds.splice(index, 1);
+  if (project.activeFileId !== id) { renderFiles(); return; }
+  const nextId = openFileIds[Math.min(index, openFileIds.length - 1)];
+  if (nextId) { openFile(nextId); return; }
+  project.activeFileId = '';
+  switchingModel = true;
+  editor.setModel(null);
+  switchingModel = false;
+  el('source-name').textContent = 'No file open';
+  renderFiles();
+  scheduleSave();
+}
 function renderFiles() {
-  const render = (container: HTMLElement, className: string, role: 'treeitem' | 'tab') => {
-    container.replaceChildren();
-    for (const file of project.files) {
-      const button = document.createElement('button');
-      button.className = `${className}${file.id === project.activeFileId ? ' active' : ''}`;
-      button.textContent = file.path;
-      button.dataset.fileId = file.id;
-      button.dataset.kind = file.kind;
-      button.setAttribute('role', role);
-      if (role === 'tab') button.setAttribute('aria-selected', String(file.id === project.activeFileId));
-      button.onclick = () => openFile(file.id);
-      container.append(button);
-    }
-  };
-  render(el('file-tree'), 'file-item', 'treeitem');
-  render(el('editor-tabs'), 'editor-tab', 'tab');
+  const tree = el('file-tree');
+  tree.replaceChildren();
+  for (const file of project.files) {
+    const button = document.createElement('button');
+    button.className = `file-item${file.id === project.activeFileId ? ' active' : ''}`;
+    button.textContent = file.path;
+    button.dataset.fileId = file.id;
+    button.dataset.kind = file.kind;
+    button.setAttribute('role', 'treeitem');
+    button.onclick = () => openFile(file.id);
+    tree.append(button);
+  }
+  const tabs = el('editor-tabs');
+  tabs.replaceChildren();
+  for (const id of openFileIds) {
+    const file = project.files.find(candidate => candidate.id === id);
+    if (!file) continue;
+    const tab = document.createElement('div');
+    tab.className = `editor-tab${file.id === project.activeFileId ? ' active' : ''}`;
+    tab.dataset.fileId = file.id;
+    tab.dataset.kind = file.kind;
+    tab.setAttribute('role', 'tab');
+    tab.setAttribute('aria-selected', String(file.id === project.activeFileId));
+    tab.onauxclick = event => { if (event.button === 1) { event.preventDefault(); closeFileTab(file.id); } };
+    const label = document.createElement('button');
+    label.className = 'editor-tab-label';
+    label.textContent = file.path;
+    label.title = file.path;
+    label.onclick = () => openFile(file.id);
+    const close = document.createElement('button');
+    close.className = 'editor-tab-close';
+    close.title = `Close ${file.path}`;
+    close.setAttribute('aria-label', `Close ${file.path}`);
+    close.innerHTML = icons.close;
+    close.onclick = event => { event.stopPropagation(); closeFileTab(file.id); };
+    tab.append(label, close);
+    tabs.append(tab);
+  }
   const selected = activeFile();
-  el<HTMLButtonElement>('archive-properties').disabled = selected.kind !== 'native-archive';
-  el<HTMLButtonElement>('delete-file').disabled = selected.kind === 'csharp' &&
+  el<HTMLButtonElement>('archive-properties').disabled = selected?.kind !== 'native-archive';
+  el<HTMLButtonElement>('rename-file').disabled = !selected;
+  el<HTMLButtonElement>('delete-file').disabled = !selected || selected.kind === 'csharp' &&
     project.files.filter(file => file.kind === 'csharp').length === 1;
   updateProjectStatus();
 }
@@ -165,6 +217,8 @@ function replaceProject(next: PlaygroundProject) {
   for (const model of models.values()) model.dispose();
   models.clear();
   project = next;
+  if (!project.files.some(file => file.id === project.activeFileId)) project.activeFileId = project.files[0].id;
+  openFileIds = [project.activeFileId];
   el('project-name').textContent = project.name;
   revision++;
   comparisons.clear(); showComparisons(); invalidateDownload();
@@ -240,7 +294,7 @@ function showPreloadProgress(progress: ToolchainPreloadProgress) {
   el('toolchain-progress-detail').textContent = `${percentage}% · ${progress.completedBundles} of ${progress.totalBundles} bundles · ${formatMegabytes(progress.loadedBundleBytes)} of ${formatMegabytes(progress.totalBundleBytes)} loaded`;
   if (!active && el('status').textContent.startsWith('Preparing toolchain')) el('status').textContent = `Preparing toolchain · ${percentage}%`;
 }
-editor.onDidChangeModelContent(() => { if (switchingModel) return; const file = activeFile(); if (!isTextProjectFile(file)) return; file.text = editor.getValue(); revision++; comparisons.clear(); showComparisons(); invalidateDownload(); setDiagnostics([]); scheduleSave(); el('status').textContent = unsupported ?? (active ? 'Project changed · result pending for earlier revision' : 'Project changed'); });
+editor.onDidChangeModelContent(() => { if (switchingModel) return; const file = activeFile(); if (!file || !isTextProjectFile(file)) return; file.text = editor.getValue(); revision++; comparisons.clear(); showComparisons(); invalidateDownload(); setDiagnostics([]); scheduleSave(); el('status').textContent = unsupported ?? (active ? 'Project changed · result pending for earlier revision' : 'Project changed'); });
 async function loadExample(recipeId: string) {
   comparisons.clear(); showComparisons();
   const example = examples.find(candidate => candidate.id === recipeId);
@@ -368,21 +422,40 @@ compileButton.onclick = () => request(false);
 runButton.onclick = () => request(true);
 stopButton.onclick = () => { stopped = true; queued = undefined; pipeline?.stop(); stopButton.disabled = true; el('status').textContent = 'Stopped'; };
 downloadButton.onclick = () => { if (!downloadUrl || publishedCompilation?.revision !== revision) return; const anchor = document.createElement('a'); anchor.href = downloadUrl; anchor.download = `program-${publishedCompilation.optimization ?? 'Oz'}.wasm`; anchor.click(); };
-el<HTMLButtonElement>('save-project').onclick = () => {
+type ProjectSaveHandle = { createWritable(): Promise<{ write(data: Blob): Promise<void>; close(): Promise<void> }> };
+type ProjectSavePicker = (options: { suggestedName: string; types: { description: string; accept: Record<string, string[]> }[] }) => Promise<ProjectSaveHandle>;
+async function exportProject() {
   const archive = buildProjectArchive(project, {
     language: languageSelect.value as LanguageMode,
     updatedMemorySafetyRules: updatedMemorySafety.checked,
     runOptimization: runOptimizationSelect.value as OptimizationMode,
     publishOptimization: optimizationSelect.value as OptimizationMode,
   });
+  const filename = projectArchiveName(project.name);
+  const blob = new Blob([archive.buffer as ArrayBuffer], { type: 'application/zip' });
+  const savePicker = (window as typeof window & { showSaveFilePicker?: ProjectSavePicker }).showSaveFilePicker;
+  if (savePicker) {
+    try {
+      const handle = await savePicker.call(window, { suggestedName: filename, types: [{ description: 'ZIP archive', accept: { 'application/zip': ['.zip'] } }] });
+      const writable = await handle.createWritable();
+      await writable.write(blob);
+      await writable.close();
+      el('status').textContent = `Exported ${filename}`;
+    } catch (error) {
+      if (error instanceof DOMException && error.name === 'AbortError') return;
+      el('status').textContent = errorSummary(error);
+    }
+    return;
+  }
   const url = URL.createObjectURL(new Blob([archive.buffer as ArrayBuffer], { type: 'application/zip' }));
   const anchor = document.createElement('a');
   anchor.href = url;
-  anchor.download = projectArchiveName(project.name);
+  anchor.download = filename;
   anchor.click();
   setTimeout(() => URL.revokeObjectURL(url), 0);
-  el('status').textContent = `Saved ${anchor.download}`;
-};
+  el('status').textContent = `Exported ${filename}`;
+}
+el<HTMLButtonElement>('export-project').onclick = () => { void exportProject(); };
 el<HTMLButtonElement>('settings-toggle').onclick = () => settingsDialog.showModal();
 for (const button of document.querySelectorAll<HTMLButtonElement>('.dock-tabs [data-panel]')) button.onclick = () => selectDock(button.dataset.panel!);
 el<HTMLButtonElement>('dock-collapse').onclick = () => {
@@ -390,16 +463,50 @@ el<HTMLButtonElement>('dock-collapse').onclick = () => {
   setDockCollapsed(collapsed);
   localStorage.setItem('netwasm.dockCollapsed', String(collapsed));
 };
-el<HTMLButtonElement>('new-file').onclick = () => {
-  const suggested = `File${project.files.length + 1}.cs`;
-  const answer = prompt('New C# file path', suggested);
-  if (!answer) return;
+let fileDialogMode: 'new' | 'rename' = 'new';
+let fileDialogFile: ProjectFile | undefined;
+function showFileDialog(mode: 'new' | 'rename', file?: ProjectFile) {
+  fileDialogMode = mode;
+  fileDialogFile = file;
+  const creating = mode === 'new';
+  el('file-dialog-title').textContent = creating ? 'New file' : 'Rename file';
+  el<HTMLButtonElement>('save-file').textContent = creating ? 'Create' : 'Rename';
+  el<HTMLInputElement>('file-path').value = creating ? `File${project.files.length + 1}.cs` : file?.path ?? '';
+  el('file-dialog-error').textContent = '';
+  fileDialog.showModal();
+  el<HTMLInputElement>('file-path').focus();
+  el<HTMLInputElement>('file-path').select();
+}
+el<HTMLButtonElement>('new-file').onclick = () => showFileDialog('new');
+el<HTMLButtonElement>('save-file').onclick = event => {
+  event.preventDefault();
   try {
-    const path = normalizeProjectPath(answer.endsWith('.cs') ? answer : `${answer}.cs`);
-    if (project.files.some(file => file.path === path)) throw new Error(`A file named ${path} already exists.`);
-    const file: ProjectFile = { id: crypto.randomUUID(), path, kind: 'csharp', text: '' };
-    validateProjectFiles([...project.files, file]); project.files.push(file); revision++; renderFiles(); openFile(file.id); invalidateDownload(); scheduleSave();
-  } catch (error) { el('status').textContent = errorSummary(error); }
+    const input = el<HTMLInputElement>('file-path').value.trim();
+    const path = normalizeProjectPath(fileDialogMode === 'new' && !input.includes('.') ? `${input}.cs` : input);
+    if (fileDialogMode === 'new') {
+      if (project.files.some(file => file.path === path)) throw new Error(`A file named ${path} already exists.`);
+      const kind = projectFileKind(path);
+      if (kind === 'native-archive') throw new Error('Upload validated .a files with the upload button or drag and drop.');
+      const file: ProjectFile = { id: crypto.randomUUID(), path, kind, text: '' };
+      validateProjectFiles([...project.files, file]);
+      project.files.push(file);
+      revision++;
+      openFile(file.id);
+    } else {
+      const file = fileDialogFile;
+      if (!file) return;
+      if (projectFileKind(path) !== file.kind) throw new Error('The renamed file must keep the same file type.');
+      if (project.files.some(candidate => candidate !== file && candidate.path === path)) throw new Error(`A file named ${path} already exists.`);
+      file.path = path;
+      models.get(file.id)?.dispose();
+      models.delete(file.id);
+      revision++;
+      openFile(file.id);
+    }
+    fileDialog.close();
+    invalidateDownload();
+    scheduleSave();
+  } catch (error) { el('file-dialog-error').textContent = errorSummary(error); }
 };
 el<HTMLButtonElement>('import-files').onclick = () => el<HTMLInputElement>('file-input').click();
 async function importProjectFiles(uploadedFiles: readonly File[]) {
@@ -423,22 +530,21 @@ el<HTMLInputElement>('file-input').onchange = event => { const input = event.cur
 function renameActiveFile() {
   const file = activeFile();
   if (!file) return;
-  const answer = prompt('Rename project file', file.path);
-  if (!answer) return;
-  try { const path = normalizeProjectPath(answer); if (projectFileKind(path) !== file.kind) throw new Error('The renamed file must keep the same file type.'); if (project.files.some(candidate => candidate !== file && candidate.path === path)) throw new Error(`A file named ${path} already exists.`); file.path = path; models.get(file.id)?.dispose(); models.delete(file.id); revision++; renderFiles(); openFile(file.id); invalidateDownload(); scheduleSave(); } catch (error) { el('status').textContent = errorSummary(error); }
+  showFileDialog('rename', file);
 }
 function deleteActiveFile() {
   const file = activeFile();
+  if (!file) return;
   if (file.kind === 'csharp' && project.files.filter(candidate => candidate.kind === 'csharp').length === 1) return;
-  if (!file || !confirm(`Delete ${file.path}?`)) return;
-  models.get(file.id)?.dispose(); models.delete(file.id); project.files = project.files.filter(candidate => candidate !== file); project.activeFileId = project.files[0].id; revision++; renderFiles(); openFile(project.activeFileId); invalidateDownload(); scheduleSave();
+  if (!confirm(`Delete ${file.path}?`)) return;
+  models.get(file.id)?.dispose(); models.delete(file.id); project.files = project.files.filter(candidate => candidate !== file); openFileIds = openFileIds.filter(id => id !== file.id); project.activeFileId = project.files[0].id; revision++; openFile(project.activeFileId); invalidateDownload(); scheduleSave();
 }
 el<HTMLButtonElement>('rename-file').onclick = renameActiveFile;
 el<HTMLButtonElement>('delete-file').onclick = deleteActiveFile;
 let archiveSettingsFile: NativeArchiveProjectFile | undefined;
 el<HTMLButtonElement>('archive-properties').onclick = () => {
   const file = activeFile();
-  if (file.kind !== 'native-archive') return;
+  if (!file || file.kind !== 'native-archive') return;
   archiveSettingsFile = file;
   el('archive-path').textContent = `${file.path} · ${file.bytes.byteLength.toLocaleString()} bytes`;
   el<HTMLInputElement>('archive-library-name').value = file.libraryName;
@@ -464,6 +570,9 @@ el('file-tree').addEventListener('keydown', event => {
 el('file-tree').addEventListener('dragover', event => { event.preventDefault(); el('file-tree').classList.add('drop-target'); });
 el('file-tree').addEventListener('dragleave', () => el('file-tree').classList.remove('drop-target'));
 el('file-tree').addEventListener('drop', event => { event.preventDefault(); el('file-tree').classList.remove('drop-target'); void importProjectFiles([...(event.dataTransfer?.files ?? [])]); });
+for (const dialog of [samplesDialog, settingsDialog, fileDialog, archiveDialog]) {
+  dialog.addEventListener('click', event => { if (event.target === dialog) dialog.close('cancel'); });
+}
 const dockHeight = Number(localStorage.getItem('netwasm.dockHeight'));
 if (dockHeight >= 140 && dockHeight <= 500) el('bottom-dock').style.setProperty('--dock-height', `${dockHeight}px`);
 el('dock-resize').addEventListener('pointerdown', event => {

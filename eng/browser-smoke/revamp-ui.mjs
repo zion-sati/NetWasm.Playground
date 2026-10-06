@@ -9,11 +9,29 @@ assert.doesNotMatch(html, /Console\.WriteLine\(42\)/,
 const browser = await chromium.launch({ headless: true });
 try {
   const page = await browser.newPage({ acceptDownloads: true });
+  await page.addInitScript(() => {
+    Object.defineProperty(window, 'showSaveFilePicker', {
+      configurable: true,
+      value: async options => {
+        window.__projectSaveOptions = options;
+        return { createWritable: async () => ({
+          write: async blob => { window.__projectSaveBytes = [...new Uint8Array(await blob.arrayBuffer()).subarray(0, 4)]; },
+          close: async () => { window.__projectSaveClosed = true; },
+        }) };
+      },
+    });
+  });
   const errors = [];
   page.on('pageerror', error => errors.push(String(error)));
   await page.route('**/toolchain/**', route => route.abort());
   await page.goto(root);
   await page.locator('.monaco-editor').waitFor();
+  assert.equal(await page.title(), 'Compile C# 15 to WebAssembly in your browser | NetWasm Playground');
+  assert.equal(await page.locator('h1').textContent(), 'Compile C# 15 to WebAssembly in your browser');
+  assert.equal(await page.locator('.github-link span').textContent(), 'NetWasm');
+  assert.equal(await page.locator('#download span').textContent(), 'Artifact(s)');
+  assert.equal(await page.locator('#export-project span').textContent(), 'Project');
+  assert.equal(await page.locator('#settings-toggle .icon').count(), 1);
   await page.setViewportSize({ width: 390, height: 844 });
   assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth), true,
     'The expanded toolbar overflows a narrow viewport');
@@ -42,6 +60,10 @@ try {
 
   await page.locator('#settings-toggle').click();
   assert.equal(await page.locator('#settings-dialog').evaluate(dialog => dialog.open), true);
+  await page.mouse.click(2, 2);
+  assert.equal(await page.locator('#settings-dialog').evaluate(dialog => dialog.open), false,
+    'Clicking outside a modal did not dismiss it');
+  await page.locator('#settings-toggle').click();
   assert.equal(await page.locator('#run-optimization').inputValue(), 'none');
   assert.equal(await page.locator('#optimization').inputValue(), 'Oz');
   await page.locator('#run-optimization').selectOption('O1');
@@ -58,16 +80,26 @@ try {
     publish: localStorage.getItem('netwasm.publishOptimization'),
   })), { run: 'O1', publish: 'Os' });
   await page.locator('#settings-dialog footer button').click();
-  const downloadEvent = page.waitForEvent('download');
-  await page.locator('#save-project').click();
-  const download = await downloadEvent;
-  assert.equal(download.suggestedFilename(), 'Hello-World.zip');
-  const chunks = [];
-  for await (const chunk of await download.createReadStream()) chunks.push(chunk);
-  const archive = Buffer.concat(chunks);
-  assert.deepEqual([...archive.subarray(0, 4)], [0x50, 0x4b, 0x03, 0x04]);
+  await page.locator('#export-project').click();
+  await page.waitForFunction(() => window.__projectSaveClosed === true);
+  assert.deepEqual(await page.evaluate(() => ({
+    name: window.__projectSaveOptions.suggestedName,
+    bytes: window.__projectSaveBytes,
+  })), { name: 'Hello-World.zip', bytes: [0x50, 0x4b, 0x03, 0x04] });
+
+  await page.locator('#new-file').click();
+  assert.equal(await page.locator('#file-dialog').evaluate(dialog => dialog.open), true);
+  await page.locator('#file-path').fill('Helpers/Value.cs');
+  await page.locator('#save-file').click();
+  assert.equal(await page.locator('#file-tree .file-item', { hasText: 'Helpers/Value.cs' }).count(), 1);
+  const helperTab = page.locator('.editor-tab', { hasText: 'Helpers/Value.cs' });
+  assert.equal(await helperTab.count(), 1);
+  await helperTab.click({ button: 'middle' });
+  assert.equal(await helperTab.count(), 0, 'Middle-click did not close the editor tab');
+  assert.equal(await page.locator('#file-tree .file-item', { hasText: 'Helpers/Value.cs' }).count(), 1,
+    'Closing a tab removed the project file');
   assert.deepEqual(errors, []);
-  console.log('PASS: static sample removed, modal flows, persisted profiles, dock toggle and project ZIP');
+  console.log('PASS: C# 15 identity, modal flows, persisted profiles, dock toggle, native project export and closable tabs');
 } finally {
   await browser.close();
 }
