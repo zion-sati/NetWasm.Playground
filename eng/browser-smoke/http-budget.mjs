@@ -1,4 +1,4 @@
-import { openSample } from './playground-ui.mjs';
+import { openSample, setOptimizations } from './playground-ui.mjs';
 import { chromium } from 'playwright';
 
 const source = `using System;
@@ -57,7 +57,7 @@ try {
       uploads.push(request.method());
   });
   await page.goto(process.env.PLAYGROUND_URL ?? 'http://127.0.0.1:4173/');
-  await page.locator('#optimization').selectOption('none');
+  await setOptimizations(page, 'none');
   await openSample(page, 'http');
   await page.locator('#editor .view-lines').click({ position: { x: 80, y: 12 } });
   await page.keyboard.press('ControlOrMeta+A');
