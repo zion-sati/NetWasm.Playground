@@ -11,12 +11,13 @@ Editable examples cover Hello World, allocation and guest GC, LINQ, read-only
 JSON parsing, source-generated JSON serialization, regular expressions,
 constructor-based dependency injection, CRC32 hashing, and TUnit tests.
 
-The Optimization dropdown exposes Binaryen's `-O0` through `-O3`, `-Os` and
-`-Oz` settings, plus a None option that skips `wasm-opt` for the quickest
-iteration. The page retains each setting's build time and component size for
-the current source so the tradeoff can be compared directly. C# remains a
-Release compilation for every setting; this control changes the final
-WebAssembly optimization pass.
+The Settings dialog contains independent Run and Publish profiles. Run defaults
+to no final optimization for the quickest edit/test loop; Publish defaults to
+Binaryen `-Oz` for the smallest download. Both profiles also expose `-O0`
+through `-O3` and `-Os`. The page retains each setting's build time and
+component size for the current source so the tradeoff can be compared directly.
+C# remains a Release compilation for every setting; these controls change the
+final WebAssembly optimization pass.
 
 The browser compiler uses NativeAOT-LLVM in a dedicated worker. When the page
 has cross-origin isolation and shared WebAssembly memory, `wasm-opt` uses a
@@ -93,15 +94,39 @@ npm run typecheck
 PLAYGROUND_URL=http://127.0.0.1:5173/playground/ PLAYGROUND_EVIDENCE=.cache/ui-smoke node eng/browser-smoke/ui.mjs
 ```
 
-Compile and Run disable while a job is active; Stop remains available. A
-spinner and numbered status show the current operation across eight steps for
-Compile + Run, seven for Compile, or one for an unchanged component rerun.
+Publish and Run disable while a job is active; Stop remains available. The
+status bar names the active phase and reports its elapsed time instead of
+guessing a fixed step number. Run uses the fastest profile; Publish uses the
+selected optimization and enables the component download.
 `eng/browser-smoke/progress.mjs` checks these states and Stop recovery.
+
+The workbench stores one bounded project in IndexedDB. Its Explorer supports
+new files, multi-file import, drag and drop, rename, and delete. Every C# file
+is compiled as a separate Roslyn syntax tree, so diagnostics retain their
+project path. `eng/browser-smoke/multifile.mjs` qualifies a two-file run,
+publish, and path-aware compiler error.
+
+Compiler preferences, independent Run and Publish optimization profiles, and
+the bottom-dock layout are stored in browser local storage. **Project** exports
+the current project to a ZIP without compiling it. Supporting browsers open a
+native save dialog; other browsers use their normal download flow. The
+deterministic ZIP contains
+every text and binary project file plus `netwasm-project.json`, which records
+the project kind, native-library metadata, language options, and build profiles.
+No project source or archive bytes are uploaded.
+
+Native archives remain binary project assets and are validated as WebAssembly
+archives before entering the workspace. The LZ4 sample compiles a real `.a`
+library through `LibraryImport`; `eng/browser-smoke/native-library.mjs` covers
+archive rejection, library naming, compilation, and execution. The JSExport
+worker sample runs its managed export in a dedicated Web Worker and supplies
+its JavaScript import module from the project. The corresponding end-to-end
+check is `eng/browser-smoke/web-worker.mjs`.
 
 After the editor mounts, the Playground starts the compiler, linker and tools
 in background workers and fetches four phase-specific binary bundles for the
 compiler, linker, WebAssembly tools and guest runtime. The browser-addressable
-module graph is collapsed to 12 entry files. CI names every bundle
+module graph is collapsed to a small set of browser entry modules. CI names every bundle
 `<phase>.<sha256>.bin` and records that immutable URL in the generated manifest.
 Each whole bundle and every asset slice are checked against the manifest before
 use. Compile and Run remain available while this is happening; an early click joins the same worker
@@ -183,10 +208,20 @@ Focused development-server checks:
 
 ```sh
 NETWASM_VERSION="$(python3 -c 'import json; print(json.load(open("eng/upstream-sources.json"))["sources"]["netwasm"]["packageVersion"])')"
+PLAYGROUND_URL=http://127.0.0.1:5178/ node eng/browser-smoke/revamp-ui.mjs
+PLAYGROUND_URL=http://127.0.0.1:5178/ node eng/browser-smoke/multifile.mjs
+PLAYGROUND_URL=http://127.0.0.1:5178/ node eng/browser-smoke/native-library.mjs
+PLAYGROUND_URL=http://127.0.0.1:5178/ node eng/browser-smoke/web-worker.mjs
 PLAYGROUND_URL=http://127.0.0.1:5173/playground/ node eng/browser-smoke/worker-channel.mjs
 PLAYGROUND_URL=http://127.0.0.1:5173/playground/ PLAYGROUND_EVIDENCE=<evidence-dir> PLAYGROUND_WASM_TOOLS=<verified-baseline>/packages/netwasm.toolchain/$NETWASM_VERSION/tools/wasm-tools node eng/browser-smoke/reliability.mjs
 PLAYGROUND_URL=http://127.0.0.1:5173/playground/ PLAYGROUND_EVIDENCE=<evidence-dir> node eng/browser-smoke/resource.mjs
 ```
+
+The first four commands qualify this revamp against a local development server
+started with `npm run dev -- --port 5178`: the modal UI and separate profiles,
+multi-file compilation, uploaded/native `LibraryImport`, and the JSExport Web
+Worker execution path. They require the ignored `public/toolchain/` assets to
+have been prepared as described above.
 
 The resource check samples owned Chromium processes with `ps`. For a production
 preview, use `eng/browser-smoke/browsers.mjs` with `PLAYGROUND_URL` and

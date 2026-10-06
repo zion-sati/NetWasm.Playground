@@ -1,3 +1,4 @@
+import { openSample, setOptimizations } from './playground-ui.mjs';
 import { browserName, browserType } from './engine.mjs';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { examples } from '../../src/examples.ts';
@@ -10,11 +11,10 @@ try {
   const page = await browser.newPage();
   await page.goto(process.env.PLAYGROUND_URL ?? 'http://127.0.0.1:4173/');
   await page.locator('.monaco-editor').waitFor();
-  await page.getByLabel('Optimization', { exact: true }).selectOption('none');
-  await page.getByLabel('Example', { exact: true }).selectOption('tunit');
+  await setOptimizations(page, 'none');
+  await openSample(page, 'tunit');
   const source = examples.find(example => example.id === 'tunit')?.source;
   if (!source?.includes('IsEqualTo(42)')) throw new Error('TUnit source anchor is missing');
-  await page.waitForFunction(() => document.querySelector('#editor .view-lines')?.textContent?.includes('IsEqualTo(42)'));
   await page.locator('#editor textarea').focus();
   await page.keyboard.press(browserName === 'webkit' ? 'Meta+f' : 'ControlOrMeta+f');
   const find = page.getByLabel('Find', { exact: true });

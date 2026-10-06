@@ -7,7 +7,7 @@ const toBase64 = bytes => {
   return btoa(text);
 };
 const fromBase64 = text => Uint8Array.from(atob(text), character => character.charCodeAt(0));
-const coreRecipes = new Set(['hello', 'span-memory-unsafe', 'datetime', 'csharp15-tour']);
+const coreRecipes = new Set(['hello', 'multi-file', 'span-memory-unsafe', 'datetime', 'csharp15-tour', 'native-lz4', 'web-worker']);
 const generatedRecipes = new Set(['json-generated', 'tunit', 'di', 'logging']);
 const validStringArray = (value, maximumLength = 256) => Array.isArray(value) &&
   value.length <= maximumLength && value.every(item => typeof item === 'string' && item.length <= 4096);
@@ -149,10 +149,16 @@ export function createNativeAotCompilerChannel(options = {}) {
             return { Path: `/netwasm-link/${asset}`, Sha256: receipt.sha256 };
           }));
         })(),
+        loader.load('compiler/command-wit.json').then(bytes => decoder.decode(bytes)),
+        loader.load('compiler/command-wit-command.wat').then(bytes => decoder.decode(bytes)),
       ]);
       const failed = loaded.find(result => result.status === 'rejected');
       if (failed) throw failed.reason;
-      return { inputs: loaded.map(result => result.value) };
+      const values = loaded.map(result => result.value);
+      return {
+        inputs: values.slice(0, 9),
+        rawBindings: { runtimeWitJson: values[9], runtimeWitInventory: values[10] },
+      };
     })().catch(error => { initialized = undefined; throw error; });
   }
 
@@ -230,33 +236,58 @@ export function createNativeAotCompilerChannel(options = {}) {
         await initialize();
         return { success: true };
       }
-      const { inputs } = await initialize();
+      const { inputs, rawBindings } = await initialize();
       if (data.operation === 'prune') {
         const value = invoke('retainComponentExports', [toBase64(data.module), data.prefix]);
         return { module: fromBase64(value), hostLinearMemoryBytes: module.HEAPU8.buffer.byteLength };
+      }
+      if (data.operation === 'pruneRaw') {
+        const value = invoke('removeRawExports', [toBase64(data.module), JSON.stringify(data.exports)]);
+        return { module: fromBase64(value), hostLinearMemoryBytes: module.HEAPU8.buffer.byteLength };
+      }
+      if (data.operation === 'buildRawBindings') {
+        const value = JSON.parse(invoke('buildRawBindings', [
+          data.handle,
+          rawBindings.runtimeWitJson,
+          rawBindings.runtimeWitInventory,
+          JSON.stringify(data.runtimeImports),
+          JSON.stringify(data.finalImports),
+        ]));
+        if (!value.success) throw Error(value.error || 'Raw binding generation failed');
+        return {
+          adapter: fromBase64(value.adapter),
+          requiredImports: value.requiredImports,
+          hostLinearMemoryBytes: module.HEAPU8.buffer.byteLength,
+        };
       }
       if (data.operation !== 'compile') throw Error('Unsupported native compiler operation');
       const { images, supportJson } = await recipeInputs(data.recipe);
       const compilerInputs = inputs.slice();
       if (supportJson !== undefined) compilerInputs[1] = supportJson;
       const settings = [data.language, data.updatedMemorySafetyRules, data.optimization];
+      const projectKind = data.projectKind ?? 'command';
+      const nativeLibrariesJson = data.nativeLibrariesJson ?? '[]';
+      const projectCompilation = projectKind !== 'command' || nativeLibrariesJson !== '[]';
       const generated = generatedRecipes.has(data.recipe);
       const trustedRecipe = data.recipe === 'tunit' ? 'tunit'
         : data.recipe === 'di' ? 'di' : data.recipe === 'logging' ? 'logging' : 'json';
       let result;
-      if (data.frontendCache !== false && frontendCache) {
+      if (!projectCompilation && data.frontendCache !== false && frontendCache) {
         const operation = generated ? 'prepareGeneratedRecipe'
           : data.recipe === 'http' ? 'prepareHttpRecipe' : 'prepareRecipe';
         const arguments_ = generated
-          ? [data.source, ...compilerInputs, ...images, trustedRecipe, ...settings]
-          : [data.source, ...compilerInputs, ...images, ...settings];
+          ? [data.sourceSet, ...compilerInputs, ...images, trustedRecipe, ...settings]
+          : [data.sourceSet, ...compilerInputs, ...images, ...settings];
         result = await compileWithFrontendCache(operation, arguments_);
       } else {
-        const operation = generated ? 'compileGeneratedRecipe'
+        const operation = projectCompilation ? 'compileProject' : generated ? 'compileGeneratedRecipe'
           : data.recipe === 'http' ? 'compileHttpRecipe' : 'compileRecipe';
-        const arguments_ = generated
-          ? [data.source, ...compilerInputs, ...images, trustedRecipe, false, ...settings]
-          : [data.source, ...compilerInputs, ...images, ...settings];
+        const arguments_ = projectCompilation
+          ? [data.sourceSet, projectKind, ...compilerInputs, ...images,
+            nativeLibrariesJson, ...settings]
+          : generated
+          ? [data.sourceSet, ...compilerInputs, ...images, trustedRecipe, false, ...settings]
+          : [data.sourceSet, ...compilerInputs, ...images, ...settings];
         result = JSON.parse(invoke(operation, arguments_));
       }
       if (typeof result.application === 'string') result.application = fromBase64(result.application);

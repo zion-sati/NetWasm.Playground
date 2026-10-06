@@ -1,3 +1,4 @@
+import { openSample, setOptimizations } from './playground-ui.mjs';
 import { chromium } from 'playwright';
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { createHash } from 'node:crypto';
@@ -10,8 +11,8 @@ if (selectedCase && !['template', 'second-test', 'assertion-failure'].includes(s
 try {
   const page = await browser.newPage({ acceptDownloads: true }); page.on('pageerror', error => errors.push(String(error)));
   await page.goto(url); await page.locator('.monaco-editor').waitFor();
-  await page.getByLabel('Optimization', { exact: true }).selectOption('none');
-  await page.getByLabel('Example', { exact: true }).selectOption('tunit');
+  await setOptimizations(page, 'none');
+  await openSample(page, 'tunit');
   for (const [name, passed, failed] of [['template', 1, 0], ['second-test', 2, 0], ['assertion-failure', 1, 1]]) {
     if (selectedCase && name !== selectedCase) continue;
     const source = readFileSync(`${desktop}/cases/${name}/Tests.cs`, 'utf8');

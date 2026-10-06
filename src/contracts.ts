@@ -1,11 +1,15 @@
 import type { OptimizationMode } from './optimization';
+import type { ProjectFile, ProjectKind } from './workspace';
 
 export type LanguageMode = '15' | 'preview';
 
 export interface SourceSnapshot {
   requestId: number;
   revision: number;
-  source: string;
+  files: ProjectFile[];
+  projectKind: ProjectKind;
+  /** Accepted temporarily by lower-level compatibility tests and older callers. */
+  source?: string;
   recipeId: string;
   optimization?: OptimizationMode;
   language: LanguageMode;
@@ -67,7 +71,16 @@ export interface CompilationResult {
   updatedMemorySafetyRules?: boolean;
   cancelled?: boolean;
   component?: Uint8Array;
-  componentContract?: 'command' | 'async-command';
+  componentContract?: 'command' | 'async-command' | 'jsexport-worker';
+  rawAdapter?: Uint8Array;
+  runtimeLayout?: Uint8Array;
+  interopManifest?: Uint8Array;
+  requiredImports?: readonly {
+    Interface: string;
+    Name: string;
+    Parameters: readonly string[];
+    Results: readonly string[];
+  }[];
   diagnostics: Diagnostic[];
   timings: StageTiming[];
   frontendCacheMetrics?: FrontendCacheMetrics;

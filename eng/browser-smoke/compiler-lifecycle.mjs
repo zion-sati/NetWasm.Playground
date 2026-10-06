@@ -1,3 +1,4 @@
+import { setOptimizations } from './playground-ui.mjs';
 import { browserType } from './engine.mjs';
 import { mkdirSync, writeFileSync } from 'node:fs';
 
@@ -28,7 +29,7 @@ try {
   });
   await page.goto(process.env.PLAYGROUND_URL ?? 'http://127.0.0.1:5173/playground/');
   await page.locator('.monaco-editor').waitFor();
-  await page.getByLabel('Optimization', { exact: true }).selectOption('none');
+  await setOptimizations(page, 'none');
   const success = page.locator('#compilation-success');
   if (await success.isVisible()) throw Error('Compilation callout is visible before compilation');
   await page.locator('#compile').click();
@@ -60,7 +61,7 @@ try {
   await page.locator('.monaco-editor').waitFor();
   if (await page.locator('#compilation-success').isVisible())
     throw Error('Page reload retained compilation callout');
-  await page.getByLabel('Optimization', { exact: true }).selectOption('none');
+  await setOptimizations(page, 'none');
   await page.locator('#compile').click();
   await page.waitForFunction(() => !document.querySelector('#stop').disabled, undefined,
     { timeout: 10000 });

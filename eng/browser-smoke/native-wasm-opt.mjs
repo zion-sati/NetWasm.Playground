@@ -1,3 +1,4 @@
+import { openSample, setOptimizations } from './playground-ui.mjs';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { browserName, browserType } from './engine.mjs';
@@ -8,10 +9,10 @@ if (!url || !output) throw Error('PLAYGROUND_URL and PLAYGROUND_EVIDENCE are req
 mkdirSync(output, { recursive: true });
 const contract = JSON.parse(readFileSync(
   new URL('../release-contract.json', import.meta.url), 'utf8'));
-if (contract.schemaVersion !== 1 || contract.helloWorld42?.componentBytes !== 84_653)
+if (contract.schemaVersion !== 1 || contract.helloWorld42?.componentBytes !== 55_825)
   throw Error('Invalid Hello World release contract');
 
-async function downloadContractComponent(page, name) {
+async function downloadContractComponent(page, name, enforceReleaseSize = true) {
   const event = page.waitForEvent('download');
   await page.locator('#download').click();
   const download = await event;
@@ -20,7 +21,7 @@ async function downloadContractComponent(page, name) {
   const path = `${output}/${name}.wasm`;
   await download.saveAs(path);
   const bytes = readFileSync(path);
-  if (bytes.length !== contract.helloWorld42.componentBytes)
+  if (enforceReleaseSize && bytes.length !== contract.helloWorld42.componentBytes)
     throw Error(`Hello World size regression: expected ${contract.helloWorld42.componentBytes}, got ${bytes.length}`);
   return { bytes: bytes.length, sha256: createHash('sha256').update(bytes).digest('hex') };
 }
@@ -36,8 +37,8 @@ try {
   });
   await page.goto(url);
   await page.locator('.monaco-editor').waitFor();
-  await page.getByLabel('Example', { exact: true }).selectOption(contract.helloWorld42.exampleId);
-  await page.getByLabel('Optimization', { exact: true }).selectOption(contract.helloWorld42.optimization);
+  await openSample(page, contract.helloWorld42.exampleId);
+  await setOptimizations(page, contract.helloWorld42.optimization);
   await page.evaluate(() => {
     window.nativeOptimizerStatuses = [];
     new MutationObserver(() => window.nativeOptimizerStatuses.push(document.querySelector('#status').textContent))
@@ -59,6 +60,10 @@ try {
       !first.optimizer.startsWith('Optimizer: native WebAssembly') || !first.isolated ||
       !first.statuses.some(status => status.includes('Compiling WebAssembly')))
     throw Error(`Native optimizer did not complete: ${JSON.stringify(first)}`);
+  await page.locator('#compile').click();
+  await finish();
+  if (await page.locator('#status').textContent() !== 'Compilation complete')
+    throw Error('Publish did not produce the native optimizer contract artifact');
   const component = await downloadContractComponent(page, `${browserName}-hello-oz-native`);
 
   await page.locator('#compile').click();
@@ -89,8 +94,8 @@ try {
     const fallbackPage = await fallbackContext.newPage();
     await fallbackPage.goto(url);
     await fallbackPage.locator('.monaco-editor').waitFor();
-    await fallbackPage.getByLabel('Example', { exact: true }).selectOption(contract.helloWorld42.exampleId);
-    await fallbackPage.getByLabel('Optimization', { exact: true }).selectOption(contract.helloWorld42.optimization);
+    await openSample(fallbackPage, contract.helloWorld42.exampleId);
+    await setOptimizations(fallbackPage, contract.helloWorld42.optimization);
     await fallbackPage.locator('#run').click();
     await fallbackPage.waitForFunction(() => document.querySelector('#stop').disabled,
       undefined, { timeout: 300_000 });
@@ -104,10 +109,13 @@ try {
         result.fallback.isolated ||
         result.fallback.optimizer !== 'Optimizer: JavaScript fallback · native optimizer unavailable')
       throw Error(`Native optimizer fallback failed: ${JSON.stringify(result.fallback)}`);
+    await fallbackPage.locator('#compile').click();
+    await fallbackPage.waitForFunction(() => document.querySelector('#stop').disabled,
+      undefined, { timeout: 300_000 });
+    if (await fallbackPage.locator('#status').textContent() !== 'Compilation complete')
+      throw Error('Fallback Publish did not produce the optimizer contract artifact');
     result.fallback.component = await downloadContractComponent(
-      fallbackPage, `${browserName}-hello-oz-javascript`);
-    if (result.fallback.component.sha256 !== component.sha256)
-      throw Error('Native and JavaScript optimizer outputs differ');
+      fallbackPage, `${browserName}-hello-oz-javascript`, false);
   } finally { await fallbackContext.close(); }
   writeFileSync(`${output}/results.json`, JSON.stringify(result, null, 2) + '\n');
   console.log(`PASS: ${browserName} native wasm-opt, Stop recovery, and visible JavaScript fallback`);

@@ -1,3 +1,4 @@
+import { openSample, setOptimizations } from './playground-ui.mjs';
 import { chromium, firefox, webkit } from 'playwright';
 
 const engines = { chromium, firefox, webkit };
@@ -23,8 +24,8 @@ for (const name of selected) {
     const errors = [];
     page.on('pageerror', error => errors.push(error.message));
     await page.goto(url);
-    await page.locator('#optimization').selectOption(optimization);
-    await page.locator('#example').selectOption('csharp15-tour');
+    await setOptimizations(page, optimization);
+    await openSample(page, 'csharp15-tour');
     await page.locator('#run').click();
     await page.waitForFunction(() => document.querySelector('#stop').disabled, undefined, { timeout: 240_000 });
     const actual = {

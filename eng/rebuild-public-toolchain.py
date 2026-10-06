@@ -236,20 +236,25 @@ def add_guest_providers(stage, toolchain_archive):
             raise ValueError('Public package lacks browser WASI providers')
         for name in names:
             (browser / name[len(prefix):]).write_bytes(package.read(name))
+        instantiation = ('tools/jco/node_modules/@bytecodealliance/preview2-shim/'
+                         'dist/common/instantiation.js')
+        if instantiation not in package.namelist():
+            raise ValueError('Public package lacks browser WASI instantiation support')
+        (browser / 'instantiation.js').write_bytes(package.read(instantiation))
     subprocess.run(['node', str(ROOT / 'eng/bundle-toolchain-modules.mjs'), str(stage),
                     '--providers-only'], check=True)
-    shutil.rmtree(browser)
 
 
 def add_component_host(stage):
     subprocess.run(['node', str(ROOT / 'eng/bundle-toolchain-modules.mjs'), str(stage),
                     '--hosting-only'], check=True)
+    shutil.rmtree(stage / 'jco/preview2')
 
 
 def add_http_example(stage, library_version):
     member = 'lib/NetWasm,Version=v0.1/System.Net.Http.dll'
     assembly = package_members('netwasm.system.net.http', library_version, {
-        member: 'b35165fe34a6f179af6af3f6971af8e4f6999b0f07c4258c45413d662b25f528',
+        member: 'c21bfb6c10624bac6e1b177cf870c91510e9e9c4612894d81a96b0807e95ad58',
     })[member]
     for role in ('references', 'implementations'):
         destination = stage / role / 'System.Net.Http.dll'
@@ -293,7 +298,7 @@ def public_member(package, version, member):
         return package_zip.read(member)
 
 
-def add_compiler_wit_inventories(stage, version):
+def add_wit_inventories(stage, version):
     with tempfile.TemporaryDirectory(prefix='.compiler-wit-', dir=stage.parent) as temporary:
         temporary = Path(temporary)
         runner = temporary / 'run-wasm-tools.mjs'
@@ -302,37 +307,44 @@ def add_compiler_wit_inventories(stage, version):
             'netwasm.toolchain', version, 'tools/wasm-tools/run-wasm-tools.mjs'))
         module.write_bytes(public_member(
             'netwasm.toolchain', version, 'tools/wasm-tools/wasm-tools.wasm'))
-        wit = stage / 'compiler/compiler.wit.wasm'
-        normalized = subprocess.run([
-            'node', '--no-warnings', str(runner), str(module), 'component', 'wit',
-            str(wit), '--json', '--no-docs',
-        ], cwd=temporary, capture_output=True, check=False)
-        if normalized.returncode != 0:
-            raise ValueError(
-                'Could not normalize compiler WIT: '
-                f'{normalized.stderr.decode(errors="replace").strip()}')
-        try:
-            json.loads(normalized.stdout)
-        except (UnicodeDecodeError, json.JSONDecodeError) as error:
-            raise ValueError('Invalid normalized compiler WIT') from error
-        (stage / 'compiler/compiler-wit.json').write_bytes(normalized.stdout)
-        for world, name in (
-                ('netwasm:platform/platform@1.0.0', 'compiler-wit-platform.wat'),
-                ('netwasm:platform/async-platform@1.0.0', 'compiler-wit-async-platform.wat')):
-            result = subprocess.run([
-                'node', '--no-warnings', str(runner), str(module), 'component', 'embed',
-                str(wit), '--world', world, '--dummy', '-t',
+        def add(wit, normalized_path, worlds, label):
+            normalized = subprocess.run([
+                'node', '--no-warnings', str(runner), str(module), 'component', 'wit',
+                str(wit), '--json', '--no-docs',
             ], cwd=temporary, capture_output=True, check=False)
-            if result.returncode != 0:
+            if normalized.returncode != 0:
                 raise ValueError(
-                    f'Could not derive compiler WIT core bindings for {world}: '
-                    f'{result.stderr.decode(errors="replace").strip()}')
-            if not result.stdout.startswith(b'(module') or len(result.stdout) > 1024 * 1024:
-                raise ValueError(f'Invalid compiler WIT core bindings for {world}')
-            (stage / 'compiler' / name).write_bytes(result.stdout)
+                    f'Could not normalize {label} WIT: '
+                    f'{normalized.stderr.decode(errors="replace").strip()}')
+            try:
+                json.loads(normalized.stdout)
+            except (UnicodeDecodeError, json.JSONDecodeError) as error:
+                raise ValueError(f'Invalid normalized {label} WIT') from error
+            normalized_path.write_bytes(normalized.stdout)
+            for world, destination in worlds:
+                result = subprocess.run([
+                    'node', '--no-warnings', str(runner), str(module), 'component', 'embed',
+                    str(wit), '--world', world, '--dummy', '-t',
+                ], cwd=temporary, capture_output=True, check=False)
+                if result.returncode != 0:
+                    raise ValueError(
+                        f'Could not derive {label} WIT core bindings for {world}: '
+                        f'{result.stderr.decode(errors="replace").strip()}')
+                if not result.stdout.startswith(b'(module') or len(result.stdout) > 1024 * 1024:
+                    raise ValueError(f'Invalid {label} WIT core bindings for {world}')
+                destination.write_bytes(result.stdout)
+
+        add(stage / 'compiler/compiler.wit.wasm',
+            stage / 'compiler/compiler-wit.json', (
+                ('netwasm:platform/platform@1.0.0', stage / 'compiler/compiler-wit-platform.wat'),
+                ('netwasm:platform/async-platform@1.0.0', stage / 'compiler/compiler-wit-async-platform.wat'),
+            ), 'compiler')
+        add(stage / 'command.wit.wasm', stage / 'compiler/command-wit.json', (
+                ('command', stage / 'compiler/command-wit-command.wat'),
+            ), 'command')
 
 
-def refresh_public_assets(stage, pins, runtime_plan=None):
+def refresh_public_assets(stage, pins, runtime_plan=None, candidate_toolchain=None):
     """Replace every versioned compiler input in the pinned reusable browser base."""
     core = pins['netwasm']['packageVersion']
     libraries = pins['libraries']['packageVersion']
@@ -358,14 +370,30 @@ def refresh_public_assets(stage, pins, runtime_plan=None):
             'runtime/NetWasm.CoreLib.dll')
     replace('compiler/compiler.wit.wasm', 'netwasm.toolchain', core,
             'tools/wit-packages/compiler.wit.wasm')
-    add_compiler_wit_inventories(stage, core)
+    replace('command.wit.wasm', 'netwasm.toolchain', core,
+            'tools/wit-packages/command.wit.wasm')
+    add_wit_inventories(stage, core)
     replace('async-command.wit.wasm', 'netwasm.toolchain', core,
             'tools/wit-packages/async-command.wit.wasm')
     hosting_directory = stage / 'hosting'
     hosting_directory.mkdir(exist_ok=True)
-    for name in HOSTING_MODULES:
-        (hosting_directory / name).write_bytes(public_member(
-            'netwasm.hosting', core, f'tools/netwasm/hosting/{name}'))
+    for existing in hosting_directory.glob('*.mjs'):
+        existing.unlink()
+    hosting_prefix = 'tools/netwasm/hosting/'
+    with zipfile.ZipFile(io.BytesIO(package_archive('netwasm.hosting', core))) as package:
+        hosting_members = sorted(name for name in package.namelist()
+                                 if name.startswith(hosting_prefix) and name.endswith('.mjs')
+                                 and '/' not in name[len(hosting_prefix):])
+        if not all(f'{hosting_prefix}{name}' in hosting_members for name in HOSTING_MODULES):
+            raise ValueError('Public hosting package lacks the component execution closure')
+        required_raw = {
+            f'{hosting_prefix}browser-raw-export-session.mjs',
+            f'{hosting_prefix}worker-import-bindings.mjs',
+        }
+        if not required_raw.issubset(hosting_members):
+            raise ValueError('Public hosting package lacks the raw worker execution closure')
+        for member in hosting_members:
+            (hosting_directory / member[len(hosting_prefix):]).write_bytes(package.read(member))
     runtime = json.loads(public_member('netwasm.runtime.pack', core, 'runtime/runtime-pack.json'))
     target = next((item for item in runtime.get('targets', []) if item.get('target') == 'wasm32'), None)
     if target is None or not isinstance(target.get('systemLibraries', {}).get('names'), list):
@@ -382,22 +410,26 @@ def refresh_public_assets(stage, pins, runtime_plan=None):
                 not re.fullmatch(r'[a-f0-9]{64}', asset['sha256'])):
             raise ValueError(f'Public runtime pack has an invalid {field}')
         relative = safe_path(asset['path'])
-        if relative.parent != PurePosixPath('wasm32'):
+        if len(relative.parts) < 2 or relative.parts[0] != 'wasm32':
             raise ValueError(f'Public runtime pack has an invalid wasm32 asset path: {asset["path"]}')
         payload = public_member('netwasm.runtime.pack', core, f'runtime/{relative.as_posix()}')
         if sha256(payload) != asset['sha256']:
             raise ValueError(f'Public runtime pack asset changed: {asset["path"]}')
-        runtime_files[relative.name] = payload
+        runtime_files[PurePosixPath(*relative.parts[1:])] = payload
     for existing in runtime_directory.iterdir():
         if existing.name == 'system':
             if not existing.is_dir():
                 raise ValueError('Public base runtime system-library entry is not a directory')
-        elif not existing.is_file():
-            raise ValueError(f'Unexpected public base runtime entry: {existing.name}')
-        elif existing.name not in runtime_files:
+        elif existing.is_dir():
+            shutil.rmtree(existing)
+        elif existing.is_file():
             existing.unlink()
-    for name, payload in runtime_files.items():
-        (runtime_directory / name).write_bytes(payload)
+        else:
+            raise ValueError(f'Unexpected public base runtime entry: {existing.name}')
+    for relative, payload in runtime_files.items():
+        destination = runtime_directory.joinpath(*relative.parts)
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination.write_bytes(payload)
     system_names = target['systemLibraries']['names']
     system_assets = target['systemLibraries'].get('assets')
     if len(system_names) != len(set(system_names)):
@@ -470,7 +502,7 @@ def refresh_public_assets(stage, pins, runtime_plan=None):
     inputs = json.loads(inputs_path.read_text())
     inputs['referenceSha256'] = sha256((stage / 'compiler/target-reference.dll').read_bytes())
     inputs['browserCompilerPackage']['version'] = core
-    inputs['toolchain'] = json.loads(download(
+    inputs['toolchain'] = candidate_toolchain or json.loads(download(
         f"https://raw.githubusercontent.com/zion-sati/NetWasm/{pins['netwasm']['commit']}/eng/toolchain.json",
         128 * 1024))
     inputs.pop('desktopReceiptSha256', None)
@@ -524,6 +556,8 @@ def main():
     parser.add_argument('--candidate-tunit-commit')
     parser.add_argument('--runtime-plan', type=Path,
                         help='Actual candidate compiler runtime plan captured from a preliminary toolchain')
+    parser.add_argument('--candidate-toolchain-manifest', type=Path,
+                        help='Local eng/toolchain.json paired with a local compiler candidate')
     args = parser.parse_args()
     candidate_values = (args.candidate_feed, args.candidate_version, args.candidate_commit)
     if any(candidate_values) != all(candidate_values):
@@ -543,9 +577,13 @@ def main():
         parser.error('--candidate-feed must be an existing directory')
     if args.runtime_plan and not args.candidate_feed:
         parser.error('--runtime-plan is only valid with a candidate feed')
+    if args.candidate_toolchain_manifest and not args.candidate_feed:
+        parser.error('--candidate-toolchain-manifest is only valid with a candidate feed')
     CANDIDATE_FEED = args.candidate_feed.resolve() if args.candidate_feed else None
     CANDIDATE_VERSION = args.candidate_version
     runtime_plan = json.loads(args.runtime_plan.read_text()) if args.runtime_plan else None
+    candidate_toolchain = (json.loads(args.candidate_toolchain_manifest.read_text())
+                           if args.candidate_toolchain_manifest else None)
     base = json.loads((ROOT / 'eng/toolchain-base.json').read_text())
     archive = base.get('archive', {})
     if base.get('schemaVersion') != 2 or not isinstance(archive.get('bytes'), int) or archive['bytes'] < 1 or \
@@ -607,7 +645,7 @@ def main():
         pins['nativeAotLlvmCompilerHost'] = upstream['nativeAotLlvmCandidate']
         add_browser_wasm_opt(stage, upstream['browserWasmOpt'])
         pins['browserWasmOpt'] = upstream['browserWasmOpt']
-        refresh_public_assets(stage, pins, runtime_plan)
+        refresh_public_assets(stage, pins, runtime_plan, candidate_toolchain)
         rebind_notice_origins(stage, release_pins)
         add_guest_providers(stage, package_archive('netwasm.toolchain', pins['netwasm']['packageVersion']))
         add_component_host(stage)

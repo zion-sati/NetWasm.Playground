@@ -1,3 +1,4 @@
+import { openSample } from './playground-ui.mjs';
 import { browserType } from './engine.mjs';
 
 const base = process.argv[2] ?? process.env.PLAYGROUND_URL ?? 'http://127.0.0.1:4173/';
@@ -28,7 +29,7 @@ try {
     dispatchEvent(new PageTransitionEvent('pageshow', { persisted: true }));
   });
 
-  await page.getByLabel('Example', { exact: true }).selectOption('regex');
+  await openSample(page, 'regex');
   await page.waitForFunction(() => document.querySelector('#editor .view-lines')?.textContent?.includes('Regex'));
   const restored = await page.evaluate(() => ({
     source: document.querySelector('#editor .view-lines')?.textContent ?? '',

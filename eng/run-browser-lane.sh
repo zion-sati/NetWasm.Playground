@@ -25,13 +25,18 @@ run_step cross-origin-isolation env PLAYGROUND_EVIDENCE="$evidence/cross-origin-
   node eng/browser-smoke/cross-origin-isolation.mjs
 run_step deployment env PLAYGROUND_EVIDENCE="$evidence/deployment" \
   node eng/browser-smoke/deployment.mjs
+run_step multifile env PLAYGROUND_EVIDENCE="$evidence/multifile" \
+  node eng/browser-smoke/multifile.mjs
 run_step native-wasm-opt env PLAYGROUND_EVIDENCE="$evidence/native-wasm-opt" \
   node eng/browser-smoke/native-wasm-opt.mjs
 run_step csharp15 env PLAYGROUND_BROWSERS="$browser" PLAYGROUND_CSHARP15_OPTIMIZATION=none \
   node eng/browser-smoke/csharp15-runtime.mjs
 run_step wasi env PLAYGROUND_BROWSERS="$browser" node eng/browser-smoke/wasi-examples.mjs
 if [[ "$browser" == chromium ]]; then
+  run_step revamp-ui node eng/browser-smoke/revamp-ui.mjs
   run_step library-catalog node eng/browser-smoke/library-catalog.mjs
+  run_step native-library node eng/browser-smoke/native-library.mjs
+  run_step web-worker node eng/browser-smoke/web-worker.mjs
 fi
 run_step tunit-failure env PLAYGROUND_EVIDENCE="$evidence/tunit-failure" \
   node eng/browser-smoke/tunit-failure.mjs

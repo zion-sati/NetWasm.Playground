@@ -1,3 +1,4 @@
+import { setOptimizations } from './playground-ui.mjs';
 import { chromium } from 'playwright';
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { createHash } from 'node:crypto';
@@ -17,7 +18,7 @@ try {
   await page.goto(url);
   assert(await page.getByLabel('Playground version', { exact: true }).textContent() === `v${playgroundVersion}`, 'Playground version is missing or stale');
   await page.locator('.monaco-editor').waitFor();
-  await page.getByLabel('Optimization', { exact: true }).selectOption('Oz');
+  await setOptimizations(page, 'Oz');
   assert(!requests.some(request => request.url.includes('/toolchain/')), 'Toolchain fetched before first action');
   await page.screenshot({ path: `${output}/desktop.png`, fullPage: true });
   await page.setViewportSize({ width: 390, height: 844 });

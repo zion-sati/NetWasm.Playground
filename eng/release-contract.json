@@ -5,6 +5,6 @@
     "optimization": "Oz",
     "source": "using System;\n\nConsole.WriteLine(42);\n",
     "stdout": "42\n",
-    "componentBytes": 84653
+    "componentBytes": 55825
   }
 }

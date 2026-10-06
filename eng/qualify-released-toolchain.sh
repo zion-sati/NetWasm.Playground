@@ -45,6 +45,9 @@ PLAYGROUND_EVIDENCE="$evidence/settings" node eng/browser-smoke/csharp15-setting
 PLAYGROUND_BROWSERS=chromium PLAYGROUND_CSHARP15_OPTIMIZATION=none \
   node eng/browser-smoke/csharp15-runtime.mjs
 node eng/browser-smoke/library-catalog.mjs
+node eng/browser-smoke/revamp-ui.mjs
+node eng/browser-smoke/native-library.mjs
+node eng/browser-smoke/web-worker.mjs
 PLAYGROUND_EVIDENCE="$evidence/tunit-failure" node eng/browser-smoke/tunit-failure.mjs
 PLAYGROUND_EVIDENCE="$evidence/progress" node eng/browser-smoke/progress.mjs
 PLAYGROUND_EVIDENCE="$evidence/lifecycle" node eng/browser-smoke/compiler-lifecycle.mjs

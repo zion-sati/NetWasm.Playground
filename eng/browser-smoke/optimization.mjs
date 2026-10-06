@@ -1,3 +1,4 @@
+import { openSample, setOptimizations } from './playground-ui.mjs';
 import { chromium } from 'playwright';
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
@@ -12,20 +13,20 @@ try {
   page.on('pageerror', error => errors.push(String(error)));
   await page.goto(process.env.PLAYGROUND_URL ?? 'http://127.0.0.1:5173/playground/');
   await page.locator('.monaco-editor').waitFor();
-  const modes = await page.getByLabel('Optimization', { exact: true }).locator('option').evaluateAll(options => options.map(option => option.value));
+  const modes = await page.locator('#optimization option').evaluateAll(options => options.map(option => option.value));
   if (modes.includes('O4') || !['none', 'O0', 'O1', 'O2', 'O3', 'Os', 'Oz'].every(mode => modes.includes(mode))) throw Error(`Unexpected optimization modes: ${modes}`);
-  if (await page.getByLabel('Optimization', { exact: true }).inputValue() !== 'Oz') throw Error('Expected -Oz to be selected by default');
-  await page.getByLabel('Example', { exact: true }).selectOption('json-generated');
+  if (await page.locator('#optimization').inputValue() !== 'Oz') throw Error('Expected -Oz to be selected by default');
+  await openSample(page, 'json-generated');
   for (const mode of ['none', 'Oz']) {
-    await page.getByLabel('Optimization', { exact: true }).selectOption(mode);
+    await setOptimizations(page, mode);
     await page.evaluate(() => {
       window.optimizationStatuses = [];
       new MutationObserver(() => window.optimizationStatuses.push(document.querySelector('#status').textContent))
         .observe(document.querySelector('#status'), { childList: true, subtree: true, characterData: true });
     });
     const started = Date.now();
-    await page.locator('#run').click();
-    if (await page.getByLabel('Optimization', { exact: true }).isEnabled()) throw Error('Optimization changed while busy');
+    await page.locator('#compile').click();
+    if (await page.locator('#optimization').isEnabled()) throw Error('Optimization changed while busy');
     await page.waitForFunction(() => document.querySelector('#stop').disabled, undefined, { timeout: 240000 });
     const ui = await page.evaluate(() => ({
       status: document.querySelector('#status').textContent,
@@ -35,7 +36,7 @@ try {
       comparison: document.querySelector('#comparison').textContent,
       statuses: window.optimizationStatuses,
     }));
-    if (ui.status !== 'Run complete' || ui.stdout !== '{"Name":"Ada","Score":42}\n') throw Error(JSON.stringify(ui));
+    if (ui.status !== 'Compilation complete') throw Error(JSON.stringify(ui));
     if ((mode === 'none') === ui.timings.includes('optimize:')) throw Error(`${mode}: unexpected optimization timing`);
     const download = page.waitForEvent('download');
     await page.locator('#download').click();
@@ -43,9 +44,10 @@ try {
     if (item.suggestedFilename() !== `program-${mode}.wasm`) throw Error(`Wrong filename: ${item.suggestedFilename()}`);
     const path = `${output}/${mode}.wasm`; await item.saveAs(path);
     const bytes = readFileSync(path), nativeStdout = execFileSync('wasmtime', [path], { encoding: 'utf8' });
-    if (nativeStdout !== ui.stdout) throw Error(`${mode}: Wasmtime output mismatch`);
-    const denominator = mode === 'none' ? 7 : 8;
-    if (!ui.statuses.some(status => status.startsWith(`Step ${denominator} of ${denominator}`))) throw Error(`${mode}: progress denominator missing`);
+    if (nativeStdout !== '{"Name":"Ada","Score":42}\n') throw Error(`${mode}: Wasmtime output mismatch`);
+    if (!ui.statuses.some(status => status.startsWith('Packaging component'))) throw Error(`${mode}: component packaging phase missing`);
+    if ((mode === 'none') === ui.statuses.some(status => status.startsWith('Optimizing WebAssembly')))
+      throw Error(`${mode}: optimizer phase mismatch`);
     results.push({ mode, elapsedMilliseconds: Date.now() - started, bytes: bytes.length,
       sha256: createHash('sha256').update(bytes).digest('hex'), nativeStdout, ui });
     writeFileSync(`${output}/partial.json`, JSON.stringify({ results, errors }, null, 2));

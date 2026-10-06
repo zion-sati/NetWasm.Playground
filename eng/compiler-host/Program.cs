@@ -24,6 +24,7 @@ using System.Collections.Generic;
 using NetWasm.Runtime.Pack.Planning;
 using NetWasm.Compiler.ComponentModel;
 using NetWasm.Compiler.ComponentModel.Browser;
+using NetWasm.Compiler.ComponentModel.Raw;
 using Microsoft.CodeAnalysis.Diagnostics;
 using System.Collections.Immutable;
 using System.Security.Cryptography;
@@ -44,6 +45,8 @@ internal sealed class NativeAotExportAttribute : Attribute { }
 public static partial class Program
 {
     public sealed record SupportSource(string path, string text);
+    public sealed record UserSource(string path, string text);
+    public sealed record UserSourceSet(int schemaVersion, UserSource[] files);
     private sealed record StageTiming(string stage, double milliseconds);
     private sealed record GeneratedSource(string producer, string hintName, string? text, int bytes, string sha256);
     private sealed record DiagnosticInfo(string code, string message, string severity, string? path = null,
@@ -57,7 +60,8 @@ public static partial class Program
     private sealed record InteropImportInfo(string Module, string Name, string[] Parameters, string Result,
         string? AsyncReturn, string? ResolveExport, string? RejectExport, string? CancelExport);
     private sealed record InteropExportInfo(string Name, string[] Parameters, string Result,
-        string? AsyncReturn, string? StatusExport, string? ResultExport, string? CompleteExport);
+        string? AsyncReturn, string? StatusExport, string? ResultExport, string? CompleteExport,
+        string? CompletionResult);
     private sealed record InteropCallbackInfo(string Module, string ImportName, int ParameterIndex, string ExportName,
         string[] Parameters, string Result);
     private sealed record WitImportInfo(string Interface, string Function);
@@ -69,16 +73,30 @@ public static partial class Program
         int Kind, EntryPointAbiInfo? Abi);
     private sealed record RuntimeLinkAssetInfo(string Path, string Sha256);
     private sealed record RuntimeSystemLibrary(string Path, string Sha256);
+    private sealed record RuntimeNativeLibrary(string LibraryName, string Target, string Path, string Sha256);
     private sealed record RuntimeCacheInfo(string schema, string @namespace, string slot, string key);
     private sealed record RuntimeLinkPlanInfo(string[] Arguments, string[] OptimizationArguments,
         RuntimeLinkAssetInfo[] Inputs, string RuntimeAbi,
         string ToolchainFingerprint, long RuntimeGlobalBase, long HeapBase, long InitialMemorySizeBytes,
-        long MaximumMemorySizeBytes, RuntimeCacheInfo Cache);
+        long MaximumMemorySizeBytes, RuntimeCacheInfo Cache, RuntimeLinkExportInfo[] InternalRuntimeExports);
+    private sealed record RuntimeLinkExportInfo(string Name, byte Kind);
     private sealed record TextModuleInfo(string OutputPath, string Text);
     private sealed record ToolInvocationInfo(string ToolId, string[] Arguments);
     private sealed record ExportPruningInfo(string InputPath, string OutputPath, string Prefix);
     private sealed record CoreLinkPlanInfo(TextModuleInfo[] TextModules, ToolInvocationInfo Merge,
         ExportPruningInfo ExportPruning, ToolInvocationInfo? Optimization, string[] CleanupPaths);
+    private sealed record RawExportPruningInfo(string InputPath, string OutputPath,
+        RuntimeLinkExportInfo[] RemovedExports);
+    private sealed record FileCopyInfo(string InputPath, string OutputPath);
+    private sealed record FileMoveInfo(string InputPath, string OutputPath);
+    private sealed record CoreValidationInfo(string Path, string[] Arguments);
+    private sealed record RawCoreLinkPlanInfo(TextModuleInfo[] TextModules, ToolInvocationInfo Merge,
+        RawExportPruningInfo? ExportPruning, ToolInvocationInfo? Optimization,
+        CoreValidationInfo Validation, FileCopyInfo? Copy, FileMoveInfo Publication);
+    private sealed record RawCoreImportInfo(string Module, string Name, int[] Parameters, int[] Results);
+    private sealed record RequiredImportInfo(string Interface, string Name, string[] Parameters, string[] Results);
+    private sealed record RawBindingResponse(int schemaVersion, bool success, string? error = null,
+        string? adapter = null, RequiredImportInfo[]? requiredImports = null);
 #if FRONTEND_CACHE_TRANSPORT
     private sealed record FrontendCacheInfo(string schema, string @namespace, string handle);
     private sealed record FrontendPublicationInfo(string token, int entryCount, long totalBytes);
@@ -107,6 +125,8 @@ public static partial class Program
         EntryPointInfo? entryPoint = null,
         RuntimeLinkPlanInfo? runtimeLinkPlan = null,
         CoreLinkPlanInfo? coreLinkPlan = null,
+        RawCoreLinkPlanInfo? rawCoreLinkPlan = null,
+        string? rawBindingHandle = null,
         string? trustedRecipe = null,
         int? catalogCaseCount = null,
         string? componentContract = null,
@@ -120,17 +140,31 @@ public static partial class Program
 
     [JsonSourceGenerationOptions(DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull)]
     [JsonSerializable(typeof(SupportSource[]))]
+    [JsonSerializable(typeof(UserSourceSet))]
     [JsonSerializable(typeof(RuntimeSystemLibrary[]))]
+    [JsonSerializable(typeof(RuntimeNativeLibrary[]))]
     [JsonSerializable(typeof(Dictionary<string, string>))]
     [JsonSerializable(typeof(CompilerHostResponse))]
+    [JsonSerializable(typeof(RawCoreImportInfo[]))]
+    [JsonSerializable(typeof(RuntimeLinkExportInfo[]))]
+    [JsonSerializable(typeof(RawBindingResponse))]
 #if FRONTEND_CACHE_TRANSPORT
     [JsonSerializable(typeof(FrontendBatchInfo))]
 #endif
     private sealed partial class CompilerHostJsonContext : JsonSerializerContext;
     private const int MaximumGeneratedSources = 128;
     private const int MaximumGeneratedBytes = 512 * 1024;
+    private const int MaximumUserSources = 32;
+    private const int MaximumUserSourceBytes = 64 * 1024;
+    private const int MaximumUserSourceSetBytes = 256 * 1024;
     private static bool progressEnabled;
     private static long? guestMemoryMaximum;
+    private sealed record PendingRawBinding(
+        RawCompilerImportSource Source,
+        string CompilerWitJson,
+        string CompilerWitInventory);
+    private static PendingRawBinding? pendingRawBinding;
+    private static string? pendingRawBindingHandle;
 #if FRONTEND_CACHE_TRANSPORT
     private sealed record PendingFrontendCompilation(
         BrowserCompilerSession Session,
@@ -190,7 +224,8 @@ public static partial class Program
         manifest.Imports.Select(value => new InteropImportInfo(value.Module, value.Name, value.Parameters.ToArray(), value.Result,
             value.AsyncReturn, value.ResolveExport, value.RejectExport, value.CancelExport)).ToArray(),
         manifest.Exports.Select(value => new InteropExportInfo(value.Name, value.Parameters.ToArray(), value.Result,
-            value.AsyncReturn, value.StatusExport, value.ResultExport, value.CompleteExport)).ToArray(),
+            value.AsyncReturn, value.StatusExport, value.ResultExport, value.CompleteExport,
+            value.CompletionResult)).ToArray(),
         manifest.Callbacks.Select(value => new InteropCallbackInfo(value.Module, value.ImportName, value.ParameterIndex,
             value.ExportName, value.Parameters.ToArray(), value.Result)).ToArray(),
         manifest.WitImports.Select(value => new WitImportInfo(value.Interface, value.Function)).ToArray());
@@ -205,7 +240,8 @@ public static partial class Program
         plan.Inputs.Select(value => new RuntimeLinkAssetInfo(value.Path, value.Sha256)).ToArray(), plan.RuntimeAbi,
         plan.ToolchainFingerprint, plan.RuntimeGlobalBase, plan.HeapBase, plan.InitialMemorySizeBytes,
         plan.MaximumMemorySizeBytes, new(plan.Cache.Schema, plan.Cache.Namespace,
-            plan.Cache.Slot, plan.Cache.Key));
+            plan.Cache.Slot, plan.Cache.Key),
+        plan.InternalRuntimeExports.Select(value => new RuntimeLinkExportInfo(value.Name, value.Kind)).ToArray());
 
     private static RuntimeWasmOptimization ParseOptimization(string optimization) => optimization switch
     {
@@ -225,6 +261,16 @@ public static partial class Program
         new(plan.ExportPruning.InputPath, plan.ExportPruning.OutputPath, plan.ExportPruning.Prefix),
         plan.Optimization is null ? null : new(plan.Optimization.ToolId, plan.Optimization.Arguments.ToArray()),
         plan.CleanupPaths.ToArray());
+
+    private static RawCoreLinkPlanInfo Describe(BrowserRawCoreModuleLinkPlan plan) => new(
+        plan.TextModules.Select(value => new TextModuleInfo(value.OutputPath, value.Text)).ToArray(),
+        new(plan.Merge.ToolId, plan.Merge.Arguments.ToArray()),
+        plan.ExportPruning is null ? null : new(plan.ExportPruning.InputPath, plan.ExportPruning.OutputPath,
+            plan.ExportPruning.RemovedExports.Select(value => new RuntimeLinkExportInfo(value.Name, value.Kind)).ToArray()),
+        plan.Optimization is null ? null : new(plan.Optimization.ToolId, plan.Optimization.Arguments.ToArray()),
+        new(plan.Validation.Path, plan.Validation.Arguments.ToArray()),
+        plan.Copy is null ? null : new(plan.Copy.InputPath, plan.Copy.OutputPath),
+        new(plan.Publication.InputPath, plan.Publication.OutputPath));
 
     [JSExport]
     public static string Compile(string source, string reference, string supportJson, string implementation, string witJson, string witBytes,
@@ -264,6 +310,19 @@ public static partial class Program
             runtimeSystemLibrariesJson, additionalReferencesJson, additionalImplementationsJson, trustedRecipe, includeGeneratedSourceText,
             languageVersion, updatedMemorySafetyRules, optimization);
 
+    [JSExport]
+    public static string CompileProject(string source, string projectKind, string reference, string supportJson,
+        string implementation, string witJson, string witBytes, string syncWitInventory,
+        string asyncWitInventory, string runtimeManifest, string runtimeSystemLibrariesJson,
+        string additionalReferencesJson, string additionalImplementationsJson,
+        string nativeLibrariesJson, string languageVersion, bool updatedMemorySafetyRules,
+        string optimization)
+        => CompileCore(source, reference, supportJson, implementation, witJson, witBytes,
+            syncWitInventory, asyncWitInventory, runtimeManifest, runtimeSystemLibrariesJson,
+            additionalReferencesJson, additionalImplementationsJson, null, false,
+            languageVersion, updatedMemorySafetyRules, optimization,
+            projectKind: projectKind, nativeLibrariesJson: nativeLibrariesJson);
+
 #if FRONTEND_CACHE_TRANSPORT
     [JSExport]
     public static string PrepareRecipe(string source, string reference, string supportJson, string implementation, string witJson, string witBytes,
@@ -300,7 +359,9 @@ public static partial class Program
         string syncWitInventory, string asyncWitInventory, string runtimeManifest,
         string runtimeSystemLibrariesJson, string additionalReferencesJson, string additionalImplementationsJson, string? trustedRecipe, bool includeGeneratedSourceText,
         string languageVersion, bool updatedMemorySafetyRules, string optimization,
-        bool useAsyncPlatform = false
+        bool useAsyncPlatform = false,
+        string projectKind = "command",
+        string nativeLibrariesJson = "[]"
 #if FRONTEND_CACHE_TRANSPORT
         , bool prepareFrontendCache = false
 #endif
@@ -318,6 +379,9 @@ public static partial class Program
             if (languageVersion is not ("15" or "preview") ||
                 (updatedMemorySafetyRules && languageVersion != "preview"))
                 return Serialize(new(1, false, "request", "unsupported-language-settings", true, []));
+            if (projectKind is not ("command" or "jsexport-worker"))
+                return Serialize(new(1, false, "request", "unsupported-project-kind", true, []));
+            var javaScriptExportWorker = projectKind == "jsexport-worker";
             var runtimeOptimization = ParseOptimization(optimization);
             var tunit = trustedRecipe == "tunit";
             Stage("roslyn");
@@ -326,31 +390,36 @@ public static partial class Program
                 preprocessorSymbols: ["TRACE", "NETWASM", "NETWASM0_1", "RELEASE"]);
             if (updatedMemorySafetyRules)
                 parse = parse.WithFeatures([new("updated-memory-safety-rules", "true")]);
-            var trees = new[] { CSharpSyntaxTree.ParseText(SourceText.From(source, Encoding.UTF8), parse, tunit ? "Tests.cs" : "Program.cs") }
+            var userSources = ParseUserSources(source, tunit ? "Tests.cs" : "Program.cs");
+            var trees = userSources
+                .Select(file => CSharpSyntaxTree.ParseText(SourceText.From(file.text, Encoding.UTF8), parse, file.path))
                 .Concat(JsonSerializer.Deserialize(supportJson, CompilerHostJsonContext.Default.SupportSourceArray)!
                     .Select(file => CSharpSyntaxTree.ParseText(SourceText.From(file.text, Encoding.UTF8), parse, file.path)));
             if (tunit) trees = trees.Append(CSharpSyntaxTree.ParseText(SourceText.From(TrustedGeneratorAssets.TUnitProgram, Encoding.UTF8), parse, "NetWasm.TUnit.Program.cs"));
             var compilation = CSharpCompilation.Create(tunit ? "NetWasmTUnitTests" : "NetWasmApp", trees,
                 new[] { reference }.Concat(JsonSerializer.Deserialize(additionalReferencesJson, CompilerHostJsonContext.Default.DictionaryStringString)!.Values)
                     .Select(bytes => MetadataReference.CreateFromImage(Convert.FromBase64String(bytes))),
-                new CSharpCompilationOptions(OutputKind.ConsoleApplication,
+                new CSharpCompilationOptions(javaScriptExportWorker
+                        ? OutputKind.DynamicallyLinkedLibrary
+                        : OutputKind.ConsoleApplication,
                     optimizationLevel: OptimizationLevel.Release,
                     nullableContextOptions: NullableContextOptions.Enable,
                     allowUnsafe: true,
                     concurrentBuild: false, deterministic: true,
                     mainTypeName: tunit ? "NetWasm.TUnit.Generated.NetWasmTestProgram" : null));
             Compilation generatedCompilation = compilation;
-            if (trustedRecipe is not null)
             {
                 Stage("generator");
                 var generatorStarted = Stopwatch.GetTimestamp();
-                IIncrementalGenerator[] generators = trustedRecipe switch
+                var generators = new List<IIncrementalGenerator> { TrustedGeneratorAssets.CreateLibraryImportGenerator() };
+                generators.AddRange(trustedRecipe switch
                 {
                     "tunit" => [new TestMetadataGenerator(), new HookMetadataGenerator(), new AotConverterGenerator(), new PropertyInjectionSourceGenerator()],
                     "di" => [TrustedGeneratorAssets.CreateDependencyInjectionGenerator()],
                     "logging" => [TrustedGeneratorAssets.CreateLoggingGenerator()],
+                    null => [],
                     _ => [new JsonSourceGenerator()],
-                };
+                });
                 GeneratorDriver driver = CSharpGeneratorDriver.Create(generators.Select(generator => generator.AsSourceGenerator()),
                     parseOptions: parse, optionsProvider: new TrustedOptionsProvider(tunit));
                 driver = driver.RunGeneratorsAndUpdateCompilation(compilation, out generatedCompilation, out generatorDiagnostics);
@@ -387,23 +456,29 @@ public static partial class Program
             var entryPoint = generatedCompilation.GetEntryPoint(CancellationToken.None);
             var inferredAsyncPlatform = entryPoint?.ReturnType is INamedTypeSymbol returnType &&
                 returnType.Name == "Task" && returnType.ContainingNamespace.ToDisplayString() == "System.Threading.Tasks";
-            var asynchronous = tunit || useAsyncPlatform || inferredAsyncPlatform;
-            var componentContract = asynchronous ? "async-command" : "command";
+            var asynchronous = javaScriptExportWorker || tunit || useAsyncPlatform || inferredAsyncPlatform;
+            var componentContract = javaScriptExportWorker ? "jsexport-worker"
+                : asynchronous ? "async-command" : "command";
             var images = new Dictionary<string,byte[]> { ["NetWasmApp.dll"] = pe.ToArray(), ["NetWasm.CoreLib.dll"] = Convert.FromBase64String(implementation) };
             var additionalImplementations = JsonSerializer.Deserialize(additionalImplementationsJson, CompilerHostJsonContext.Default.DictionaryStringString)!;
             foreach (var image in additionalImplementations) images.Add(image.Key, Convert.FromBase64String(image.Value));
             images["compiler.wit.wasm"] = Convert.FromBase64String(witBytes);
             var options = new CompilerOptions(
-                "NetWasmApp.dll", ["NetWasm.CoreLib.dll", .. additionalImplementations.Keys], "Program", "<Main>$", [],
+                "NetWasmApp.dll", ["NetWasm.CoreLib.dll", .. additionalImplementations.Keys],
+                javaScriptExportWorker ? string.Empty : "Program",
+                javaScriptExportWorker ? string.Empty : "<Main>$", [],
                 WitPath: "compiler.wit.wasm", WitWorld: asynchronous ? "netwasm:platform@1.0.0/async-platform" : "netwasm:platform@1.0.0/platform",
-                EntryPointKind: CompilerEntryPointKind.ManagedExecutable);
+                EntryPointKind: javaScriptExportWorker
+                    ? CompilerEntryPointKind.Library
+                    : CompilerEntryPointKind.ManagedExecutable,
+                UseJavaScriptExportBoundary: javaScriptExportWorker);
             var request = new BrowserCompilationRequest(options, images,
                 new Dictionary<string,string> { ["compiler.wit.wasm"] = witJson },
                 new Dictionary<string,string>
                 {
                     ["compiler.wit.wasm"] = asynchronous ? asyncWitInventory : syncWitInventory,
                 },
-                selectManagedExecutableEntryPoint: true);
+                selectManagedExecutableEntryPoint: !javaScriptExportWorker);
 #if FRONTEND_CACHE_TRANSPORT
             if (prepareFrontendCache)
             {
@@ -435,19 +510,56 @@ public static partial class Program
             }
 #endif
             var compiled = BrowserCompiler.Compile(request);
+            if (compiled.NativeCallbackSupport is not null)
+                throw new InvalidOperationException("Browser native callbacks are not supported.");
             timings.Add(new("netwasm", Stopwatch.GetElapsedTime(started).TotalMilliseconds));
             var systemLibraries = JsonSerializer.Deserialize(runtimeSystemLibrariesJson,
                 CompilerHostJsonContext.Default.RuntimeSystemLibraryArray)!
                 .Select(asset => new RuntimeLinkPlanAsset(asset.Path, asset.Sha256)).ToImmutableArray();
+            var nativeLibraries = JsonSerializer.Deserialize(nativeLibrariesJson,
+                CompilerHostJsonContext.Default.RuntimeNativeLibraryArray)!;
             var runtimeLinkPlan = RuntimeLinkPlanner.Plan(new(runtimeManifest, "wasm32", compiled.StaticDataEnd,
                 AssetRoot: "/netwasm-link/runtime", OutputPath: "/netwasm-link/runtime.wasm",
                 MaximumMemorySizeBytes: guestMemoryMaximum, SystemLibraries: systemLibraries,
-                Optimization: runtimeOptimization));
-            var coreLinkPlan = BrowserComponentCoreModules.CreateLinkPlan(
-                new("/netwasm-link/application.wasm", "/netwasm-link/runtime.wasm", "/netwasm-link/linked.wasm",
-                    ComponentTarget.Wasm32Wasi02, compiled.EntryPoint.Abi),
-                new("/netwasm-link/environment.wasm", "/netwasm-link/host.wasm", "/netwasm-link/command.wasm",
-                    "/netwasm-link/merged.wasm", "/netwasm-link/sanitized.wasm"));
+                Optimization: runtimeOptimization)
+            {
+                NativeImports = [.. compiled.NativeImports.Select(import => new RuntimeLinkPlanNativeImport(
+                    import.LibraryName,
+                    import.EntryPoint,
+                    [.. import.Parameters.Select(MapNativeType)],
+                    import.ReturnType is { } result ? MapNativeType(result) : null))],
+                NativeLibraries = [.. nativeLibraries.Select(library => new RuntimeLinkPlanNativeLibrary(
+                    library.LibraryName, library.Target, library.Path, library.Sha256))],
+            });
+            CoreLinkPlanInfo? coreLinkPlan = null;
+            RawCoreLinkPlanInfo? rawCoreLinkPlan = null;
+            string? rawBindingHandle = null;
+            if (javaScriptExportWorker)
+            {
+                var finalOptimization = Enum.Parse<FinalWasmOptimization>(optimization == "none" ? "None" : optimization);
+                var rawRequest = new RawModuleLinkRequest(
+                    "/netwasm-link/application.wasm", "/netwasm-link/runtime.wasm",
+                    "/netwasm-link/output.wasm", ComponentTarget.Wasm32Wasi02, finalOptimization)
+                {
+                    InternalRuntimeExports = [.. runtimeLinkPlan.InternalRuntimeExports
+                        .Select(value => new WasmInternalExport(value.Name, value.Kind))],
+                    InternalApplicationExports = [],
+                };
+                rawCoreLinkPlan = Describe(BrowserRawCoreModules.CreateLinkPlan(rawRequest,
+                    new("/netwasm-link/raw", "/netwasm-link/raw/linked.wasm")));
+                rawBindingHandle = Convert.ToHexStringLower(RandomNumberGenerator.GetBytes(16));
+                pendingRawBindingHandle = rawBindingHandle;
+                pendingRawBinding = new(new(compiled.FunctionImports, compiled.InteropManifest),
+                    witJson, asyncWitInventory);
+            }
+            else
+            {
+                coreLinkPlan = Describe(BrowserComponentCoreModules.CreateLinkPlan(
+                    new("/netwasm-link/application.wasm", "/netwasm-link/runtime.wasm", "/netwasm-link/linked.wasm",
+                        ComponentTarget.Wasm32Wasi02, compiled.EntryPoint.Abi),
+                    new("/netwasm-link/environment.wasm", "/netwasm-link/host.wasm", "/netwasm-link/command.wasm",
+                        "/netwasm-link/merged.wasm", "/netwasm-link/sanitized.wasm")));
+            }
             return Serialize(new(1, emitted.Success,
                 diagnostics: emitted.Diagnostics.Take(128).Select(Describe).ToArray(),
                 timings: timings.ToArray(), generatedSources: generatedSources,
@@ -455,7 +567,9 @@ public static partial class Program
                 application: Convert.ToBase64String(compiled.ApplicationModule), staticDataEnd: compiled.StaticDataEnd,
                 runtimeFeatures: compiled.RuntimeFeatures.ToArray(), imports: compiled.FunctionImports.Select(Describe).ToArray(),
                 interopManifest: Describe(compiled.InteropManifest), entryPoint: Describe(compiled.EntryPoint),
-                runtimeLinkPlan: Describe(runtimeLinkPlan), coreLinkPlan: Describe(coreLinkPlan), trustedRecipe: trustedRecipe,
+                runtimeLinkPlan: Describe(runtimeLinkPlan), coreLinkPlan: coreLinkPlan,
+                rawCoreLinkPlan: rawCoreLinkPlan, rawBindingHandle: rawBindingHandle,
+                trustedRecipe: trustedRecipe,
                 catalogCaseCount: tunit ? CountCatalogCases(generatedCompilation) : 0, componentContract: componentContract,
                 pe: emitted.Success ? Convert.ToBase64String(pe.ToArray()) : null));
         }
@@ -471,6 +585,133 @@ public static partial class Program
             return Serialize(new(1, false, "compiler-host", "host-error", true, error: Bound(error.ToString())));
         }
     }
+
+    private static RuntimeLinkPlanNativeValueType MapNativeType(WasmValueType value) => value switch
+    {
+        WasmValueType.I32 => RuntimeLinkPlanNativeValueType.I32,
+        WasmValueType.I64 => RuntimeLinkPlanNativeValueType.I64,
+        WasmValueType.F32 => RuntimeLinkPlanNativeValueType.F32,
+        WasmValueType.F64 => RuntimeLinkPlanNativeValueType.F64,
+        _ => throw new InvalidOperationException("Native import contains an unsupported value type."),
+    };
+
+    [JSExport]
+    public static string BuildRawBindings(string handle, string runtimeWitJson,
+        string runtimeWitInventory, string runtimeImportsJson, string finalImportsJson)
+    {
+        try
+        {
+            if (pendingRawBinding is null || pendingRawBindingHandle is null ||
+                !CryptographicOperations.FixedTimeEquals(
+                    Encoding.ASCII.GetBytes(handle),
+                    Encoding.ASCII.GetBytes(pendingRawBindingHandle)))
+                throw new InvalidOperationException("The raw binding handle is invalid or expired.");
+            var pending = pendingRawBinding;
+            pendingRawBinding = null;
+            pendingRawBindingHandle = null;
+            var runtimeImports = ParseRawImports(runtimeImportsJson);
+            var finalImports = ParseRawImports(finalImportsJson);
+            const string compilerWitPath = "compiler.wit.json";
+            const string runtimeWitPath = "command.wit.json";
+            var result = BrowserRawBindings.Build(new(
+                pending.Source,
+                compilerWitPath,
+                "netwasm:platform/async-platform@1.0.0",
+                runtimeWitPath,
+                "command",
+                WasmTarget.Wasm32,
+                new Dictionary<string, string>
+                {
+                    [compilerWitPath] = pending.CompilerWitJson,
+                    [runtimeWitPath] = runtimeWitJson,
+                },
+                new Dictionary<string, string>
+                {
+                    [compilerWitPath] = pending.CompilerWitInventory,
+                    [runtimeWitPath] = runtimeWitInventory,
+                },
+                runtimeImports,
+                finalImports));
+            return JsonSerializer.Serialize(new RawBindingResponse(1, true,
+                adapter: Convert.ToBase64String(result.Adapter),
+                requiredImports: result.RequiredImports.Select(value => new RequiredImportInfo(
+                    value.Interface, value.Name, value.Parameters.ToArray(), value.Results.ToArray())).ToArray()),
+                CompilerHostJsonContext.Default.RawBindingResponse);
+        }
+        catch (Exception error)
+        {
+            pendingRawBinding = null;
+            pendingRawBindingHandle = null;
+            return JsonSerializer.Serialize(new RawBindingResponse(1, false, Bound(error.ToString())),
+                CompilerHostJsonContext.Default.RawBindingResponse);
+        }
+    }
+
+    private static ImmutableArray<RawCoreFunctionImportSignature> ParseRawImports(string json)
+    {
+        var values = JsonSerializer.Deserialize(json, CompilerHostJsonContext.Default.RawCoreImportInfoArray)
+            ?? throw new InvalidDataException("Raw module imports are missing.");
+        if (values.Length > 512)
+            throw new InvalidDataException("Raw module import limit exceeded.");
+        return [.. values.Select(value => new RawCoreFunctionImportSignature(
+            new(value.Module, value.Name),
+            [.. value.Parameters.Select(MapRawCoreType)],
+            [.. value.Results.Select(MapRawCoreType)]))];
+    }
+
+    private static RawCoreValueType MapRawCoreType(int value) => value switch
+    {
+        0 => RawCoreValueType.I32,
+        1 => RawCoreValueType.I64,
+        2 => RawCoreValueType.F32,
+        3 => RawCoreValueType.F64,
+        _ => throw new InvalidDataException("Raw module import contains an unsupported value type."),
+    };
+
+    [JSExport]
+    public static string RemoveRawExports(string module, string exportsJson)
+    {
+        var exports = JsonSerializer.Deserialize(
+            exportsJson, CompilerHostJsonContext.Default.RuntimeLinkExportInfoArray)
+            ?? throw new InvalidDataException("Raw export selection is missing.");
+        if (exports.Length is < 1 or > 512)
+            throw new InvalidDataException("Raw export selection limit exceeded.");
+        return Convert.ToBase64String(BrowserRawCoreModules.RemoveExports(
+            Convert.FromBase64String(module),
+            [.. exports.Select(value => new WasmInternalExport(value.Name, value.Kind))]));
+    }
+
+    private static UserSource[] ParseUserSources(string value, string legacyPath)
+    {
+        // Keep the exported ABI stable while the browser protocol moves from one
+        // source string to an ordered source-set document. Older tool hosts still
+        // send raw source and remain valid during the transition.
+        if (!value.StartsWith("{\"schemaVersion\":", StringComparison.Ordinal)) return [new(legacyPath, value)];
+        var sourceSet = JsonSerializer.Deserialize(value, CompilerHostJsonContext.Default.UserSourceSet)
+            ?? throw new InvalidOperationException("The source set is missing.");
+        if (sourceSet.schemaVersion != 1 || sourceSet.files is not { Length: > 0 and <= MaximumUserSources })
+            throw new InvalidOperationException("The source set schema or file count is invalid.");
+        var paths = new HashSet<string>(StringComparer.Ordinal);
+        var totalBytes = 0;
+        foreach (var file in sourceSet.files)
+        {
+            if (!IsSafeUserSourcePath(file.path) || !paths.Add(file.path))
+                throw new InvalidOperationException("The source set contains an invalid or duplicate path.");
+            var bytes = Encoding.UTF8.GetByteCount(file.text);
+            if (bytes > MaximumUserSourceBytes)
+                throw new InvalidOperationException($"Source file '{file.path}' exceeds 64 KiB.");
+            totalBytes += bytes;
+        }
+        if (totalBytes > MaximumUserSourceSetBytes)
+            throw new InvalidOperationException("The source set exceeds 256 KiB.");
+        return sourceSet.files;
+    }
+
+    private static bool IsSafeUserSourcePath(string path) =>
+        !string.IsNullOrWhiteSpace(path) && path.Length <= 240 && path.EndsWith(".cs", StringComparison.Ordinal) &&
+        path[0] != '/' && !path.Contains('\\') && !path.Any(character =>
+            character < ' ' || character is '<' or '>' or ':' or '"' or '|' or '?' or '*') &&
+        path.Split('/').All(segment => segment.Length > 0 && segment is not "." and not "..");
 
 #if FRONTEND_CACHE_TRANSPORT
     [JSExport]

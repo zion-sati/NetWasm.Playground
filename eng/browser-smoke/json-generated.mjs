@@ -1,3 +1,4 @@
+import { openSample, setOptimizations } from './playground-ui.mjs';
 import { chromium } from 'playwright';
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { createHash } from 'node:crypto';
@@ -14,8 +15,8 @@ try {
   page.on('pageerror', error => errors.push(String(error)));
   await page.goto(url);
   await page.locator('.monaco-editor').waitFor();
-  if (process.env.PLAYGROUND_COMPARE_DESKTOP_BYTES === '1') await page.getByLabel('Optimization', { exact: true }).selectOption('Oz');
-  await page.getByLabel('Example', { exact: true }).selectOption('json-generated');
+  if (process.env.PLAYGROUND_COMPARE_DESKTOP_BYTES === '1') await setOptimizations(page, 'Oz');
+  await openSample(page, 'json-generated');
   async function run(stdout) {
     await page.locator('#run').click();
     await page.waitForFunction(() => document.querySelector('#stop').disabled, undefined, { timeout: 300000 });
