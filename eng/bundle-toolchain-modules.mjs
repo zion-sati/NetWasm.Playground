@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { rolldown } from 'rolldown';
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import { pathToFileURL } from 'node:url';
@@ -50,6 +50,16 @@ const specifications = [
     `,
   },
   {
+    name: 'raw-worker-runtime',
+    destination: 'jco/raw-worker-runtime.mjs',
+    source: `
+      export { bindWorkerImports } from ${JSON.stringify(pathToFileURL(join(stage, 'hosting/worker-import-bindings.mjs')).href)};
+      export { createBrowserRawExportSession } from ${JSON.stringify(pathToFileURL(join(stage, 'hosting/browser-raw-export-session.mjs')).href)};
+      export { WASIShim } from ${JSON.stringify(pathToFileURL(join(stage, 'jco/preview2/instantiation.js')).href)};
+      export { createFilesystem, InMemoryFilesystemAdapter } from ${JSON.stringify(pathToFileURL(join(stage, 'jco/preview2/filesystem.js')).href)};
+    `,
+  },
+  {
     name: 'guest-providers',
     destination: 'jco/guest-providers.mjs',
     source: `
@@ -64,17 +74,8 @@ const specifications = [
   },
 ];
 
-const hostingObsolete = [
-  'hosting/canonical-component-binder.mjs', 'hosting/command-executor.mjs',
-  'hosting/component-execution-preparation.mjs', 'hosting/component-executor.mjs',
-  'hosting/component-managed-exception-host.mjs', 'hosting/diagnostic-command-export.mjs',
-  'hosting/execution-contracts.mjs', 'hosting/execution-result.mjs',
-  'hosting/execution-scope-closer.mjs', 'hosting/guest-wake-notifier.mjs',
-  'hosting/managed-errors.mjs', 'hosting/managed-exception-details.mjs',
-  'hosting/managed-exception-reporter.mjs',
-  'hosting/managed-process-observer.mjs', 'hosting/pollable-reactor.mjs',
-  'hosting/terminal-managed-export.mjs',
-];
+const hostingObsolete = (await readdir(join(stage, 'hosting')))
+  .filter(name => name.endsWith('.mjs')).map(name => `hosting/${name}`);
 
 const obsolete = [
   'hosts/binaryen-host.mjs', 'hosts/tool-inputs.mjs', 'hosts/wasm-tools-host.mjs',
@@ -92,11 +93,22 @@ const obsolete = [
 
 try {
   const selected = providersOnly ? specifications.filter(item => item.name === 'guest-providers')
-    : hostingOnly ? specifications.filter(item => item.name === 'component-host') : specifications;
+    : hostingOnly ? specifications.filter(item => ['component-host', 'raw-worker-runtime'].includes(item.name))
+    : specifications.filter(item => item.name !== 'raw-worker-runtime');
   for (const specification of selected) {
     const entry = join(temporary, `${specification.name}.mjs`);
     await writeFile(entry, specification.source);
-    const bundle = await rolldown({ input: entry, external: id => id === 'node:fs/promises' });
+    const bundle = await rolldown({
+      input: entry,
+      external: id => id === 'node:fs/promises',
+      plugins: [{
+        name: 'preview2-browser-alias',
+        resolveId(id) {
+          return id === '@bytecodealliance/preview2-shim'
+            ? join(stage, 'jco/preview2/index.js') : null;
+        },
+      }],
+    });
     const generated = await bundle.generate({ format: 'esm', minify: false });
     const chunks = generated.output.filter(item => item.type === 'chunk');
     if (chunks.length !== 1 || generated.output.length !== 1 || chunks[0].dynamicImports.some(id => id !== 'node:fs/promises'))

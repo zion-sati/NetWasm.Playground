@@ -14,8 +14,11 @@ const recipes = new Set([
   'pipelines', 'web-encoding', 'xml', 'json-dom', 'json-generated', 'tunit', 'regex',
   'di', 'logging', 'hashing', 'fluentvalidation',
   'native-lz4',
+  'web-worker',
 ]);
 const encoder = new TextEncoder();
+const validStringArray = (value, maximumLength = 256) => Array.isArray(value) &&
+  value.length <= maximumLength && value.every(item => typeof item === 'string' && item.length <= 512);
 
 function validSourceSet(value) {
   if (typeof value !== 'string' || value.length > 300000) return false;
@@ -41,7 +44,7 @@ function validSourceSet(value) {
 
 serveWorker(async (data, emit) => {
   report = emit;
-  if (!['compile', 'prune', 'initialize'].includes(data.operation))
+  if (!['compile', 'prune', 'pruneRaw', 'buildRawBindings', 'initialize'].includes(data.operation))
     throw Error('Unsupported compiler operation');
   if (data.operation === 'initialize') {
     if (typeof data.toolchainId !== 'string' || !/^[a-f0-9]{64}$/.test(data.toolchainId))
@@ -65,5 +68,22 @@ serveWorker(async (data, emit) => {
       (!(data.module instanceof Uint8Array) || data.module.length > 5 * 1048576 ||
        typeof data.prefix !== 'string' || data.prefix.length > 255))
     throw Error('Invalid export pruning request');
+  if (data.operation === 'pruneRaw' &&
+      (!(data.module instanceof Uint8Array) || data.module.length > 5 * 1048576 ||
+       !Array.isArray(data.exports) || data.exports.length < 1 || data.exports.length > 512 ||
+       data.exports.some(value => !value || typeof value.Name !== 'string' || value.Name.length > 512 ||
+         !Number.isInteger(value.Kind) || value.Kind < 0 || value.Kind > 4)))
+    throw Error('Invalid raw export pruning request');
+  if (data.operation === 'buildRawBindings') {
+    const validImport = value => value && typeof value.Module === 'string' && value.Module.length <= 512 &&
+      typeof value.Name === 'string' && value.Name.length <= 512 &&
+      validStringArray(value.Parameters?.map(String), 32) && validStringArray(value.Results?.map(String), 4) &&
+      [...value.Parameters, ...value.Results].every(item => Number.isInteger(item) && item >= 0 && item <= 3);
+    if (typeof data.handle !== 'string' || !/^[a-f0-9]{32}$/.test(data.handle) ||
+        !Array.isArray(data.runtimeImports) || data.runtimeImports.length > 512 ||
+        !Array.isArray(data.finalImports) || data.finalImports.length > 512 ||
+        !data.runtimeImports.every(validImport) || !data.finalImports.every(validImport))
+      throw Error('Invalid raw binding request');
+  }
   return compiler.request(data);
 });

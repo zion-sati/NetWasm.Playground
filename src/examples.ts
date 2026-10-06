@@ -36,6 +36,7 @@ const descriptions: Readonly<Record<string, { description: string; category: Non
   hashing: { description: 'Compute non-cryptographic hashes with System.IO.Hashing.', category: 'Libraries' },
   logging: { description: 'Use source-generated Microsoft.Extensions.Logging messages.', category: 'Libraries' },
   'native-lz4': { description: 'Call the upstream LZ4 C library through LibraryImport and a WebAssembly .a archive.', category: 'Interop and workers' },
+  'web-worker': { description: 'Call a JSExport from a dedicated Web Worker and report progress through a JavaScript import.', category: 'Interop and workers' },
   tunit: { description: 'Compile and run an asynchronous TUnit test project.', category: 'Testing' },
 };
 
@@ -52,6 +53,63 @@ const recipes: readonly ExampleRecipe[] = [
     files: [
       { path: 'Program.cs', text: `using System;\nConsole.WriteLine(Answer.Value);\n` },
       { path: 'Answer.cs', text: `public static class Answer\n{\n    public const int Value = 42;\n}\n` },
+    ],
+  },
+  {
+    id: 'web-worker',
+    name: 'Web Worker · JSExport',
+    kind: 'jsexport-worker',
+    source: `using System;
+using System.Runtime.InteropServices.JavaScript;
+
+public static partial class WorkerApi
+{
+    [JSImport("report", "playground.progress")]
+    private static extern void Report(int completed, int total);
+
+    [JSExport("run")]
+    public static int Run(int total)
+    {
+        ArgumentOutOfRangeException.ThrowIfNegative(total);
+        for (int completed = 1; completed <= total; completed++)
+            Report(completed, total);
+        return total;
+    }
+}
+`,
+    files: [
+      {
+        path: 'WorkerApi.cs',
+        text: `using System;
+using System.Runtime.InteropServices.JavaScript;
+
+public static partial class WorkerApi
+{
+    [JSImport("report", "playground.progress")]
+    private static extern void Report(int completed, int total);
+
+    [JSExport("run")]
+    public static int Run(int total)
+    {
+        ArgumentOutOfRangeException.ThrowIfNegative(total);
+        for (int completed = 1; completed <= total; completed++)
+            Report(completed, total);
+        return total;
+    }
+}
+`,
+      },
+      {
+        path: 'progress.mjs',
+        text: `export function createWorkerImports(notify) {
+  return Object.freeze({
+    report(completed, total) {
+      notify("Progress", [completed, total]);
+    },
+  });
+}
+`,
+      },
     ],
   },
   {

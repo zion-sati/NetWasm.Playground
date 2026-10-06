@@ -7,7 +7,7 @@ const toBase64 = bytes => {
   return btoa(text);
 };
 const fromBase64 = text => Uint8Array.from(atob(text), character => character.charCodeAt(0));
-const coreRecipes = new Set(['hello', 'multi-file', 'span-memory-unsafe', 'datetime', 'csharp15-tour', 'native-lz4']);
+const coreRecipes = new Set(['hello', 'multi-file', 'span-memory-unsafe', 'datetime', 'csharp15-tour', 'native-lz4', 'web-worker']);
 const generatedRecipes = new Set(['json-generated', 'tunit', 'di', 'logging']);
 const validStringArray = (value, maximumLength = 256) => Array.isArray(value) &&
   value.length <= maximumLength && value.every(item => typeof item === 'string' && item.length <= 4096);
@@ -149,10 +149,16 @@ export function createNativeAotCompilerChannel(options = {}) {
             return { Path: `/netwasm-link/${asset}`, Sha256: receipt.sha256 };
           }));
         })(),
+        loader.load('compiler/command-wit.json').then(bytes => decoder.decode(bytes)),
+        loader.load('compiler/command-wit-command.wat').then(bytes => decoder.decode(bytes)),
       ]);
       const failed = loaded.find(result => result.status === 'rejected');
       if (failed) throw failed.reason;
-      return { inputs: loaded.map(result => result.value) };
+      const values = loaded.map(result => result.value);
+      return {
+        inputs: values.slice(0, 9),
+        rawBindings: { runtimeWitJson: values[9], runtimeWitInventory: values[10] },
+      };
     })().catch(error => { initialized = undefined; throw error; });
   }
 
@@ -230,10 +236,29 @@ export function createNativeAotCompilerChannel(options = {}) {
         await initialize();
         return { success: true };
       }
-      const { inputs } = await initialize();
+      const { inputs, rawBindings } = await initialize();
       if (data.operation === 'prune') {
         const value = invoke('retainComponentExports', [toBase64(data.module), data.prefix]);
         return { module: fromBase64(value), hostLinearMemoryBytes: module.HEAPU8.buffer.byteLength };
+      }
+      if (data.operation === 'pruneRaw') {
+        const value = invoke('removeRawExports', [toBase64(data.module), JSON.stringify(data.exports)]);
+        return { module: fromBase64(value), hostLinearMemoryBytes: module.HEAPU8.buffer.byteLength };
+      }
+      if (data.operation === 'buildRawBindings') {
+        const value = JSON.parse(invoke('buildRawBindings', [
+          data.handle,
+          rawBindings.runtimeWitJson,
+          rawBindings.runtimeWitInventory,
+          JSON.stringify(data.runtimeImports),
+          JSON.stringify(data.finalImports),
+        ]));
+        if (!value.success) throw Error(value.error || 'Raw binding generation failed');
+        return {
+          adapter: fromBase64(value.adapter),
+          requiredImports: value.requiredImports,
+          hostLinearMemoryBytes: module.HEAPU8.buffer.byteLength,
+        };
       }
       if (data.operation !== 'compile') throw Error('Unsupported native compiler operation');
       const { images, supportJson } = await recipeInputs(data.recipe);

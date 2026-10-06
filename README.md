@@ -105,10 +105,18 @@ is compiled as a separate Roslyn syntax tree, so diagnostics retain their
 project path. `eng/browser-smoke/multifile.mjs` qualifies a two-file run,
 publish, and path-aware compiler error.
 
+Native archives remain binary project assets and are validated as WebAssembly
+archives before entering the workspace. The LZ4 sample compiles a real `.a`
+library through `LibraryImport`; `eng/browser-smoke/native-library.mjs` covers
+archive rejection, library naming, compilation, and execution. The JSExport
+worker sample runs its managed export in a dedicated Web Worker and supplies
+its JavaScript import module from the project. The corresponding end-to-end
+check is `eng/browser-smoke/web-worker.mjs`.
+
 After the editor mounts, the Playground starts the compiler, linker and tools
 in background workers and fetches four phase-specific binary bundles for the
 compiler, linker, WebAssembly tools and guest runtime. The browser-addressable
-module graph is collapsed to 12 entry files. CI names every bundle
+module graph is collapsed to a small set of browser entry modules. CI names every bundle
 `<phase>.<sha256>.bin` and records that immutable URL in the generated manifest.
 Each whole bundle and every asset slice are checked against the manifest before
 use. Compile and Run remain available while this is happening; an early click joins the same worker

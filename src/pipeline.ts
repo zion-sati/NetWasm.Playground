@@ -1,5 +1,5 @@
 import type { CompilationResult, PipelineEvent, RunResult, SourceSnapshot, StageTiming, ToolchainPreloadProgress } from './contracts';
-import { createProject, serializeSourceSet, validateProjectFiles } from './workspace';
+import { createProject, isTextProjectFile, serializeSourceSet, validateProjectFiles } from './workspace';
 import { WorkerChannel } from './worker-channel';
 import { optimizationArguments, optimizationModes } from './optimization';
 import { createFrontendCache } from './workers/frontend-cache.mjs';
@@ -7,6 +7,44 @@ import { createNativeWasmOptChannel, supportsNativeWasmOpt } from './workers/nat
 import { materializeRuntimeLinkPlan } from './runtime-link-plan.mjs';
 const basename = (path: string) => path.slice(path.lastIndexOf('/') + 1);
 const compilerTimeoutMilliseconds = 300_000;
+type RawCoreImport = { Module: string; Name: string; Parameters: number[]; Results: number[] };
+const rawCoreValueTypes = new Map([['i32', 0], ['i64', 1], ['f32', 2], ['f64', 3]]);
+
+function parseCoreFunctionImports(bytes: Uint8Array): RawCoreImport[] {
+  const text = new TextDecoder('utf-8', { fatal: true }).decode(bytes);
+  const types = new Map<number, { Parameters: number[]; Results: number[] }>();
+  const imports: RawCoreImport[] = [];
+  const values = (source: string | undefined) => source ? source.trim().split(/\s+/u).map(value => {
+    const mapped = rawCoreValueTypes.get(value);
+    if (mapped === undefined) throw new Error(`Unsupported core Wasm value type: ${value}`);
+    return mapped;
+  }) : [];
+  for (const line of text.split('\n')) {
+    const type = /^\s*\(type \(;([0-9]+);\) \(func(?: \(param ([^)]*)\))?(?: \(result ([^)]*)\))?\)\)\s*$/u.exec(line);
+    if (type) {
+      const index = Number(type[1]);
+      if (types.has(index) || index !== types.size) throw new Error('Invalid core Wasm type inventory');
+      types.set(index, { Parameters: values(type[2]), Results: values(type[3]) });
+      continue;
+    }
+    if (!line.trimStart().startsWith('(import ')) continue;
+    const imported = /^\s*\(import ("(?:\\.|[^"\\])*") ("(?:\\.|[^"\\])*") \(func \(;[0-9]+;\) \(type ([0-9]+)\)\)\)\s*$/u.exec(line);
+    if (!imported) continue;
+    const signature = types.get(Number(imported[3]));
+    if (!signature) throw new Error('Core Wasm import references an unknown type');
+    imports.push({ Module: JSON.parse(imported[1]), Name: JSON.parse(imported[2]),
+      Parameters: [...signature.Parameters], Results: [...signature.Results] });
+  }
+  if (types.size === 0 || imports.length > 512) throw new Error('Invalid core Wasm import inventory');
+  return imports;
+}
+
+function lowerCamelData(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(lowerCamelData);
+  if (value === null || typeof value !== 'object') return value;
+  return Object.fromEntries(Object.entries(value).map(([name, member]) =>
+    [name[0].toLowerCase() + name.slice(1), lowerCamelData(member)]));
+}
 type AssetReceipt = { sha256: string; bytes: number; bundle?: string; offset?: number };
 type BundleRole = 'compiler' | 'linker' | 'tools' | 'guest';
 type BundleReceipt = { path: string; sha256: string; bytes: number; rawBytes: number; assets: number };
@@ -336,7 +374,7 @@ export class PlaygroundPipeline {
       if (!['hello', 'multi-file', 'span-memory-unsafe', 'csharp15-tour', 'datetime', 'http',
         'allocation', 'linq', 'async-linq', 'pipelines', 'web-encoding', 'xml', 'json-dom',
         'json-generated', 'tunit', 'regex', 'di', 'logging', 'hashing',
-        'fluentvalidation', 'native-lz4'].includes(snapshot.recipeId)) throw new Error('Unknown compilation recipe');
+        'fluentvalidation', 'native-lz4', 'web-worker'].includes(snapshot.recipeId)) throw new Error('Unknown compilation recipe');
       if (!optimizationModes.includes(optimization)) throw new Error('Unknown optimization mode');
       if (!['15', 'preview'].includes(snapshot.language) ||
           (snapshot.updatedMemorySafetyRules && snapshot.language !== 'preview'))
@@ -405,6 +443,77 @@ export class PlaygroundPipeline {
       }
       if (runtimeLookup.hit)
         await this.stage('tools-initialize', timings, () => this.initializeChannel('tools'));
+      if (compilation.componentContract === 'jsexport-worker') {
+        const plan = compilation.rawCoreLinkPlan;
+        if (!plan || !compilation.rawBindingHandle) throw new Error('Compiler returned no raw worker link plan');
+        const files: Record<string, Uint8Array> = {
+          'application.wasm': compilation.application,
+          'runtime.wasm': runtimeBytes,
+        };
+        for (const textModule of plan.TextModules) {
+          const output = basename(textModule.OutputPath), input = `${output}.wat`;
+          Object.assign(files, await this.stage('parse', timings, () => this.tool('wasm-tools',
+            ['parse', input, '--output', output],
+            { [input]: new TextEncoder().encode(textModule.Text) }, [output])));
+        }
+        const mergedName = basename(plan.ExportPruning?.InputPath ?? plan.Copy?.InputPath ?? plan.Validation.Path);
+        const merged = await this.stage('merge', timings, () =>
+          this.tool('wasm-merge', args(plan.Merge), files, [mergedName]));
+        let linked = merged[mergedName];
+        if (plan.ExportPruning) {
+          const pruned = await this.stage('prune', timings, () => this.channel('compiler').request({
+            operation: 'pruneRaw', module: linked, exports: plan.ExportPruning.RemovedExports,
+          }, [linked.buffer]));
+          linked = pruned.module;
+        }
+        if (plan.Optimization) {
+          linked = (await this.stage('optimize', timings, () => this.tool('wasm-opt',
+            optimizationArguments(args(plan.Optimization), optimization),
+            { [basename(plan.ExportPruning?.OutputPath ?? plan.Copy?.InputPath ?? mergedName)]: linked },
+            [basename(plan.Validation.Path)], 300_000)))[basename(plan.Validation.Path)];
+        }
+        const validationArguments = plan.Validation.Arguments.map((argument: string) =>
+          argument.startsWith('/netwasm-link/') ? basename(argument) : argument);
+        await this.stage('validate', timings, () => this.tool('wasm-tools', validationArguments,
+          { [basename(plan.Validation.Path)]: linked }, []));
+        const runtimeSkeleton = await this.stage('inspect-runtime', timings, () => this.tool('wasm-tools',
+          ['print', 'runtime.wasm', '--skeleton', '-o', 'runtime.wat'],
+          { 'runtime.wasm': runtimeBytes }, ['runtime.wat']));
+        const finalSkeleton = await this.stage('inspect-application', timings, () => this.tool('wasm-tools',
+          ['print', 'application.wasm', '--skeleton', '-o', 'application.wat'],
+          { 'application.wasm': linked }, ['application.wat']));
+        const rawBindings = await this.stage('bindings', timings, () =>
+          this.channel('compiler').request({
+            operation: 'buildRawBindings', handle: compilation.rawBindingHandle,
+            runtimeImports: parseCoreFunctionImports(runtimeSkeleton['runtime.wat']),
+            finalImports: parseCoreFunctionImports(finalSkeleton['application.wat']),
+          }));
+        const encode = (value: unknown) => new TextEncoder().encode(JSON.stringify(value));
+        const runtimeLayout = encode({
+          schemaVersion: 3,
+          target: 'wasm32',
+          applicationStaticDataEnd: compilation.staticDataEnd,
+          managedExecutableEntryPoint: null,
+          runtimeFeatures: compilation.runtimeFeatures,
+          nativeImports: [],
+        });
+        const interopManifest = encode(lowerCamelData(compilation.interopManifest));
+        if (epoch !== this.epoch) throw new Error('Stopped');
+        return { ...result, success: true, component: linked,
+          componentContract: 'jsexport-worker', rawAdapter: rawBindings.adapter,
+          runtimeLayout, interopManifest, requiredImports: rawBindings.requiredImports,
+          compilerHostLinearMemoryBytes: rawBindings.hostLinearMemoryBytes,
+          optimizerHost: this.optimizerHost,
+          optimizerWorkerCount: this.optimizerWorkerCount,
+          optimizerLinearMemoryBytes: this.optimizerLinearMemoryBytes,
+          optimizerFallback: this.optimizerFallback,
+          runtimeCacheMetrics: {
+            outcome: runtimeLookup.hit ? 'hit' : runtimeLookup.available ? 'miss' : 'unavailable',
+            readBytes: runtimeLookup.payload?.byteLength ?? 0,
+            written: runtimeCacheWritten,
+          },
+          assets: { ...this.assets } };
+      }
       const plan = compilation.coreLinkPlan;
       const files: Record<string, Uint8Array> = { 'application.wasm': compilation.application, 'runtime.wasm': runtimeBytes };
       for (const module of plan.TextModules) {
@@ -465,8 +574,40 @@ export class PlaygroundPipeline {
     try {
       if (!compilation.component) throw new Error('No compiled component');
       const componentContract = compilation.componentContract ?? 'command';
-      if (!['command', 'async-command'].includes(componentContract)) throw new Error('Invalid compiled component contract');
-      await this.initialize(); this.channels.get('guest')?.reset(); this.channels.delete('guest');
+      if (!['command', 'async-command', 'jsexport-worker'].includes(componentContract))
+        throw new Error('Invalid compiled component contract');
+      await this.initialize();
+      if (componentContract === 'jsexport-worker') {
+        if (!compilation.rawAdapter || !compilation.runtimeLayout || !compilation.interopManifest ||
+            !compilation.requiredImports) throw new Error('Raw worker artifacts are incomplete');
+        const modules = [...new Set((JSON.parse(new TextDecoder().decode(compilation.interopManifest)).imports ?? [])
+          .map((value: { module?: unknown }) => value.module)
+          .filter((value: unknown): value is string => typeof value === 'string' && value !== 'netwasm.host.v1'))];
+        const scripts = snapshot.files.filter(isTextProjectFile).filter(file => file.path.endsWith('.mjs'));
+        if (modules.length !== 1 || scripts.length !== 1)
+          throw new Error('The Playground worker sample requires one JavaScript import module');
+        this.channels.get('raw-guest')?.reset(); this.channels.delete('raw-guest');
+        const module = compilation.component.slice();
+        const adapter = compilation.rawAdapter.slice();
+        const runtimeLayout = compilation.runtimeLayout.slice();
+        const interopManifest = compilation.interopManifest.slice();
+        const result = await this.stage('run', timings, async () => {
+          const bundleName: BundleRole = 'guest';
+          await this.preloadBundle(bundleName, this.manifest!.bundles[bundleName]);
+          return this.channel('raw-guest').request({
+            operation: 'run', module, adapter, runtimeLayout, interopManifest,
+            requiredImports: compilation.requiredImports,
+            moduleName: modules[0], moduleSource: scripts[0].text,
+            exportName: 'run', arguments: [5],
+          }, [module.buffer, adapter.buffer, runtimeLayout.buffer, interopManifest.buffer], 60_000, 5_000);
+        });
+        const completion = `Completed: ${String(result.value)}\n`;
+        this.runOutput.stdout += completion;
+        this.emit({ type: 'console', stream: 'stdout', text: completion });
+        return { ...base, ...result, ...this.runOutput,
+          timings: [...timings, ...(result.timings ?? [])] };
+      }
+      this.channels.get('guest')?.reset(); this.channels.delete('guest');
       const component = compilation.component.slice();
       const result = await this.stage('run', timings, async () => {
         const bundleName: BundleRole = 'guest';
@@ -480,7 +621,11 @@ export class PlaygroundPipeline {
       for (const timing of result.timings ?? []) this.emit({ type: 'stage', stage: timing.stage, state: 'complete', milliseconds: timing.milliseconds });
       return { ...base, ...result, timings: [...timings, ...(result.timings ?? [])] };
     } catch (error) { return { ...base, ...this.runOutput, success: false, cancelled: epoch !== this.epoch, stage: this.currentStage, error: String(error) }; }
-    finally { this.channels.get('guest')?.reset(); this.channels.delete('guest'); this.runOutput = undefined; this.context = undefined; }
+    finally {
+      this.channels.get('guest')?.reset(); this.channels.delete('guest');
+      this.channels.get('raw-guest')?.reset(); this.channels.delete('raw-guest');
+      this.runOutput = undefined; this.context = undefined;
+    }
   }
   stop() {
     this.epoch++; this.abort?.abort();

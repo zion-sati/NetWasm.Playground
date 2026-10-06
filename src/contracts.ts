@@ -71,7 +71,16 @@ export interface CompilationResult {
   updatedMemorySafetyRules?: boolean;
   cancelled?: boolean;
   component?: Uint8Array;
-  componentContract?: 'command' | 'async-command';
+  componentContract?: 'command' | 'async-command' | 'jsexport-worker';
+  rawAdapter?: Uint8Array;
+  runtimeLayout?: Uint8Array;
+  interopManifest?: Uint8Array;
+  requiredImports?: readonly {
+    Interface: string;
+    Name: string;
+    Parameters: readonly string[];
+    Results: readonly string[];
+  }[];
   diagnostics: Diagnostic[];
   timings: StageTiming[];
   frontendCacheMetrics?: FrontendCacheMetrics;

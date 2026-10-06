@@ -48,6 +48,7 @@ public static unsafe class NativeAotBridge
                 "compileHttpRecipe" => CompileHttpRecipe(arguments),
                 "compileGeneratedRecipe" => CompileGeneratedRecipe(arguments),
                 "compileProject" => CompileProject(arguments),
+                "buildRawBindings" => BuildRawBindings(arguments),
                 "prepareRecipe" => PrepareRecipe(arguments),
                 "prepareHttpRecipe" => PrepareHttpRecipe(arguments),
                 "prepareGeneratedRecipe" => PrepareGeneratedRecipe(arguments),
@@ -58,6 +59,7 @@ public static unsafe class NativeAotBridge
                 "acknowledgeFrontendArtifactBatch" => AcknowledgeFrontendArtifactBatch(arguments),
                 "abandonFrontendArtifactPublication" => AbandonFrontendArtifactPublication(arguments),
                 "retainComponentExports" => RetainComponentExports(arguments),
+                "removeRawExports" => RemoveRawExports(arguments),
                 _ => throw new InvalidDataException("Native compiler operation is unsupported."),
             };
             result = Encoding.UTF8.GetBytes(response);
@@ -121,6 +123,12 @@ public static unsafe class NativeAotBridge
         RequireCount(value, 17);
         return Program.CompileProject(value[0], value[1], value[2], value[3], value[4], value[5], value[6], value[7],
             value[8], value[9], value[10], value[11], value[12], value[13], value[14], bool.Parse(value[15]), value[16]);
+    }
+
+    private static string BuildRawBindings(string[] value)
+    {
+        RequireCount(value, 5);
+        return Program.BuildRawBindings(value[0], value[1], value[2], value[3], value[4]);
     }
 
     private static string PrepareRecipe(string[] value)
@@ -188,6 +196,12 @@ public static unsafe class NativeAotBridge
     {
         RequireCount(value, 2);
         return Program.RetainComponentExports(value[0], value[1]);
+    }
+
+    private static string RemoveRawExports(string[] value)
+    {
+        RequireCount(value, 2);
+        return Program.RemoveRawExports(value[0], value[1]);
     }
 
     private static int CopyTo(byte[] source, byte* destination, int capacity)
