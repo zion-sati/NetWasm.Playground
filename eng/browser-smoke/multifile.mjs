@@ -1,9 +1,9 @@
 import { openSample } from './playground-ui.mjs';
-import { chromium } from 'playwright';
+import { browserType } from './engine.mjs';
 import { mkdirSync } from 'node:fs';
 
 const url = process.env.PLAYGROUND_URL ?? 'http://127.0.0.1:5174/';
-const browser = await chromium.launch({ headless: true });
+const browser = await browserType.launch({ headless: true });
 try {
   const page = await browser.newPage();
   const errors = [];
