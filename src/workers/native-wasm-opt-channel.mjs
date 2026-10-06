@@ -11,13 +11,17 @@ export const supportsNativeWasmOpt = () => {
   } catch { return false; }
 };
 
-export function createNativeWasmOptChannel(candidateRoot, workerCount, signal = () => {}) {
+export function createNativeWasmOptChannel(candidateRoot, wasmProvider, workerCount, signal = () => {}) {
+  if (typeof wasmProvider !== 'function') throw Error('Native wasm-opt module provider is required');
   workerCount ??= recommendedNativeWasmOptWorkers();
   const channel = new WorkerChannel(new URL('./native-wasm-opt-worker.mjs', import.meta.url), signal);
   let initialization;
-  const initialize = () => initialization ??= channel.request({
-    operation: 'initialize', candidateRoot, workerCount,
-  }, [], 120_000).catch(error => { initialization = undefined; throw error; });
+  const initialize = () => initialization ??= Promise.resolve(wasmProvider()).then(wasm => {
+    if (!(wasm instanceof Uint8Array) || wasm.byteLength < 1)
+      throw Error('Native wasm-opt module provider returned invalid bytes');
+    return channel.request({ operation: 'initialize', candidateRoot, workerCount, wasm },
+      [wasm.buffer], 120_000);
+  }).catch(error => { initialization = undefined; throw error; });
   return {
     initialize,
     async request(data, transfers = [], timeout = 300_000) {

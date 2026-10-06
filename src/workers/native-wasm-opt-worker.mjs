@@ -30,7 +30,7 @@ const maximumAssetBytes = 16 * 1048576;
 const limits = { maximumInputBytes: 5 * 1048576, maximumOutputBytes: 5 * 1048576 };
 let initialized, runtime, configuredRoot, configuredWorkers, workerCount;
 let linearMemory;
-let javascriptUrl, wasmUrl;
+let javascriptUrl;
 let stdout = [], stderr = [];
 
 const validPath = name => typeof name === 'string' && /^[A-Za-z0-9_.@/-]+$/.test(name) &&
@@ -46,7 +46,7 @@ async function boundedBytes(url, maximum = maximumAssetBytes) {
   return bytes;
 }
 
-async function initialize(root, requestedWorkers) {
+async function initialize(root, requestedWorkers, suppliedWasm) {
   if (initialized && (root !== configuredRoot || requestedWorkers !== configuredWorkers))
     throw Error('Native wasm-opt configuration changed');
   configuredRoot = root;
@@ -73,20 +73,19 @@ async function initialize(root, requestedWorkers) {
         !Number.isSafeInteger(receipt.wasmSize) || receipt.wasmSize < 1000000 ||
         !/^[a-f0-9]{64}$/.test(receipt.javascriptSha256) || !/^[a-f0-9]{64}$/.test(receipt.wasmSha256))
       throw Error('Invalid native wasm-opt receipt');
-    const loaded = await Promise.allSettled([
+    if (!(suppliedWasm instanceof Uint8Array) || suppliedWasm.byteLength < 1 ||
+        suppliedWasm.byteLength > maximumAssetBytes)
+      throw Error('Native wasm-opt module exceeds its byte limit');
+    const [javascript, wasm] = await Promise.all([
       boundedBytes(new URL('wasm-opt.js', candidateRoot)),
-      boundedBytes(new URL('wasm-opt.wasm', candidateRoot)),
+      Promise.resolve(suppliedWasm),
     ]);
-    const failed = loaded.find(result => result.status === 'rejected');
-    if (failed) throw failed.reason;
-    const [javascript, wasm] = loaded.map(result => result.value);
     if (javascript.byteLength !== receipt.javascriptSize || await digest(javascript) !== receipt.javascriptSha256 ||
         wasm.byteLength !== receipt.wasmSize || await digest(wasm) !== receipt.wasmSha256)
       throw Error('Native wasm-opt asset integrity failed');
-    // Candidate paths are immutable during a benchmark run. Production bundles
-    // will provide the same URLs through the verified tool asset loader.
+    // The module bytes arrive through the verified tool asset loader. The
+    // addressable JavaScript bootstrap remains the pthread worker entry point.
     javascriptUrl = new URL('wasm-opt.js', candidateRoot).href;
-    wasmUrl = new URL('wasm-opt.wasm', candidateRoot).href;
     const createWasmOpt = (await import(javascriptUrl)).default;
     workerCount = 0;
     runtime = await createWasmOpt({
@@ -95,7 +94,9 @@ async function initialize(root, requestedWorkers) {
       pthreadPoolSize: requestedWorkers,
       environment: { BINARYEN_CORES: String(requestedWorkers) },
       pthreadWorkerUrl: javascriptUrl,
-      locateFile: name => name === 'wasm-opt.wasm' ? wasmUrl : (() => { throw Error('Unexpected native wasm-opt asset'); })(),
+      locateFile: name => name === 'wasm-opt.wasm'
+        ? new URL('wasm-opt.wasm', candidateRoot).href
+        : (() => { throw Error('Unexpected native wasm-opt asset'); })(),
       instantiateWasm(imports, receive) {
         linearMemory = imports?.a?.a;
         if (!(linearMemory instanceof WebAssembly.Memory))
@@ -122,7 +123,7 @@ function clean(names) {
 
 serveWorker(async data => {
   if (!['initialize', 'wasm-opt'].includes(data.operation)) throw Error('Unsupported native wasm-opt operation');
-  const metadata = await initialize(data.candidateRoot, data.workerCount);
+  const metadata = await initialize(data.candidateRoot, data.workerCount, data.wasm);
   if (data.operation === 'initialize') return { success: true, workerCount, ...metadata };
   if (!Array.isArray(data.args) || data.args.length > 256 || !data.args.every(argument => typeof argument === 'string' && argument.length <= 4096) ||
       !Array.isArray(data.outputs) || data.outputs.length > 16 || !data.outputs.every(validPath))

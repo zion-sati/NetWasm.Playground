@@ -210,7 +210,9 @@ try {
         const originalChannel = pipeline.channel.bind(pipeline);
         const originalDispose = pipeline.dispose.bind(pipeline);
         const nativeTools = nativeWasmOpt
-          ? createNativeWasmOptChannel('/native-wasm-opt/', wasmOptWorkers) : undefined;
+          ? createNativeWasmOptChannel('/native-wasm-opt/', async () =>
+            new Uint8Array(await (await fetch('/native-wasm-opt/wasm-opt.wasm')).arrayBuffer()), wasmOptWorkers)
+          : undefined;
         let originalTools;
         const toolMemoryBytes = [];
         const proxy = {

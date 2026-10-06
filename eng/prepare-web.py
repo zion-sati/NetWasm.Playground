@@ -43,8 +43,11 @@ HOSTING_MODULES = (
 
 def bundle_role(relative):
     path = Path(relative)
-    # Keep the threaded optimizer closure lazy. It is fetched only after the
-    # browser proves cross-origin isolation and Wasm shared-memory support.
+    # Background-load the large threaded optimizer module with the existing
+    # Brotli-compressed tools bundle. Keep its small JavaScript bootstrap,
+    # receipt, and licence addressable for module loading and verification.
+    if relative == 'native-wasm-opt/wasm-opt.wasm':
+        return 'tools'
     if relative.startswith('native-wasm-opt/'):
         return None
     if relative in {'wasm-merge.js', 'wasm-opt.js', 'path-browserify.js'}:

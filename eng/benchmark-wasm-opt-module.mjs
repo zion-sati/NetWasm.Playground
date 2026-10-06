@@ -77,7 +77,8 @@ try {
       await pipeline.initialize();
       await pipeline.initializeChannel('tools');
       const currentTools = pipeline.channel('tools');
-      const nativeTools = native ? createNativeWasmOptChannel('/native-wasm-opt/', workerCount) : undefined;
+      const nativeTools = native ? createNativeWasmOptChannel('/native-wasm-opt/', async () =>
+        new Uint8Array(await (await fetch('/native-wasm-opt/wasm-opt.wasm')).arrayBuffer()), workerCount) : undefined;
       const selected = nativeTools ?? currentTools;
       let nativeMetadata;
       if (nativeTools) nativeMetadata = await nativeTools.initialize();

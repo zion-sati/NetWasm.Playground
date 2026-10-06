@@ -67,7 +67,8 @@ class PublicPackageBoundaryTests(unittest.TestCase):
             self.assertTrue((stage / 'workers/worker.mjs').exists())
             self.assertTrue((stage / 'notices/LICENSE.txt').exists())
             self.assertTrue((stage / 'native-wasm-opt/wasm-opt.js').exists())
-            self.assertTrue((stage / 'native-wasm-opt/wasm-opt.wasm').exists())
+            self.assertFalse((stage / 'native-wasm-opt/wasm-opt.wasm').exists())
+            self.assertEqual('tools', assets['native-wasm-opt/wasm-opt.wasm']['bundle'])
 
             (stage / bundles['compiler']['path']).write_bytes(b'corrupt')
             with self.assertRaisesRegex(ValueError, 'Staged bundle mismatch'):
@@ -129,7 +130,7 @@ class PublicPackageBoundaryTests(unittest.TestCase):
         self.assertIn("candidate['sdkImage']", builder)
         self.assertIn('emcc --version', builder)
 
-    def test_threaded_browser_wasm_opt_is_pinned_as_a_lazy_release_asset(self):
+    def test_threaded_browser_wasm_opt_is_pinned_as_a_background_bundle_asset(self):
         upstream = json.loads((ROOT / 'eng/upstream-sources.json').read_text())
         candidate = upstream['browserWasmOpt']
         self.assertEqual('https://github.com/zion-sati/NetWasm.NativeTools',
@@ -143,7 +144,9 @@ class PublicPackageBoundaryTests(unittest.TestCase):
         self.assertIn('add_browser_wasm_opt(stage', script)
         self.assertIn("pins['browserWasmOpt']", script)
         self.assertIn("{'wasm-opt.js', 'wasm-opt.wasm', 'build-receipt.json', 'LICENSE.upstream'}", script)
-        self.assertIsNone(PREPARE_WEB.bundle_role('native-wasm-opt/wasm-opt.wasm'))
+        self.assertEqual('tools', PREPARE_WEB.bundle_role('native-wasm-opt/wasm-opt.wasm'))
+        self.assertIsNone(PREPARE_WEB.bundle_role('native-wasm-opt/wasm-opt.js'))
+        self.assertIsNone(PREPARE_WEB.bundle_role('native-wasm-opt/build-receipt.json'))
 
     def test_candidate_compiler_feed_is_explicit_and_not_the_release_default(self):
         help_text = subprocess.check_output(
