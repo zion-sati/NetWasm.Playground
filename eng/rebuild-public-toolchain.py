@@ -344,6 +344,46 @@ def add_wit_inventories(stage, version):
             ), 'command')
 
 
+def runtime_variant_assets(targets):
+    """Collect manifest-owned wasm32 assets for every collector and profile."""
+    assets = {}
+    collectors = set()
+    system_libraries = None
+    for target in targets:
+        if target.get('target') != 'wasm32':
+            continue
+        collector = target.get('garbageCollector')
+        if not isinstance(collector, str) or not collector or collector in collectors:
+            raise ValueError('Runtime collector identities must be explicit and unique')
+        collectors.add(collector)
+        if system_libraries is None:
+            system_libraries = target.get('systemLibraries')
+        elif system_libraries != target.get('systemLibraries'):
+            raise ValueError('Runtime collectors disagree on shared system libraries')
+        profiles = [(target, ('runtimeArchive', 'collectorArchive', 'allowedUndefinedSymbols'))]
+        if 'speed' in target:
+            if not isinstance(target['speed'], dict):
+                raise ValueError('Invalid runtime speed profile')
+            profiles.append((target['speed'], ('runtimeArchive', 'collectorArchive')))
+        for profile, fields in profiles:
+            for field in fields:
+                asset = profile.get(field)
+                if (not isinstance(asset, dict) or set(asset) != {'path', 'sha256'} or
+                        not isinstance(asset['path'], str) or not isinstance(asset['sha256'], str) or
+                        not re.fullmatch(r'[a-f0-9]{64}', asset['sha256'])):
+                    raise ValueError(f'Invalid runtime variant asset: {field}')
+                relative = safe_path(asset['path'])
+                if len(relative.parts) < 2 or relative.parts[0] != 'wasm32':
+                    raise ValueError('Runtime variant asset is outside wasm32')
+                previous = assets.get(relative)
+                if previous is not None and previous != asset['sha256']:
+                    raise ValueError('Conflicting runtime asset hashes')
+                assets[relative] = asset['sha256']
+    if not collectors:
+        raise ValueError('Runtime pack contains no wasm32 collectors')
+    return assets
+
+
 def refresh_public_assets(stage, pins, runtime_plan=None, candidate_toolchain=None):
     """Replace every versioned compiler input in the pinned reusable browser base."""
     core = pins['netwasm']['packageVersion']
@@ -403,18 +443,10 @@ def refresh_public_assets(stage, pins, runtime_plan=None, candidate_toolchain=No
     if not runtime_directory.is_dir():
         raise ValueError('Public base lacks the wasm32 runtime directory')
     runtime_files = {}
-    for field in ('runtimeArchive', 'collectorArchive', 'allowedUndefinedSymbols'):
-        asset = target.get(field)
-        if (not isinstance(asset, dict) or set(asset) != {'path', 'sha256'} or
-                not isinstance(asset['path'], str) or not isinstance(asset['sha256'], str) or
-                not re.fullmatch(r'[a-f0-9]{64}', asset['sha256'])):
-            raise ValueError(f'Public runtime pack has an invalid {field}')
-        relative = safe_path(asset['path'])
-        if len(relative.parts) < 2 or relative.parts[0] != 'wasm32':
-            raise ValueError(f'Public runtime pack has an invalid wasm32 asset path: {asset["path"]}')
+    for relative, expected_hash in runtime_variant_assets(runtime['targets']).items():
         payload = public_member('netwasm.runtime.pack', core, f'runtime/{relative.as_posix()}')
-        if sha256(payload) != asset['sha256']:
-            raise ValueError(f'Public runtime pack asset changed: {asset["path"]}')
+        if sha256(payload) != expected_hash:
+            raise ValueError(f'Public runtime pack asset changed: {relative}')
         runtime_files[PurePosixPath(*relative.parts[1:])] = payload
     for existing in runtime_directory.iterdir():
         if existing.name == 'system':

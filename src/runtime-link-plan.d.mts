@@ -2,6 +2,7 @@ export interface BrowserRuntimeLinkPlan {
   Arguments: string[];
   OptimizationArguments: string[];
   RuntimeGlobalBase: number;
+  GarbageCollector: string;
   Cache: {
     schema: string;
     namespace: string;
@@ -11,7 +12,6 @@ export interface BrowserRuntimeLinkPlan {
   [key: string]: unknown;
 }
 
-export function materializeRuntimeLinkPlan(
+export function acceptRuntimeLinkPlan(
   plan: BrowserRuntimeLinkPlan,
-  runtimeFeatures?: string[],
-): Promise<BrowserRuntimeLinkPlan>;
+): BrowserRuntimeLinkPlan;

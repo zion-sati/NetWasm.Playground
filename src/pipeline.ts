@@ -6,7 +6,7 @@ import { executeCoreLink } from './core-link-executor.mjs';
 import { parseGarbageCollector } from './garbage-collector';
 import { createFrontendCache } from './workers/frontend-cache.mjs';
 import { createNativeWasmOptChannel, supportsNativeWasmOpt } from './workers/native-wasm-opt-channel.mjs';
-import { materializeRuntimeLinkPlan } from './runtime-link-plan.mjs';
+import { acceptRuntimeLinkPlan } from './runtime-link-plan.mjs';
 const basename = (path: string) => path.slice(path.lastIndexOf('/') + 1);
 const compilerTimeoutMilliseconds = 300_000;
 type RawCoreImport = { Module: string; Name: string; Parameters: number[]; Results: number[] };
@@ -404,8 +404,7 @@ export class PlaygroundPipeline {
         throw new Error('Compiler runtime plan does not match the selected garbage collector');
       if (compilation.timings) timings.push(...compilation.timings);
       const args = (invocation: any) => invocation.Arguments.map((arg: string) => arg.startsWith('/netwasm-link/') ? basename(arg) : arg);
-      const runtimePlan = await materializeRuntimeLinkPlan(
-        compilation.runtimeLinkPlan, compilation.runtimeFeatures);
+      const runtimePlan = acceptRuntimeLinkPlan(compilation.runtimeLinkPlan);
       const runtimeLookup = await this.stage('runtime-cache-read', timings,
         () => this.runtimeCache!.loadRuntime(runtimePlan.Cache));
       let runtimeBytes: Uint8Array;

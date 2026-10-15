@@ -412,7 +412,7 @@ async function execute(job: { snapshot: SourceSnapshot; run: boolean }) {
       result = await pipeline.compile(job.snapshot);
       if (!stopped && revision === job.snapshot.revision) {
         setDiagnostics(result.diagnostics); showTimings(result.timings); showOptimizer(result);
-        if (result.success && result.component) { compilation = result; const exclusive = result.timings.filter(t => !['generator', 'roslyn', 'netwasm'].includes(t.stage)).reduce((total, timing) => total + timing.milliseconds, 0); comparisons.set(result.optimization ?? 'Oz', { bytes: result.component.byteLength, milliseconds: exclusive }); showComparisons(); if (!job.run) { invalidateDownload(); compilation = result; publishedCompilation = result; downloadUrl = URL.createObjectURL(new Blob([new Uint8Array(result.component)], { type: 'application/wasm' })); downloadButton.disabled = false; setCompilationSuccess(true); el('size').textContent = `${optimizationLabels[result.optimization ?? 'Oz']} · ${formatBytes(result.component.byteLength)}`; selectDock('artifacts'); } }
+        if (result.success && result.component) { compilation = result; const exclusive = result.timings.filter(t => !['generator', 'roslyn', 'netwasm'].includes(t.stage)).reduce((total, timing) => total + timing.milliseconds, 0); comparisons.set(result.optimization ?? 'Oz', { bytes: result.component.byteLength, milliseconds: exclusive }); showComparisons(); if (!job.run) { invalidateDownload(); compilation = result; publishedCompilation = result; downloadUrl = URL.createObjectURL(new Blob([new Uint8Array(result.component)], { type: 'application/wasm' })); downloadButton.disabled = false; setCompilationSuccess(true); el('size').textContent = `${garbageCollectorLabels[result.garbageCollector ?? 'Compact']} · ${optimizationLabels[result.optimization ?? 'Oz']} · ${formatBytes(result.component.byteLength)}`; selectDock('artifacts'); } }
         else { invalidateDownload(); if (!result.cancelled) selectDock('problems'); el('status').textContent = result.cancelled ? 'Stopped' : result.error ? errorSummary(result.error) : 'Compilation failed'; }
       }
     }
@@ -449,7 +449,7 @@ else {
 compileButton.onclick = () => request(false);
 runButton.onclick = () => request(true);
 stopButton.onclick = () => { stopped = true; queued = undefined; pipeline?.stop(); stopButton.disabled = true; el('status').textContent = 'Stopped'; };
-downloadButton.onclick = () => { if (!downloadUrl || publishedCompilation?.revision !== revision) return; const anchor = document.createElement('a'); anchor.href = downloadUrl; anchor.download = `program-${publishedCompilation.optimization ?? 'Oz'}.wasm`; anchor.click(); };
+downloadButton.onclick = () => { if (!downloadUrl || publishedCompilation?.revision !== revision) return; const anchor = document.createElement('a'); anchor.href = downloadUrl; anchor.download = `program-${publishedCompilation.garbageCollector ?? 'Compact'}-${publishedCompilation.optimization ?? 'Oz'}.wasm`; anchor.click(); };
 type ProjectSaveHandle = { createWritable(): Promise<{ write(data: Blob): Promise<void>; close(): Promise<void> }> };
 type ProjectSavePicker = (options: { suggestedName: string; types: { description: string; accept: Record<string, string[]> }[] }) => Promise<ProjectSaveHandle>;
 async function exportProject() {
