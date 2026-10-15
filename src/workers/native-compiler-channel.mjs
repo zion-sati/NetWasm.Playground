@@ -237,6 +237,10 @@ export function createNativeAotCompilerChannel(options = {}) {
         return { success: true };
       }
       const { inputs, rawBindings } = await initialize();
+      if (data.operation === 'inline') {
+        const value = invoke('filterInlineAnnotations', [toBase64(data.module), data.selection]);
+        return { module: fromBase64(value), hostLinearMemoryBytes: module.HEAPU8.buffer.byteLength };
+      }
       if (data.operation === 'prune') {
         const value = invoke('retainComponentExports', [toBase64(data.module), data.prefix]);
         return { module: fromBase64(value), hostLinearMemoryBytes: module.HEAPU8.buffer.byteLength };
@@ -264,7 +268,7 @@ export function createNativeAotCompilerChannel(options = {}) {
       const { images, supportJson } = await recipeInputs(data.recipe);
       const compilerInputs = inputs.slice();
       if (supportJson !== undefined) compilerInputs[1] = supportJson;
-      const settings = [data.language, data.updatedMemorySafetyRules, data.optimization];
+      const settings = [data.language, data.updatedMemorySafetyRules, data.optimization, data.garbageCollector ?? 'Compact'];
       const projectKind = data.projectKind ?? 'command';
       const nativeLibrariesJson = data.nativeLibrariesJson ?? '[]';
       const projectCompilation = projectKind !== 'command' || nativeLibrariesJson !== '[]';
@@ -292,7 +296,11 @@ export function createNativeAotCompilerChannel(options = {}) {
       }
       if (typeof result.application === 'string') result.application = fromBase64(result.application);
       if (typeof result.pe === 'string') result.pe = fromBase64(result.pe);
-      if (result.success) validateRuntimeLinkPlan(result.runtimeLinkPlan, data.optimization);
+      if (result.success) {
+        validateRuntimeLinkPlan(result.runtimeLinkPlan, data.optimization);
+        if (result.runtimeLinkPlan.GarbageCollector !== (data.garbageCollector ?? 'Compact'))
+          throw Error('Runtime collector plan does not match the request');
+      }
       result.hostLinearMemoryBytes = module.HEAPU8.buffer.byteLength;
       return result;
     },
