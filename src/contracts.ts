@@ -14,6 +14,8 @@ export interface SourceSnapshot {
   recipeId: string;
   optimization?: OptimizationMode;
   garbageCollector?: GarbageCollector;
+  /** Compiler-owned override names and values; validated by the compiler. */
+  optimizationOverrides?: Readonly<Record<string, string>>;
   language: LanguageMode;
   updatedMemorySafetyRules: boolean;
 }
@@ -70,6 +72,8 @@ export interface CompilationResult {
   success: boolean;
   optimization?: OptimizationMode;
   garbageCollector?: GarbageCollector;
+  /** Compiler-owned override names and values; validated by the compiler. */
+  optimizationOverrides?: Readonly<Record<string, string>>;
   language?: LanguageMode;
   updatedMemorySafetyRules?: boolean;
   cancelled?: boolean;

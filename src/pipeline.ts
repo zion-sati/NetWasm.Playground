@@ -395,7 +395,7 @@ export class PlaygroundPipeline {
         operation: 'compile', recipe: snapshot.recipeId, sourceSet,
         projectKind: snapshot.projectKind ?? 'command', nativeLibrariesJson: nativeLibraries.json,
         language: snapshot.language, updatedMemorySafetyRules: snapshot.updatedMemorySafetyRules,
-        optimization, garbageCollector,
+        optimization, garbageCollector, optimizationOverrides: snapshot.optimizationOverrides,
       }, [], compilerTimeoutMilliseconds));
       for (const timing of compilation.timings ?? []) this.emit({ type: 'stage', stage: timing.stage, state: 'complete', milliseconds: timing.milliseconds });
       if (!compilation.success) return { ...result, success: false, diagnostics: compilation.diagnostics ?? [],

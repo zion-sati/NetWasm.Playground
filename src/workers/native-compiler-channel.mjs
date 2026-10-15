@@ -268,7 +268,8 @@ export function createNativeAotCompilerChannel(options = {}) {
       const { images, supportJson } = await recipeInputs(data.recipe);
       const compilerInputs = inputs.slice();
       if (supportJson !== undefined) compilerInputs[1] = supportJson;
-      const settings = [data.language, data.updatedMemorySafetyRules, data.optimization, data.garbageCollector ?? 'Compact'];
+      const settings = [data.language, data.updatedMemorySafetyRules, data.optimization, data.garbageCollector ?? 'Compact',
+        JSON.stringify(data.optimizationOverrides ?? null)];
       const projectKind = data.projectKind ?? 'command';
       const nativeLibrariesJson = data.nativeLibrariesJson ?? '[]';
       const projectCompilation = projectKind !== 'command' || nativeLibrariesJson !== '[]';

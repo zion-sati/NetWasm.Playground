@@ -28,7 +28,7 @@ try {
       data.source, reference, support, implementation, witJson, witBytes,
       syncWitInventory, asyncWitInventory, runtimeManifest, '[]',
       data.language ?? '15', data.updatedMemorySafetyRules ?? false, data.optimization ?? 'Oz',
-      data.garbageCollector ?? 'Compact'));
+      data.garbageCollector ?? 'Compact', JSON.stringify(data.optimizationOverrides ?? null)));
     result.hostLinearMemoryBytes = runtime.Module?.HEAPU8?.buffer?.byteLength ?? null;
     self.postMessage({id:data.id, result});
   }
