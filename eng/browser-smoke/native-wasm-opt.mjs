@@ -16,7 +16,7 @@ async function downloadContractComponent(page, name, enforceReleaseSize = true) 
   const event = page.waitForEvent('download');
   await page.locator('#download').click();
   const download = await event;
-  if (download.suggestedFilename() !== 'program-Oz.wasm')
+  if (download.suggestedFilename() !== 'program-Compact-Oz.wasm')
     throw Error(`Unexpected contract artifact name: ${download.suggestedFilename()}`);
   const path = `${output}/${name}.wasm`;
   await download.saveAs(path);

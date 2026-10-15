@@ -179,7 +179,7 @@ try {
   const event = page.waitForEvent('download');
   await page.locator('#download').click();
   const download = await event;
-  if (download.suggestedFilename() !== 'program-none.wasm') throw Error('Unexpected download filename');
+  if (download.suggestedFilename() !== 'program-Compact-none.wasm') throw Error('Unexpected download filename');
   const componentPath = `${output}/hello-none.wasm`;
   await download.saveAs(componentPath);
   const nativeStdout = execFileSync('wasmtime', [componentPath], { encoding: 'utf8' });
