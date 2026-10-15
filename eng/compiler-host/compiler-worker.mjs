@@ -26,7 +26,9 @@ try {
     }
     const result = JSON.parse(exports.NetWasm.Playground.CompilerProbe.Program.Compile(
       data.source, reference, support, implementation, witJson, witBytes,
-      syncWitInventory, asyncWitInventory, runtimeManifest, '[]', '15', false, 'Oz'));
+      syncWitInventory, asyncWitInventory, runtimeManifest, '[]',
+      data.language ?? '15', data.updatedMemorySafetyRules ?? false, data.optimization ?? 'Oz',
+      data.garbageCollector ?? 'Compact'));
     result.hostLinearMemoryBytes = runtime.Module?.HEAPU8?.buffer?.byteLength ?? null;
     self.postMessage({id:data.id, result});
   }

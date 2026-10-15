@@ -239,8 +239,9 @@ try {
   try {
    const result = JSON.parse(api.CompileGeneratedRecipe(data.source, reference, JSON.stringify(recipe.support), implementation,
      witJson, wit, syncWitInventory, asyncWitInventory, manifest,
-     JSON.stringify(recipe.references), JSON.stringify(recipe.implementations), data.recipe, data.evidence,
-     '15', false, 'Oz'));
+     '[]', JSON.stringify(recipe.references), JSON.stringify(recipe.implementations), data.recipe, data.evidence,
+     data.language ?? '15', data.updatedMemorySafetyRules ?? false, data.optimization ?? 'Oz',
+     data.garbageCollector ?? 'Compact'));
    result.hostLinearMemoryBytes = runtime.Module?.HEAPU8?.buffer?.byteLength ?? null;
    self.postMessage({id:data.id,result});
   } catch(error) { self.postMessage({id:data.id,error:String(error)}); }
