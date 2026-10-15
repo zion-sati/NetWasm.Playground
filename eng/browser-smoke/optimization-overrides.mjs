@@ -51,12 +51,17 @@ try {
         throw Error('Default frontend cache did not warm');
       for (const policy of ['loopInvariantFieldHoisting', 'staticDataViewElimination',
         'addressTakenValuePromotion', 'managedMethodInlining', 'branchPrefixDuplication',
-        'scalarCallPreservation', 'arrayBoundsCheckElimination', 'loopUnrolling',
+        'arrayBoundsCheckElimination', 'loopUnrolling',
         'constantArgumentPropagation', 'staticArrayPopulationElimination']) {
         const enabled = await compile(`${policy}-enabled`, { [policy]: 'Enabled' });
         const disabled = await compile(`${policy}-disabled`, { [policy]: 'Disabled' });
         if (enabled.namespace === disabled.namespace)
           throw Error(`Managed policy reused an incompatible frontend namespace: ${policy}`);
+      }
+      for (const value of ['Enabled', 'Disabled']) {
+        const scalar = await compile(`scalar-call-preservation-${value}`, { scalarCallPreservation: value });
+        if (scalar.namespace !== cold.namespace)
+          throw Error('Post-cache scalar-call emission policy changed the frontend namespace');
       }
       const preserve = await compile('hints-preserve', { managedInliningHints: 'Preserve' });
       const sizeAware = await compile('hints-ignore-aggressive', { managedInliningHints: 'IgnoreAggressive' });
