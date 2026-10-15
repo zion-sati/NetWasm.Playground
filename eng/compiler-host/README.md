@@ -1,5 +1,10 @@
 # NetWasm browser compiler feasibility harness
 
+This is a historical diagnostic harness, not an alternative production compiler
+transport. The shipped Playground uses the [NativeAOT-LLVM host](../nativeaot-compiler-host/README.md).
+Changes to the shared compiler program do not imply that this older Mono harness
+has been qualified against a new package version.
+
 Run from the repository root with a verified public desktop baseline and the
 exact package version pinned in `eng/upstream-sources.json`:
 
@@ -24,8 +29,8 @@ selects the managed entry from PE bytes. The public C# runtime planner returns
 the complete linker arguments, virtual asset paths and SHA-256 hashes using each
 application's static-data end. Compiler failures include a stage/code and bounded messages.
 This feasibility bridge uses base64 JSON; the final UI worker protocol will transfer
-owned buffers. The public component core-link plan also supplies adapter WAT,
-merge arguments, export-pruning policy and Release optimization arguments.
+owned buffers. The current component core-link contract carries ordered operations
+and compiler-prepared tool bindings, including inline and export edits.
 [The browser link smoke](../browser-link/README.md) executes that plan; component
 packaging and guest execution remain subsequent slices.
 
