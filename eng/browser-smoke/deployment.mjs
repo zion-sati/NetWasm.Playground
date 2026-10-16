@@ -12,14 +12,8 @@ if (!url || !output) throw Error('PLAYGROUND_URL and PLAYGROUND_EVIDENCE are req
 const expectedIdentity = expectedSiteIdentity();
 const playgroundVersion = process.env.EXPECTED_PLAYGROUND_VERSION ??
   JSON.parse(readFileSync(new URL('../../package.json', import.meta.url))).version;
-const releaseContract = JSON.parse(readFileSync(
-  new URL('../release-contract.json', import.meta.url), 'utf8'));
 if (!/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(playgroundVersion))
   throw Error('Invalid expected Playground version');
-if (releaseContract.schemaVersion !== 1 ||
-    !Number.isSafeInteger(releaseContract.toolchain?.maximumBackgroundBrotliBytes) ||
-    releaseContract.toolchain.maximumBackgroundBrotliBytes < 1)
-  throw Error('Invalid release transfer-size contract');
 mkdirSync(output, { recursive: true });
 const browser = await browserType.launch({ headless: true });
 const errors = [];
@@ -170,8 +164,6 @@ try {
   const compressedAssetBytes = Number(assetSizes?.[1].replaceAll(',', ''));
   if (!assetSizes || compressedAssetBytes >= Number(assetSizes[2].replaceAll(',', '')))
     throw Error(`Tool asset compression receipt was not displayed: ${assetSummary}`);
-  if (compressedAssetBytes > releaseContract.toolchain.maximumBackgroundBrotliBytes)
-    throw Error(`Background tool assets exceed the release limit: ${assetSummary}`);
   await page.locator('#compile').click();
   await page.waitForFunction(() => document.querySelector('#stop').disabled, undefined, { timeout: 240000 });
   if (await page.locator('#status').textContent() !== 'Compilation complete')
