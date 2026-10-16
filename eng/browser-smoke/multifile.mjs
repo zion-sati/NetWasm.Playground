@@ -42,7 +42,7 @@ try {
     document.querySelector('#diagnostics .diagnostic'), undefined, { timeout: 300_000 });
   if (!await page.locator('#download').isEnabled() || !(await page.locator('#size').textContent())?.includes('bytes'))
     throw new Error('Multi-file publish did not produce a downloadable component.');
-  if (!(await page.locator('#size').textContent())?.startsWith('-Oz (smallest)') ||
+  if (!(await page.locator('#size').textContent())?.startsWith('Compact (default) · -Oz (smallest) · ') ||
       !(await page.locator('#comparison').textContent())?.includes('None (fastest)') ||
       !(await page.locator('#comparison').textContent())?.includes('-Oz (smallest)'))
     throw new Error('Run and Publish did not retain independent build profiles.');
