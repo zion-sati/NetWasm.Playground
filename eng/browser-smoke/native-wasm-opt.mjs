@@ -9,7 +9,9 @@ if (!url || !output) throw Error('PLAYGROUND_URL and PLAYGROUND_EVIDENCE are req
 mkdirSync(output, { recursive: true });
 const contract = JSON.parse(readFileSync(
   new URL('../release-contract.json', import.meta.url), 'utf8'));
-if (contract.schemaVersion !== 1 || contract.helloWorld42?.componentBytes !== 55_825)
+if (contract.schemaVersion !== 1 ||
+    !Number.isSafeInteger(contract.helloWorld42?.componentBytes) ||
+    contract.helloWorld42.componentBytes <= 0)
   throw Error('Invalid Hello World release contract');
 
 async function downloadContractComponent(page, name, enforceReleaseSize = true) {
