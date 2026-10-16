@@ -12,6 +12,7 @@ import { formatTestReport } from './tunit-report';
 import './style.css';
 import { browserSupportMessage } from './browser-support';
 import { optimizationLabels, optimizationModes, type OptimizationMode } from './optimization';
+import { garbageCollectors, garbageCollectorLabels, parseGarbageCollector } from './garbage-collector';
 import { clearFrontendCache } from './workers/frontend-cache.mjs';
 import { cloneProjectFiles, createProject, inferNativeLibraryName, isTextProjectFile, normalizeProjectPath,
   projectFileKind, validateNativeLibraryName, validateProjectFiles, validateWasmArchive,
@@ -53,7 +54,7 @@ document.querySelector<HTMLDivElement>('#app')!.innerHTML = `
 </section>`;
 document.body.insertAdjacentHTML('beforeend', `
 <dialog id="samples-dialog" class="ide-dialog"><form method="dialog"><header><div><h2>Open a sample</h2><p>Choose a complete project to open in the Playground.</p></div><button value="cancel" aria-label="Close">×</button></header><div id="sample-list" class="sample-list"></div></form></dialog>
-<dialog id="settings-dialog" class="ide-dialog settings-dialog"><form method="dialog"><header><div><h2>Playground settings</h2><p>Run and Publish use independent build profiles.</p></div><button value="cancel" aria-label="Close">×</button></header><div class="settings-grid"><section><h3>Run</h3><p>Optimize for the shortest edit and test loop.</p><label>Optimization <select id="run-optimization" aria-label="Run optimization"></select></label></section><section><h3>Publish</h3><p>Optimize the downloadable artifact.</p><label>Optimization <select id="optimization" aria-label="Publish optimization"></select></label></section><section class="compiler-settings"><h3>Compiler</h3><label>Language <select id="language" aria-label="Language"><option value="15">C# 15</option><option value="preview">C# 15 preview</option></select></label><label id="memory-safety-setting" class="feature-setting" hidden><input id="updated-memory-safety" type="checkbox"><span>Updated memory safety rules<small><a href="https://learn.microsoft.com/dotnet/csharp/language-reference/proposals/unsafe-evolution" target="_blank" rel="noreferrer">Requires explicit <code>unsafe(...)</code> at affected call sites.</a></small></span></label><button id="clear-cache" type="button">Clear compilation cache</button></section></div><footer><button value="cancel" class="primary">Done</button></footer></form></dialog>`);
+<dialog id="settings-dialog" class="ide-dialog settings-dialog"><form method="dialog"><header><div><h2>Playground settings</h2><p>Run and Publish use independent build profiles.</p></div><button value="cancel" aria-label="Close">×</button></header><div class="settings-grid"><section><h3>Run</h3><p>Optimize for the shortest edit and test loop.</p><label>Optimization <select id="run-optimization" aria-label="Run optimization"></select></label></section><section><h3>Publish</h3><p>Optimize the downloadable artifact.</p><label>Optimization <select id="optimization" aria-label="Publish optimization"></select></label></section><section class="compiler-settings"><h3>Compiler</h3><label>Garbage collector <select id="garbage-collector" aria-label="Garbage collector"></select></label><p id="garbage-collector-help">Changing collector rebuilds the application.</p><label>Language <select id="language" aria-label="Language"><option value="15">C# 15</option><option value="preview">C# 15 preview</option></select></label><label id="memory-safety-setting" class="feature-setting" hidden><input id="updated-memory-safety" type="checkbox"><span>Updated memory safety rules<small><a href="https://learn.microsoft.com/dotnet/csharp/language-reference/proposals/unsafe-evolution" target="_blank" rel="noreferrer">Requires explicit <code>unsafe(...)</code> at affected call sites.</a></small></span></label><button id="clear-cache" type="button">Clear compilation cache</button></section></div><footer><button value="cancel" class="primary">Done</button></footer></form></dialog>`);
 document.body.insertAdjacentHTML('beforeend', `
 <dialog id="file-dialog" class="ide-dialog file-dialog"><form method="dialog"><header><div><h2 id="file-dialog-title">New file</h2><p>Enter a project-relative path. The extension selects the file type.</p></div><button value="cancel" aria-label="Close">×</button></header><div class="file-settings"><label>File path<input id="file-path" autocomplete="off" spellcheck="false" placeholder="Helpers/Value.cs"></label><p id="file-dialog-error" class="dialog-error" role="alert"></p></div><footer><button value="cancel" class="secondary">Cancel</button><button id="save-file" value="default" class="primary">Create</button></footer></form></dialog>
 <dialog id="archive-dialog" class="ide-dialog archive-dialog"><form method="dialog"><header><div><h2>Native library settings</h2><p id="archive-path"></p></div><button value="cancel" aria-label="Close">×</button></header><div class="archive-settings"><label>LibraryImport name<input id="archive-library-name" autocomplete="off" spellcheck="false"></label><p>This must match the name used by <code>[LibraryImport("…")]</code>. The archive is linked only when a reachable import uses it.</p></div><footer><button value="cancel">Cancel</button><button id="save-archive-settings" value="default" class="primary">Save</button></footer></form></dialog>`);
@@ -70,6 +71,17 @@ const fileDialog = el<HTMLDialogElement>('file-dialog');
 const archiveDialog = el<HTMLDialogElement>('archive-dialog');
 const runOptimizationSelect = el<HTMLSelectElement>('run-optimization');
 const optimizationSelect = el<HTMLSelectElement>('optimization');
+const garbageCollectorSelect = el<HTMLSelectElement>('garbage-collector');
+for (const collector of garbageCollectors) {
+  const option = document.createElement('option'); option.value = collector; option.textContent = garbageCollectorLabels[collector]; garbageCollectorSelect.append(option);
+}
+garbageCollectorSelect.value = parseGarbageCollector(localStorage.getItem('netwasm.garbageCollector'));
+function showCollectorHelp() {
+  el('garbage-collector-help').textContent = garbageCollectorSelect.value === 'Bump'
+    ? 'Bump never collects. Memory is reclaimed only when the application instance is discarded.'
+    : 'Changing collector rebuilds the application.';
+}
+showCollectorHelp();
 const languageSelect = el<HTMLSelectElement>('language');
 const updatedMemorySafety = el<HTMLInputElement>('updated-memory-safety');
 const memorySafetySetting = el<HTMLLabelElement>('memory-safety-setting');
@@ -357,6 +369,10 @@ for (const category of categories) {
   el('sample-list').append(section);
 }
 el<HTMLButtonElement>('open-samples').onclick = () => samplesDialog.showModal();
+garbageCollectorSelect.onchange = () => {
+  localStorage.setItem('netwasm.garbageCollector', parseGarbageCollector(garbageCollectorSelect.value));
+  revision++; comparisons.clear(); showComparisons(); invalidateDownload(); showCollectorHelp();
+};
 runOptimizationSelect.onchange = () => { localStorage.setItem('netwasm.runOptimization', runOptimizationSelect.value); invalidateDownload(); el('status').textContent = `Run optimization changed to ${optimizationLabels[runOptimizationSelect.value as OptimizationMode]}`; };
 optimizationSelect.onchange = () => { localStorage.setItem('netwasm.publishOptimization', optimizationSelect.value); invalidateDownload(); el('status').textContent = `Publish optimization changed to ${optimizationLabels[optimizationSelect.value as OptimizationMode]}`; };
 function languageSettingsChanged() {
@@ -380,22 +396,23 @@ updatedMemorySafety.onchange = () => {
 function snapshot(run: boolean): SourceSnapshot { return { requestId: ++nextRequest, revision,
   files: cloneProjectFiles(project.files), projectKind: project.kind, recipeId: project.recipeId,
   optimization: (run ? runOptimizationSelect.value : optimizationSelect.value) as OptimizationMode,
+  garbageCollector: parseGarbageCollector(garbageCollectorSelect.value),
   language: languageSelect.value as LanguageMode, updatedMemorySafetyRules: updatedMemorySafety.checked }; }
 function request(run: boolean) { const job = { snapshot: snapshot(run), run }; selectDock('build'); if (active) { queued = job; el('status').textContent = 'Latest request queued'; } else void execute(job); }
 async function execute(job: { snapshot: SourceSnapshot; run: boolean }) {
-  runOnly = job.run && !!compilation?.success && compilation.revision === job.snapshot.revision && compilation.optimization === job.snapshot.optimization && compilation.language === job.snapshot.language && compilation.updatedMemorySafetyRules === job.snapshot.updatedMemorySafetyRules;
-  compileButton.disabled = true; runButton.disabled = true; runOptimizationSelect.disabled = true; optimizationSelect.disabled = true; languageSelect.disabled = true; updatedMemorySafety.disabled = true; clearCacheButton.disabled = true;
+  runOnly = job.run && !!compilation?.success && compilation.revision === job.snapshot.revision && compilation.optimization === job.snapshot.optimization && compilation.garbageCollector === job.snapshot.garbageCollector && compilation.language === job.snapshot.language && compilation.updatedMemorySafetyRules === job.snapshot.updatedMemorySafetyRules;
+  compileButton.disabled = true; runButton.disabled = true; garbageCollectorSelect.disabled = true; runOptimizationSelect.disabled = true; optimizationSelect.disabled = true; languageSelect.disabled = true; updatedMemorySafety.disabled = true; clearCacheButton.disabled = true;
   document.querySelector('.workbench')!.setAttribute('aria-busy', 'true');
   if (!job.run) setCompilationSuccess(false);
   active = job.snapshot; stopped = false; stopButton.disabled = false; stages.clear(); el('stages').replaceChildren(); el('output').textContent = ''; el('exit').textContent = ''; el('timings').textContent = ''; el('optimizer').textContent = ''; el('status').textContent = 'Starting';
   pipeline ??= new PlaygroundPipeline(onEvent);
   try {
     let result = compilation;
-    if (!job.run || !result?.success || result.revision !== job.snapshot.revision || result.optimization !== job.snapshot.optimization || result.language !== job.snapshot.language || result.updatedMemorySafetyRules !== job.snapshot.updatedMemorySafetyRules) {
+    if (!job.run || !result?.success || result.revision !== job.snapshot.revision || result.optimization !== job.snapshot.optimization || result.garbageCollector !== job.snapshot.garbageCollector || result.language !== job.snapshot.language || result.updatedMemorySafetyRules !== job.snapshot.updatedMemorySafetyRules) {
       result = await pipeline.compile(job.snapshot);
       if (!stopped && revision === job.snapshot.revision) {
         setDiagnostics(result.diagnostics); showTimings(result.timings); showOptimizer(result);
-        if (result.success && result.component) { compilation = result; const exclusive = result.timings.filter(t => !['generator', 'roslyn', 'netwasm'].includes(t.stage)).reduce((total, timing) => total + timing.milliseconds, 0); comparisons.set(result.optimization ?? 'Oz', { bytes: result.component.byteLength, milliseconds: exclusive }); showComparisons(); if (!job.run) { invalidateDownload(); compilation = result; publishedCompilation = result; downloadUrl = URL.createObjectURL(new Blob([new Uint8Array(result.component)], { type: 'application/wasm' })); downloadButton.disabled = false; setCompilationSuccess(true); el('size').textContent = `${optimizationLabels[result.optimization ?? 'Oz']} · ${formatBytes(result.component.byteLength)}`; selectDock('artifacts'); } }
+        if (result.success && result.component) { compilation = result; const exclusive = result.timings.filter(t => !['generator', 'roslyn', 'netwasm'].includes(t.stage)).reduce((total, timing) => total + timing.milliseconds, 0); comparisons.set(result.optimization ?? 'Oz', { bytes: result.component.byteLength, milliseconds: exclusive }); showComparisons(); if (!job.run) { invalidateDownload(); compilation = result; publishedCompilation = result; downloadUrl = URL.createObjectURL(new Blob([new Uint8Array(result.component)], { type: 'application/wasm' })); downloadButton.disabled = false; setCompilationSuccess(true); el('size').textContent = `${garbageCollectorLabels[result.garbageCollector ?? 'Compact']} · ${optimizationLabels[result.optimization ?? 'Oz']} · ${formatBytes(result.component.byteLength)}`; selectDock('artifacts'); } }
         else { invalidateDownload(); if (!result.cancelled) selectDock('problems'); el('status').textContent = result.cancelled ? 'Stopped' : result.error ? errorSummary(result.error) : 'Compilation failed'; }
       }
     }
@@ -405,7 +422,7 @@ async function execute(job: { snapshot: SourceSnapshot; run: boolean }) {
       if (!stopped && revision === job.snapshot.revision) { el('output').textContent = run.stdout + run.stderr; el('exit').textContent = run.exitCode === undefined ? '' : `Exit ${run.exitCode}`; showTimings([...result.timings, ...run.timings]); el('status').textContent = run.cancelled ? 'Stopped' : run.success ? 'Run complete' : run.error ? errorSummary(run.error) : 'Run failed'; if (job.snapshot.recipeId === 'tunit' && !run.cancelled && !run.error && run.exitCode !== undefined) { const report = formatTestReport(run.stdout); el('output').textContent = report.text + run.stderr; el('status').textContent = `Tests complete · ${report.passed} passed · ${report.failed} failed`; } }
     } else if (!stopped && result?.success && revision === job.snapshot.revision) el('status').textContent = 'Compilation complete';
   } catch (error) { if (!stopped && revision === job.snapshot.revision) el('status').textContent = errorSummary(error); }
-  finally { if (stageTimer) clearInterval(stageTimer); stageTimer = undefined; active = undefined; stopButton.disabled = true; compileButton.disabled = !!unsupported; runButton.disabled = !!unsupported; runOptimizationSelect.disabled = false; optimizationSelect.disabled = false; languageSelect.disabled = false; updatedMemorySafety.disabled = false; clearCacheButton.disabled = false; document.querySelector('.workbench')!.setAttribute('aria-busy', 'false'); const next = queued; queued = undefined; if (next) void execute(next); }
+  finally { if (stageTimer) clearInterval(stageTimer); stageTimer = undefined; active = undefined; stopButton.disabled = true; compileButton.disabled = !!unsupported; runButton.disabled = !!unsupported; garbageCollectorSelect.disabled = false; runOptimizationSelect.disabled = false; optimizationSelect.disabled = false; languageSelect.disabled = false; updatedMemorySafety.disabled = false; clearCacheButton.disabled = false; document.querySelector('.workbench')!.setAttribute('aria-busy', 'false'); const next = queued; queued = undefined; if (next) void execute(next); }
 }
 unsupported = browserSupportMessage();
 if (unsupported) { compileButton.disabled = true; runButton.disabled = true; el('status').textContent = unsupported; }
@@ -432,7 +449,7 @@ else {
 compileButton.onclick = () => request(false);
 runButton.onclick = () => request(true);
 stopButton.onclick = () => { stopped = true; queued = undefined; pipeline?.stop(); stopButton.disabled = true; el('status').textContent = 'Stopped'; };
-downloadButton.onclick = () => { if (!downloadUrl || publishedCompilation?.revision !== revision) return; const anchor = document.createElement('a'); anchor.href = downloadUrl; anchor.download = `program-${publishedCompilation.optimization ?? 'Oz'}.wasm`; anchor.click(); };
+downloadButton.onclick = () => { if (!downloadUrl || publishedCompilation?.revision !== revision) return; const anchor = document.createElement('a'); anchor.href = downloadUrl; anchor.download = `program-${publishedCompilation.garbageCollector ?? 'Compact'}-${publishedCompilation.optimization ?? 'Oz'}.wasm`; anchor.click(); };
 type ProjectSaveHandle = { createWritable(): Promise<{ write(data: Blob): Promise<void>; close(): Promise<void> }> };
 type ProjectSavePicker = (options: { suggestedName: string; types: { description: string; accept: Record<string, string[]> }[] }) => Promise<ProjectSaveHandle>;
 async function exportProject() {
@@ -441,6 +458,7 @@ async function exportProject() {
     updatedMemorySafetyRules: updatedMemorySafety.checked,
     runOptimization: runOptimizationSelect.value as OptimizationMode,
     publishOptimization: optimizationSelect.value as OptimizationMode,
+    garbageCollector: parseGarbageCollector(garbageCollectorSelect.value),
   });
   const filename = projectArchiveName(project.name);
   const blob = new Blob([archive.buffer as ArrayBuffer], { type: 'application/zip' });

@@ -1,4 +1,5 @@
 import type { OptimizationMode } from './optimization.ts';
+import { parseGarbageCollector, type GarbageCollector } from './garbage-collector.ts';
 import { isTextProjectFile, validateProjectFiles, type PlaygroundProject } from './workspace.ts';
 
 export interface ProjectArchiveSettings {
@@ -6,6 +7,7 @@ export interface ProjectArchiveSettings {
   updatedMemorySafetyRules: boolean;
   runOptimization: OptimizationMode;
   publishOptimization: OptimizationMode;
+  garbageCollector?: GarbageCollector;
 }
 
 const encoder = new TextEncoder();
@@ -99,6 +101,7 @@ export function buildProjectArchive(project: PlaygroundProject, settings: Projec
     recipeId: project.recipeId,
     language: settings.language,
     updatedMemorySafetyRules: settings.updatedMemorySafetyRules,
+    garbageCollector: parseGarbageCollector(settings.garbageCollector),
     profiles: {
       run: { optimization: settings.runOptimization },
       publish: { optimization: settings.publishOptimization },

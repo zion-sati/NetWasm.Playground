@@ -44,7 +44,7 @@ function validSourceSet(value) {
 
 serveWorker(async (data, emit) => {
   report = emit;
-  if (!['compile', 'prune', 'pruneRaw', 'buildRawBindings', 'initialize'].includes(data.operation))
+  if (!['compile', 'inline', 'prune', 'pruneRaw', 'buildRawBindings', 'initialize'].includes(data.operation))
     throw Error('Unsupported compiler operation');
   if (data.operation === 'initialize') {
     if (typeof data.toolchainId !== 'string' || !/^[a-f0-9]{64}$/.test(data.toolchainId))
@@ -61,6 +61,7 @@ serveWorker(async (data, emit) => {
        typeof (data.nativeLibrariesJson ?? '[]') !== 'string' || (data.nativeLibrariesJson ?? '[]').length > 65536 ||
        !['15', 'preview'].includes(data.language) ||
        !['none', 'O0', 'O1', 'O2', 'O3', 'Os', 'Oz'].includes(data.optimization) ||
+       typeof (data.garbageCollector ?? 'Compact') !== 'string' ||
        typeof data.updatedMemorySafetyRules !== 'boolean' ||
        (data.updatedMemorySafetyRules && data.language !== 'preview')))
     throw Error('Invalid compiler source, recipe, language, or optimization settings');
@@ -68,6 +69,10 @@ serveWorker(async (data, emit) => {
       (!(data.module instanceof Uint8Array) || data.module.length > 5 * 1048576 ||
        typeof data.prefix !== 'string' || data.prefix.length > 255))
     throw Error('Invalid export pruning request');
+  if (data.operation === 'inline' &&
+      (!(data.module instanceof Uint8Array) || data.module.length > 5 * 1048576 ||
+       !['Preserve', 'SizeAware', 'Remove'].includes(data.selection)))
+    throw Error('Invalid inline annotation request');
   if (data.operation === 'pruneRaw' &&
       (!(data.module instanceof Uint8Array) || data.module.length > 5 * 1048576 ||
        !Array.isArray(data.exports) || data.exports.length < 1 || data.exports.length > 512 ||

@@ -11,6 +11,20 @@ SPEC.loader.exec_module(MODULE)
 
 
 class BrowserNoticeVersionTests(unittest.TestCase):
+    def test_collector_license_and_notices_are_included(self):
+        paths = {
+            "LICENSES/Apache-2.0.txt",
+            "src/NetWasm.Runtime/collector/compact/NOTICE",
+            "src/NetWasm.Runtime/collector/compact/UPSTREAM-NOTICE",
+            "src/NetWasm.Runtime/collector/netwasm/NOTICE",
+        }
+        actual = {
+            entry["source"].get("path")
+            for entry in MODULE.PUBLIC_CATALOG["files"].values()
+            if entry["source"].get("repository") == "https://github.com/zion-sati/NetWasm"
+        }
+        self.assertTrue(paths.issubset(actual))
+
     def test_released_package_versions_follow_public_pins(self):
         versions = MODULE.current_package_versions()
         pins = json.loads((ROOT / "eng/upstream-sources.json").read_text())["sources"]

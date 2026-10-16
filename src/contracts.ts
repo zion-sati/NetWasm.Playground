@@ -1,4 +1,5 @@
 import type { OptimizationMode } from './optimization';
+import type { GarbageCollector } from './garbage-collector';
 import type { ProjectFile, ProjectKind } from './workspace';
 
 export type LanguageMode = '15' | 'preview';
@@ -12,6 +13,9 @@ export interface SourceSnapshot {
   source?: string;
   recipeId: string;
   optimization?: OptimizationMode;
+  garbageCollector?: GarbageCollector;
+  /** Compiler-owned override names and values; validated by the compiler. */
+  optimizationOverrides?: Readonly<Record<string, string>>;
   language: LanguageMode;
   updatedMemorySafetyRules: boolean;
 }
@@ -67,6 +71,9 @@ export interface CompilationResult {
   revision: number;
   success: boolean;
   optimization?: OptimizationMode;
+  garbageCollector?: GarbageCollector;
+  /** Compiler-owned override names and values; validated by the compiler. */
+  optimizationOverrides?: Readonly<Record<string, string>>;
   language?: LanguageMode;
   updatedMemorySafetyRules?: boolean;
   cancelled?: boolean;

@@ -41,7 +41,7 @@ try {
     const download = page.waitForEvent('download');
     await page.locator('#download').click();
     const item = await download;
-    if (item.suggestedFilename() !== `program-${mode}.wasm`) throw Error(`Wrong filename: ${item.suggestedFilename()}`);
+    if (item.suggestedFilename() !== `program-Compact-${mode}.wasm`) throw Error(`Wrong filename: ${item.suggestedFilename()}`);
     const path = `${output}/${mode}.wasm`; await item.saveAs(path);
     const bytes = readFileSync(path), nativeStdout = execFileSync('wasmtime', [path], { encoding: 'utf8' });
     if (nativeStdout !== '{"Name":"Ada","Score":42}\n') throw Error(`${mode}: Wasmtime output mismatch`);

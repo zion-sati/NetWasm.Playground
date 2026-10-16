@@ -1,10 +1,12 @@
 import type { CompilationResult, PipelineEvent, RunResult, SourceSnapshot, StageTiming, ToolchainPreloadProgress } from './contracts';
 import { createProject, isTextProjectFile, serializeSourceSet, validateProjectFiles } from './workspace';
 import { WorkerChannel } from './worker-channel';
-import { optimizationArguments, optimizationModes } from './optimization';
+import { optimizationModes } from './optimization';
+import { executeCoreLink } from './core-link-executor.mjs';
+import { parseGarbageCollector } from './garbage-collector';
 import { createFrontendCache } from './workers/frontend-cache.mjs';
 import { createNativeWasmOptChannel, supportsNativeWasmOpt } from './workers/native-wasm-opt-channel.mjs';
-import { materializeRuntimeLinkPlan } from './runtime-link-plan.mjs';
+import { acceptRuntimeLinkPlan } from './runtime-link-plan.mjs';
 const basename = (path: string) => path.slice(path.lastIndexOf('/') + 1);
 const compilerTimeoutMilliseconds = 300_000;
 type RawCoreImport = { Module: string; Name: string; Parameters: number[]; Results: number[] };
@@ -365,10 +367,11 @@ export class PlaygroundPipeline {
   }
   async compile(snapshot: SourceSnapshot): Promise<CompilationResult> {
     const optimization = snapshot.optimization ?? 'Oz';
+    const garbageCollector = parseGarbageCollector(snapshot.garbageCollector);
     const epoch = this.epoch; this.context = snapshot; const timings: StageTiming[] = [];
     this.optimizerHost = undefined; this.optimizerFallback = undefined;
     this.optimizerWorkerCount = undefined; this.optimizerLinearMemoryBytes = undefined;
-    const result = { requestId: snapshot.requestId, revision: snapshot.revision, optimization,
+    const result = { requestId: snapshot.requestId, revision: snapshot.revision, optimization, garbageCollector,
       language: snapshot.language, updatedMemorySafetyRules: snapshot.updatedMemorySafetyRules,
       diagnostics: [], timings };
     try {
@@ -392,15 +395,16 @@ export class PlaygroundPipeline {
         operation: 'compile', recipe: snapshot.recipeId, sourceSet,
         projectKind: snapshot.projectKind ?? 'command', nativeLibrariesJson: nativeLibraries.json,
         language: snapshot.language, updatedMemorySafetyRules: snapshot.updatedMemorySafetyRules,
-        optimization,
+        optimization, garbageCollector, optimizationOverrides: snapshot.optimizationOverrides,
       }, [], compilerTimeoutMilliseconds));
       for (const timing of compilation.timings ?? []) this.emit({ type: 'stage', stage: timing.stage, state: 'complete', milliseconds: timing.milliseconds });
       if (!compilation.success) return { ...result, success: false, diagnostics: compilation.diagnostics ?? [],
         stage: compilation.stage, error: compilation.error, assets: { ...this.assets } };
+      if (compilation.runtimeLinkPlan?.GarbageCollector !== garbageCollector)
+        throw new Error('Compiler runtime plan does not match the selected garbage collector');
       if (compilation.timings) timings.push(...compilation.timings);
       const args = (invocation: any) => invocation.Arguments.map((arg: string) => arg.startsWith('/netwasm-link/') ? basename(arg) : arg);
-      const runtimePlan = await materializeRuntimeLinkPlan(
-        compilation.runtimeLinkPlan, compilation.runtimeFeatures);
+      const runtimePlan = acceptRuntimeLinkPlan(compilation.runtimeLinkPlan);
       const runtimeLookup = await this.stage('runtime-cache-read', timings,
         () => this.runtimeCache!.loadRuntime(runtimePlan.Cache));
       let runtimeBytes: Uint8Array;
@@ -444,39 +448,33 @@ export class PlaygroundPipeline {
       }
       if (runtimeLookup.hit)
         await this.stage('tools-initialize', timings, () => this.initializeChannel('tools'));
-      if (compilation.componentContract === 'jsexport-worker') {
-        const plan = compilation.rawCoreLinkPlan;
-        if (!plan || !compilation.rawBindingHandle) throw new Error('Compiler returned no raw worker link plan');
-        const files: Record<string, Uint8Array> = {
-          'application.wasm': compilation.application,
-          'runtime.wasm': runtimeBytes,
-        };
-        for (const textModule of plan.TextModules) {
-          const output = basename(textModule.OutputPath), input = `${output}.wat`;
-          Object.assign(files, await this.stage('parse', timings, () => this.tool('wasm-tools',
-            ['parse', input, '--output', output],
-            { [input]: new TextEncoder().encode(textModule.Text) }, [output])));
-        }
-        const mergedName = basename(plan.ExportPruning?.InputPath ?? plan.Copy?.InputPath ?? plan.Validation.Path);
-        const merged = await this.stage('merge', timings, () =>
-          this.tool('wasm-merge', args(plan.Merge), files, [mergedName]));
-        let linked = merged[mergedName];
-        if (plan.ExportPruning) {
-          const pruned = await this.stage('prune', timings, () => this.channel('compiler').request({
-            operation: 'pruneRaw', module: linked, exports: plan.ExportPruning.RemovedExports,
-          }, [linked.buffer]));
-          linked = pruned.module;
-        }
-        if (plan.Optimization) {
-          linked = (await this.stage('optimize', timings, () => this.tool('wasm-opt',
-            optimizationArguments(args(plan.Optimization), optimization),
-            { [basename(plan.ExportPruning?.OutputPath ?? plan.Copy?.InputPath ?? mergedName)]: linked },
-            [basename(plan.Validation.Path)], 300_000)))[basename(plan.Validation.Path)];
-        }
-        const validationArguments = plan.Validation.Arguments.map((argument: string) =>
-          argument.startsWith('/netwasm-link/') ? basename(argument) : argument);
-        await this.stage('validate', timings, () => this.tool('wasm-tools', validationArguments,
-          { [basename(plan.Validation.Path)]: linked }, []));
+      const raw = compilation.componentContract === 'jsexport-worker';
+      const plan = raw ? compilation.rawCoreLinkPlan : compilation.coreLinkPlan;
+      if (typeof plan !== 'string' || (raw && !compilation.rawBindingHandle))
+        throw new Error('Compiler returned no core link execution plan');
+      const outputs = await executeCoreLink(plan, {
+        '/netwasm-link/application.wasm': compilation.application,
+        '/netwasm-link/runtime.wasm': runtimeBytes,
+      }, {
+        checkCancelled: () => { if (epoch !== this.epoch) throw new Error('Stopped'); },
+        parse: async text => (await this.stage('parse', timings, () => this.tool('wasm-tools',
+          ['parse', 'input.wat', '--output', 'output.wasm'],
+          { 'input.wat': new TextEncoder().encode(text) }, ['output.wasm'])))['output.wasm'],
+        inline: async (module, selection) => (await this.stage('inline', timings, () =>
+          this.channel('compiler').request({ operation: 'inline', module, selection }, [module.buffer]))).module,
+        exports: async (module, operation) => (await this.stage('prune', timings, () =>
+          this.channel('compiler').request(operation.componentPrefix !== null
+            ? { operation: 'prune', module, prefix: operation.componentPrefix }
+            : { operation: 'pruneRaw', module, exports: operation.removedExports.map(value => ({ Name: value.name, Kind: value.kind })) },
+          [module.buffer]))).module,
+        tool: (id, arguments_, files, names) => this.stage(
+          id === 'wasm-opt' ? 'optimize' : id === 'wasm-merge' ? 'merge' : 'validate', timings,
+          () => this.tool(id, arguments_, files, names, 300_000)),
+      });
+      const finalModules = Object.values(outputs);
+      if (finalModules.length !== 1) throw new Error('Compiler core link plan must publish one module');
+      const linked = finalModules[0];
+      if (raw) {
         const runtimeSkeleton = await this.stage('inspect-runtime', timings, () => this.tool('wasm-tools',
           ['print', 'runtime.wasm', '--skeleton', '-o', 'runtime.wat'],
           { 'runtime.wasm': runtimeBytes }, ['runtime.wat']));
@@ -515,20 +513,6 @@ export class PlaygroundPipeline {
           },
           assets: { ...this.assets } };
       }
-      const plan = compilation.coreLinkPlan;
-      const files: Record<string, Uint8Array> = { 'application.wasm': compilation.application, 'runtime.wasm': runtimeBytes };
-      for (const module of plan.TextModules) {
-        const output = basename(module.OutputPath), input = `${output}.wat`;
-        Object.assign(files, await this.stage('parse', timings, () => this.tool('wasm-tools', ['parse', input, '--output', output], { [input]: new TextEncoder().encode(module.Text) }, [output])));
-      }
-      const mergedName = basename(plan.ExportPruning.InputPath);
-      const merged = await this.stage('merge', timings, () => this.tool('wasm-merge', args(plan.Merge), files, [mergedName]));
-      const module = merged[mergedName];
-      const pruned = await this.stage('prune', timings, () => this.channel('compiler').request({ operation: 'prune', module, prefix: plan.ExportPruning.Prefix }, [module.buffer]));
-      const linked = optimization === 'none' ? pruned.module : (await this.stage('optimize', timings, () =>
-        this.tool('wasm-opt', optimizationArguments(args(plan.Optimization), optimization),
-          { [basename(plan.ExportPruning.OutputPath)]: pruned.module }, ['linked.wasm'], 300_000)))['linked.wasm'];
-      await this.stage('validate', timings, () => this.tool('wasm-tools', ['validate', 'linked.wasm'], { 'linked.wasm': linked }, []));
       if (!['command', 'async-command'].includes(compilation.componentContract))
         throw new Error('Compiler returned an invalid component contract');
       const asynchronous = compilation.componentContract === 'async-command';

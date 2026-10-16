@@ -1,13 +1,10 @@
 {
   "schemaVersion": 1,
-  "toolchain": {
-    "maximumBackgroundBrotliBytes": 31457280
-  },
   "helloWorld42": {
     "exampleId": "hello",
     "optimization": "Oz",
     "source": "using System;\n\nConsole.WriteLine(42);\n",
     "stdout": "42\n",
-    "componentBytes": 55825
+    "componentBytes": 47798
   }
 }

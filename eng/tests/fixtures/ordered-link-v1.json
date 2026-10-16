@@ -1,0 +1,123 @@
+{
+  "plan": {
+    "schemaVersion": 1,
+    "requiredCapabilities": [
+      "text",
+      "inline",
+      "tool",
+      "exports",
+      "validate",
+      "move"
+    ],
+    "inputs": [
+      "application.wasm"
+    ],
+    "outputs": [
+      "result.wasm"
+    ],
+    "temporaryPaths": [
+      "support.wasm",
+      "selected.wasm",
+      "merged.wasm"
+    ],
+    "operations": [
+      {
+        "kind": "text",
+        "outputPath": "support.wasm",
+        "text": "(module)"
+      },
+      {
+        "kind": "inline",
+        "inputPath": "application.wasm",
+        "outputPath": "selected.wasm",
+        "selection": "Preserve"
+      },
+      {
+        "kind": "tool",
+        "toolId": "wasm-merge",
+        "arguments": [
+          "selected.wasm",
+          "application",
+          "support.wasm",
+          "environment",
+          "--output",
+          "merged.wasm"
+        ],
+        "inputPaths": [
+          "selected.wasm",
+          "support.wasm"
+        ],
+        "outputPaths": [
+          "merged.wasm"
+        ]
+      },
+      {
+        "kind": "exports",
+        "inputPath": "merged.wasm",
+        "outputPath": "merged.wasm",
+        "componentPrefix": null,
+        "removedExports": []
+      },
+      {
+        "kind": "validate",
+        "path": "merged.wasm",
+        "arguments": [
+          "validate",
+          "merged.wasm",
+          "--features",
+          "mvp"
+        ]
+      },
+      {
+        "kind": "move",
+        "inputPath": "merged.wasm",
+        "outputPath": "result.wasm"
+      }
+    ]
+  },
+  "invocations": {
+    "2": {
+      "toolId": "wasm-merge",
+      "arguments": [
+        "input-0",
+        "application",
+        "input-1",
+        "environment",
+        "--output",
+        "output-0"
+      ],
+      "inputs": [
+        {
+          "logicalPath": "selected.wasm",
+          "physicalName": "input-0"
+        },
+        {
+          "logicalPath": "support.wasm",
+          "physicalName": "input-1"
+        }
+      ],
+      "outputs": [
+        {
+          "logicalPath": "merged.wasm",
+          "physicalName": "output-0"
+        }
+      ]
+    },
+    "4": {
+      "toolId": "wasm-tools",
+      "arguments": [
+        "validate",
+        "input-0",
+        "--features",
+        "mvp"
+      ],
+      "inputs": [
+        {
+          "logicalPath": "merged.wasm",
+          "physicalName": "input-0"
+        }
+      ],
+      "outputs": []
+    }
+  }
+}

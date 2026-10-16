@@ -9,14 +9,16 @@ if (!url || !output) throw Error('PLAYGROUND_URL and PLAYGROUND_EVIDENCE are req
 mkdirSync(output, { recursive: true });
 const contract = JSON.parse(readFileSync(
   new URL('../release-contract.json', import.meta.url), 'utf8'));
-if (contract.schemaVersion !== 1 || contract.helloWorld42?.componentBytes !== 55_825)
+if (contract.schemaVersion !== 1 ||
+    !Number.isSafeInteger(contract.helloWorld42?.componentBytes) ||
+    contract.helloWorld42.componentBytes <= 0)
   throw Error('Invalid Hello World release contract');
 
 async function downloadContractComponent(page, name, enforceReleaseSize = true) {
   const event = page.waitForEvent('download');
   await page.locator('#download').click();
   const download = await event;
-  if (download.suggestedFilename() !== 'program-Oz.wasm')
+  if (download.suggestedFilename() !== 'program-Compact-Oz.wasm')
     throw Error(`Unexpected contract artifact name: ${download.suggestedFilename()}`);
   const path = `${output}/${name}.wasm`;
   await download.saveAs(path);

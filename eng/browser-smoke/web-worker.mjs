@@ -1,10 +1,10 @@
 import assert from 'node:assert/strict';
-import { chromium } from 'playwright';
+import { browserType } from './engine.mjs';
 
-import { openSample } from './playground-ui.mjs';
+import { openSample, setOptimizations } from './playground-ui.mjs';
 
 const root = process.env.PLAYGROUND_URL ?? 'http://127.0.0.1:5178/';
-const browser = await chromium.launch({ headless: true });
+const browser = await browserType.launch({ headless: true });
 try {
   const page = await browser.newPage();
   const errors = [];
@@ -14,6 +14,7 @@ try {
 
   await openSample(page, 'web-worker');
   await page.waitForFunction(() => document.querySelector('#project-name')?.textContent === 'Web Worker · JSExport');
+  await setOptimizations(page, process.env.PLAYGROUND_OPTIMIZATION ?? 'Oz');
   assert.equal(await page.locator('.file-item[data-kind="csharp"]').count(), 1);
   assert.equal(await page.locator('.file-item[data-kind="javascript"]').count(), 1);
 
