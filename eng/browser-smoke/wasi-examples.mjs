@@ -33,13 +33,17 @@ for (const name of selected) {
       if (status !== 'Run complete' || diagnostics !== 'No diagnostics.')
         throw Error(`${name}/${example}: ${JSON.stringify({ status, output, diagnostics })}`);
       if (example === 'datetime') {
-        const now = output.match(/DateTime\.Now \(UTC\): (\S+)/)?.[1];
+        // A fresh profile runs in the browser's own zone; timezone.mjs pins other zones.
+        const browserZone = await page.evaluate(() => Intl.DateTimeFormat().resolvedOptions().timeZone);
+        const utcZones = ['UTC', 'Etc/UTC'];
+        const zone = output.match(/Time zone: (\S+)/)?.[1];
+        const now = output.match(/DateTime\.Now: (\S+)/)?.[1];
         const utc = output.match(/UtcNow: (\S+)/)?.[1];
-        if (!output.includes('Playground timezone: UTC (no timezone data supplied)') ||
-            !now?.endsWith('+00:00') || !utc?.endsWith('Z') ||
+        if (!(zone === browserZone || utcZones.includes(zone) && utcZones.includes(browserZone)) ||
+            !utc?.endsWith('Z') ||
             Math.abs(Date.parse(now) - Date.now()) > 120_000 ||
             Math.abs(Date.parse(utc) - Date.now()) > 120_000)
-          throw Error(`${name}/datetime: implausible UTC output: ${output}`);
+          throw Error(`${name}/datetime: implausible local time in ${browserZone}: ${output}`);
       } else if (example === 'http' && output !== 'HTTP 200\n{"message":"Hello from NetWasm Playground"}\n\n') {
         throw Error(`${name}/http: unexpected response: ${output}`);
       } else if (example === 'span-memory-unsafe' && output !==

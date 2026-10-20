@@ -20,7 +20,7 @@ const descriptions: Readonly<Record<string, { description: string; category: Non
   'multi-file': { description: 'Build one application from separate C# source files.', category: 'Getting started' },
   'span-memory-unsafe': { description: 'Use Span, Memory, stackalloc, fixed pointers, and raw memory access.', category: 'Language and runtime' },
   'csharp15-tour': { description: 'Try the supported C# 15 preview language features.', category: 'Language and runtime' },
-  datetime: { description: 'Read UTC time through the browser host clock.', category: 'Language and runtime' },
+  datetime: { description: 'Read local time in the time zone chosen in Settings.', category: 'Language and runtime' },
   http: { description: 'Make an asynchronous HTTP request through browser fetch.', category: 'Libraries' },
   allocation: { description: 'Allocate managed objects and exercise the precise garbage collector.', category: 'Language and runtime' },
   linq: { description: 'Filter, project, and aggregate a sequence with LINQ.', category: 'Libraries' },
@@ -218,10 +218,13 @@ public sealed class Waiting : State;
     name: 'Date and time',
     source: `using System;
 
-// The Playground supplies no timezone data and sets TZ=UTC.
-// DateTime.Now therefore uses UTC in this Playground session.
-Console.WriteLine("Playground timezone: UTC (no timezone data supplied)");
-Console.WriteLine($"DateTime.Now (UTC): {DateTime.Now:O}");
+// Settings > Run > Time zone selects the zone; it defaults to your browser's.
+// The Playground downloads the IANA time zone data only for a program like this
+// one, which reads local time in a zone other than UTC.
+var zone = TimeZoneInfo.Local;
+Console.WriteLine($"Time zone: {zone.Id}");
+Console.WriteLine($"UTC offset: {zone.GetUtcOffset(DateTime.UtcNow)}");
+Console.WriteLine($"DateTime.Now: {DateTime.Now:O}");
 Console.WriteLine($"UtcNow: {DateTime.UtcNow:O}");
 `,
   },

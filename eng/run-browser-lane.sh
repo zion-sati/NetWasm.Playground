@@ -32,6 +32,7 @@ run_step native-wasm-opt env PLAYGROUND_EVIDENCE="$evidence/native-wasm-opt" \
 run_step csharp15 env PLAYGROUND_BROWSERS="$browser" PLAYGROUND_CSHARP15_OPTIMIZATION=none \
   node eng/browser-smoke/csharp15-runtime.mjs
 run_step wasi env PLAYGROUND_BROWSERS="$browser" node eng/browser-smoke/wasi-examples.mjs
+run_step timezone env PLAYGROUND_BROWSERS="$browser" node eng/browser-smoke/timezone.mjs
 if [[ "$browser" == chromium ]]; then
   run_step revamp-ui node eng/browser-smoke/revamp-ui.mjs
   run_step library-catalog node eng/browser-smoke/library-catalog.mjs

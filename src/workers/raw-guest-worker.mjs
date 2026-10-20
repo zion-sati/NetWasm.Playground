@@ -65,7 +65,7 @@ serveWorker(async (data, emit) => {
     profile: 'netwasm0.1',
     target: 'wasm32',
     featureSet: 'none',
-    executionContract: 'netwasm:worker/jsexport@1.0.0',
+    executionContract: 'netwasm:browser/jsexport@1.0.0',
     versions: {
       sdk: 'playground', compiler: 'playground', runtime: 'playground',
       runtimeAbi: 'netwasm.runtime.v1', hosting: 'playground', toolchain: 'playground',

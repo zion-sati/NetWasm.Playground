@@ -14,6 +14,8 @@ export interface SourceSnapshot {
   recipeId: string;
   optimization?: OptimizationMode;
   garbageCollector?: GarbageCollector;
+  /** IANA zone for runs; time zone data is mounted only for programs that reach local time. */
+  timeZone?: string;
   /** Compiler-owned override names and values; validated by the compiler. */
   optimizationOverrides?: Readonly<Record<string, string>>;
   language: LanguageMode;
@@ -79,6 +81,8 @@ export interface CompilationResult {
   cancelled?: boolean;
   component?: Uint8Array;
   componentContract?: 'command' | 'async-command' | 'jsexport-worker';
+  /** Runtime features the compiled program reaches, such as 'local-time'. */
+  runtimeFeatures?: readonly string[];
   rawAdapter?: Uint8Array;
   runtimeLayout?: Uint8Array;
   interopManifest?: Uint8Array;

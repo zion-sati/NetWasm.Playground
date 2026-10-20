@@ -6,6 +6,7 @@ import hashlib
 import io
 import importlib.util
 import json
+import os
 from pathlib import Path, PurePosixPath
 import re
 import shutil
@@ -254,7 +255,7 @@ def add_component_host(stage):
 def add_http_example(stage, library_version):
     member = 'lib/NetWasm,Version=v0.1/System.Net.Http.dll'
     assembly = package_members('netwasm.system.net.http', library_version, {
-        member: 'cc5d98d2fe1eed982a336f3cd9a6afaf2da56f0554a115dc3576016c7e32a984',
+        member: '4fb19c43fca35a94f7fe2bd1c86c5ab2491d007d301e362ae98b39380dddecec',
     })[member]
     for role in ('references', 'implementations'):
         destination = stage / role / 'System.Net.Http.dll'
@@ -265,6 +266,47 @@ def add_http_example(stage, library_version):
               'implementations': {'System.Net.Http.dll': 'implementations/System.Net.Http.dll'},
               'packages': ['NetWasm.System.Net.Http'], 'version': library_version}
     (stage / 'recipes/http.json').write_bytes(encoded(recipe))
+
+
+def add_timezone_data(stage, netwasm_version):
+    """Publishes a local-time program with the released SDK and NetWasmTimeZoneMode=Full,
+    then stages its IANA sidecar. The guest worker fetches it only for programs that reach
+    local time with a zone other than UTC."""
+    with tempfile.TemporaryDirectory(prefix='netwasm-timezones-') as temporary:
+        project = Path(temporary)
+        (project / 'Program.cs').write_text('System.Console.WriteLine(System.DateTime.Now.Kind);\n')
+        (project / 'TimeZoneData.csproj').write_text(
+            '<Project Sdk="NetWasm.Sdk"><PropertyGroup><OutputType>Exe</OutputType>'
+            '<TargetFramework>netwasm0.1</TargetFramework>'
+            '<NetWasmTimeZoneMode>Full</NetWasmTimeZoneMode></PropertyGroup></Project>\n')
+        (project / 'global.json').write_bytes(encoded({
+            'sdk': {'version': '10.0.303', 'rollForward': 'latestMajor', 'allowPrerelease': True},
+            'msbuild-sdks': {'NetWasm.Sdk': netwasm_version}}))
+        feeds = '<add key="nuget.org" value="https://api.nuget.org/v3/index.json"/>'
+        if CANDIDATE_FEED is not None and netwasm_version == CANDIDATE_VERSION:
+            feeds += f'<add key="candidate" value="{CANDIDATE_FEED}"/>'
+        (project / 'NuGet.Config').write_text(
+            f'<configuration><packageSources><clear/>{feeds}</packageSources></configuration>\n')
+        environment = {key: value for key, value in os.environ.items() if not key.startswith('NETWASM_')}
+        environment.update(NUGET_PACKAGES=str(project / 'packages'), DOTNET_CLI_HOME=str(project / 'home'),
+                           DOTNET_NOLOGO='1', DOTNET_CLI_TELEMETRY_OPTOUT='1')
+        subprocess.run(['dotnet', 'publish', 'TimeZoneData.csproj', '-c', 'Release', '-o', 'out',
+                        '--disable-build-servers', '--nologo'], cwd=project, env=environment, check=True,
+                       stdout=subprocess.DEVNULL)
+        payload = (project / 'out/TimeZoneData.wasm.tz-info').read_bytes()
+        manifest = json.loads((project / 'out/deployment.json').read_text())
+    digest = sha256(payload)
+    recorded = [artifact for artifact in manifest.get('artifacts', [])
+                if artifact.get('relativePath') == 'TimeZoneData.wasm.tz-info']
+    if len(recorded) != 1 or recorded[0].get('sha256') != digest or len(payload) < 1024 * 1024:
+        raise ValueError('Published time zone data does not match its deployment manifest')
+    name = f'timezones/netwasm-timezones.{digest}.bin'
+    destination = stage / name
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    destination.write_bytes(payload)
+    (stage / 'timezones/netwasm-timezones.json').write_bytes(encoded({
+        'schemaVersion': 1, 'asset': name, 'bytes': len(payload), 'sha256': digest,
+        'guestPath': '/netwasm-timezones/netwasm-timezones.nwtz', 'netwasmVersion': netwasm_version}))
 
 
 ASSEMBLY_PACKAGES = {
@@ -682,6 +724,7 @@ def main():
         add_guest_providers(stage, package_archive('netwasm.toolchain', pins['netwasm']['packageVersion']))
         add_component_host(stage)
         add_http_example(stage, pins['libraries']['packageVersion'])
+        add_timezone_data(stage, pins['netwasm']['packageVersion'])
         framework = stage / 'compiler/_framework'
         shutil.copytree(args.compiler_framework, framework)
         workers = sorted(args.workers.glob('*.mjs'))
