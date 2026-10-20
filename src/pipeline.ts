@@ -600,10 +600,14 @@ export class PlaygroundPipeline {
         await this.preloadBundle(bundleName, this.manifest!.bundles[bundleName]);
         const sampleHttpUrl = snapshot.recipeId === 'http'
           ? new URL(`${import.meta.env.BASE_URL}example-http.json`, location.origin).href : undefined;
+        const timeZone = snapshot.timeZone ?? 'UTC';
+        const localTime = compilation.runtimeFeatures?.includes('local-time') === true;
+        // The runtime validates the complete IANA data during start-up, which takes
+        // about 20 seconds in Firefox, so allow longer when the data is mounted.
+        const mountsTimeZone = localTime && timeZone !== 'UTC' && timeZone !== 'Etc/UTC';
         return this.channel('guest').request({ operation: 'run', component, recipe: snapshot.recipeId,
-          componentContract, timeZone: snapshot.timeZone ?? 'UTC',
-          localTime: compilation.runtimeFeatures?.includes('local-time') === true,
-          sampleHttpUrl }, [component.buffer], 60_000, 5_000);
+          componentContract, timeZone, localTime,
+          sampleHttpUrl }, [component.buffer], 60_000, mountsTimeZone ? 60_000 : 5_000);
       });
       for (const timing of result.timings ?? []) this.emit({ type: 'stage', stage: timing.stage, state: 'complete', milliseconds: timing.milliseconds });
       return { ...base, ...result, timings: [...timings, ...(result.timings ?? [])] };
