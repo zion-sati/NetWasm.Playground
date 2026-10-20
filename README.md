@@ -106,8 +106,13 @@ is compiled as a separate Roslyn syntax tree, so diagnostics retain their
 project path. `eng/browser-smoke/multifile.mjs` qualifies a two-file run,
 publish, and path-aware compiler error.
 
-Compiler preferences, independent Run and Publish optimization profiles, and
-the bottom-dock layout are stored in browser local storage. **Project** exports
+Compiler preferences, independent Run and Publish optimization profiles, the
+Run time zone, and the bottom-dock layout are stored in browser local storage.
+Run passes the selected IANA zone, by default the browser's own, as `TZ`. A
+program that reads local time in a zone other than UTC loads the complete IANA
+time zone data, published with the toolchain from the released NetWasm SDK, the
+first time it runs; other programs never fetch it. `eng/browser-smoke/timezone.mjs`
+checks both paths in a browser pinned to `Australia/Melbourne`. **Project** exports
 the current project to a ZIP without compiling it. Supporting browsers open a
 native save dialog; other browsers use their normal download flow. The
 deterministic ZIP contains

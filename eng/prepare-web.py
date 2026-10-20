@@ -37,7 +37,11 @@ HOSTING_MODULES = (
     'managed-exception-reporter.mjs',
     'managed-process-observer.mjs',
     'pollable-reactor.mjs',
+    'preview2-filesystem.mjs',
+    'read-only-file-directory.mjs',
+    'resource-disposal.mjs',
     'terminal-managed-export.mjs',
+    'timezone-sidecar-zones.mjs',
 )
 
 
@@ -49,6 +53,9 @@ def bundle_role(relative):
     if relative == 'native-wasm-opt/wasm-opt.wasm':
         return 'tools'
     if relative.startswith('native-wasm-opt/'):
+        return None
+    # Fetched by the guest only for a local-time program in a zone other than UTC.
+    if relative.startswith('timezones/'):
         return None
     if relative in {'wasm-merge.js', 'wasm-opt.js', 'path-browserify.js'}:
         return 'tools'

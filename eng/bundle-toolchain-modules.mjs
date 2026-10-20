@@ -70,6 +70,8 @@ const specifications = [
       import * as httpModule from ${JSON.stringify(pathToFileURL(join(stage, 'jco/preview2/http.js')).href)};
       import * as randomModule from ${JSON.stringify(pathToFileURL(join(stage, 'jco/preview2/random.js')).href)};
       export { cliModule, io, clockModule, filesystemModule, httpModule, randomModule };
+      export { createPreview2Filesystem } from ${JSON.stringify(pathToFileURL(join(stage, 'hosting/preview2-filesystem.mjs')).href)};
+      export { readTimeZoneNames } from ${JSON.stringify(pathToFileURL(join(stage, 'hosting/timezone-sidecar-zones.mjs')).href)};
     `,
   },
 ];

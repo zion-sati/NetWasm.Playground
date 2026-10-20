@@ -20,6 +20,7 @@ serveWorker(async (data, report) => {
   let generatedImports = [];
   let componentSha256;
   let filesystem;
+  let baseFilesystem;
   let restoreHttpBudget;
   let httpBudgetFailure;
   let previousFetch;
@@ -43,6 +44,11 @@ serveWorker(async (data, report) => {
     if (data.operation !== 'run' || !(data.component instanceof Uint8Array)) throw Error('Invalid guest run request');
     if (!['command', 'async-command'].includes(data.componentContract)) throw Error('Invalid guest component contract');
     const managedProcess = data.componentContract === 'async-command';
+    const timeZone = data.timeZone ?? 'UTC';
+    if (typeof timeZone !== 'string' || !/^[A-Za-z][A-Za-z0-9_+\-/]{0,63}$/.test(timeZone) ||
+        typeof (data.localTime ?? false) !== 'boolean') throw Error('Invalid guest time zone');
+    // Time zone data is fetched only for a program that reaches local time in another zone.
+    const mountsTimeZone = data.localTime === true && timeZone !== 'UTC' && timeZone !== 'Etc/UTC';
     const args = data.args === undefined ? [] : data.args;
     if (!Array.isArray(args) || (args.length !== 0 &&
         (data.recipe !== 'tunit' || args.length !== 1 || args[0] !== '--list'))) throw Error('Unsupported guest arguments');
@@ -72,8 +78,8 @@ serveWorker(async (data, report) => {
     loader.installFetchAdapter();
     const { jco } = await import(loader.url('jco/guest-runtime.mjs'));
     const { executeComponent } = await import(loader.url('jco/component-host.mjs'));
-    const { cliModule, io, clockModule, filesystemModule, httpModule, randomModule } =
-      await import(loader.url('jco/guest-providers.mjs'));
+    const { cliModule, io, clockModule, filesystemModule, httpModule, randomModule,
+      createPreview2Filesystem, readTimeZoneNames } = await import(loader.url('jco/guest-providers.mjs'));
     restoreHttpBudget = installGuestHttpBudget(httpModule, message => { httpBudgetFailure = message; });
     const generated = await jco.generate(component, { name: 'guest', instantiation: { tag: 'async' },
       noTypescript: true, noNodejsCompat: true, base64Cutoff: 0, bindgenEnableWasmExnref: true });
@@ -85,8 +91,16 @@ serveWorker(async (data, report) => {
     const files = Object.fromEntries(generated.files);
     graph = await Promise.all(generated.files.map(async ([name, bytes]) => ({ name, bytes: bytes.byteLength, sha256: await digest(bytes) })));
     complete();
+    let timeZoneData;
+    if (mountsTimeZone) {
+      begin('timezone');
+      const receipt = JSON.parse(new TextDecoder().decode(await loader.load('timezones/netwasm-timezones.json')));
+      timeZoneData = await loader.load(receipt.asset);
+      if (!readTimeZoneNames(timeZoneData).has(timeZone)) throw Error(`Time zone '${timeZone}' is not in the IANA time zone data`);
+      complete();
+    }
     begin('instantiate');
-    const environment = { TZ: 'UTC' };
+    const environment = { TZ: mountsTimeZone ? timeZone : 'UTC' };
     if (data.recipe === 'http') {
       const address = new URL(data.sampleHttpUrl);
       if (address.origin !== self.location.origin || !address.pathname.endsWith('/example-http.json') ||
@@ -106,8 +120,10 @@ serveWorker(async (data, report) => {
         catch (error) { return noteFetchFailure(error); }
       };
     }
-    filesystem = filesystemModule.createFilesystem({
+    baseFilesystem = filesystemModule.createFilesystem({
       adapter: new filesystemModule.InMemoryFilesystemAdapter(), preopens: {} });
+    filesystem = createPreview2Filesystem({ filesystem: baseFilesystem });
+    if (timeZoneData) filesystem.mountReadOnlyFile({ guestPath: '/netwasm-timezones/netwasm-timezones.nwtz', bytes: timeZoneData });
     // Each WASI getter returns an owned stream. Dropping one write's handle
     // must not close the stream returned by a later Console.WriteLine.
     const imports = { 'wasi:cli/environment': cli.environment, 'wasi:cli/exit': cli.exit,
@@ -214,5 +230,5 @@ serveWorker(async (data, report) => {
       code: running ? 'guest-trap' : 'guest-failure', consoleBytes, componentSha256,
       graph, loaded, memoryMaximumBytes: allocatedMemoryPages * 65536, coreInstances, imports: generatedImports, timings, recoverable: true };
   } finally { restoreHttpBudget?.(); if (previousFetch) self.fetch = previousFetch;
-    filesystem?.dispose(); if (url) URL.revokeObjectURL(url); }
+    filesystem?.dispose(); baseFilesystem?.dispose(); if (url) URL.revokeObjectURL(url); }
 });
