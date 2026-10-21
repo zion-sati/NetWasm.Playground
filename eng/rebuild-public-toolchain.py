@@ -165,9 +165,18 @@ def package_members(package, version, members):
     return extracted
 
 
+def drop_uncatalogued_notices(stage, origins):
+    # The base toolchain can carry notices for components that a pinned release
+    # removed, such as BDWGC in NetWasm 0.10.0; the catalog lists what ships.
+    for target in [name for name in origins['files'] if name not in NOTICES.PUBLIC_CATALOG['files']]:
+        del origins['files'][target]
+        (stage / 'notices' / target).unlink()
+
+
 def rebind_notice_origins(stage, pins):
     origins_path = stage / 'notices/origins.json'
     origins = json.loads(origins_path.read_text())
+    drop_uncatalogued_notices(stage, origins)
     source_families = {source['repository']: family for family, source in pins.items()}
     for target, catalog_entry in NOTICES.PUBLIC_CATALOG['files'].items():
         source = catalog_entry['source']
