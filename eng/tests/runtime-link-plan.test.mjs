@@ -14,7 +14,7 @@ function plan(collector) {
 }
 
 test('preserves compiler arguments and cache identity for every collector', () => {
-  for (const collector of ['Compact', 'NetWasm', 'Boehm', 'Bump']) {
+  for (const collector of ['Compact', 'NetWasm', 'Bump']) {
     const original = plan(collector);
     const snapshot = structuredClone(original);
     assert.equal(acceptRuntimeLinkPlan(original), original);

@@ -21,9 +21,9 @@ def target(collector):
 
 class RuntimeVariantTests(unittest.TestCase):
     def test_all_collectors_and_profiles_are_retained(self):
-        targets = [target(name) for name in ['Compact', 'NetWasm', 'Boehm', 'Bump']]
+        targets = [target(name) for name in ['Compact', 'NetWasm', 'Bump']]
         assets = MODULE.runtime_variant_assets(targets)
-        self.assertEqual(20, len(assets))
+        self.assertEqual(15, len(assets))
         for item in targets:
             self.assertIn(PurePosixPath(item['speed']['collectorArchive']['path']), assets)
             self.assertIn(PurePosixPath(item['allowedUndefinedSymbols']['path']), assets)
@@ -46,10 +46,10 @@ class RuntimeVariantTests(unittest.TestCase):
                 MODULE.runtime_variant_assets(case)
 
     def test_shared_assets_are_deduplicated_only_when_hashes_agree(self):
-        targets = [target(name) for name in ['Compact', 'NetWasm', 'Boehm', 'Bump']]
+        targets = [target(name) for name in ['Compact', 'NetWasm', 'Bump']]
         for item in targets:
             item['allowedUndefinedSymbols'] = {'path': 'wasm32/shared.txt', 'sha256': 'b' * 64}
-        self.assertEqual(17, len(MODULE.runtime_variant_assets(targets)))
+        self.assertEqual(13, len(MODULE.runtime_variant_assets(targets)))
         targets[-1]['allowedUndefinedSymbols']['sha256'] = 'c' * 64
         with self.assertRaises(ValueError):
             MODULE.runtime_variant_assets(targets)

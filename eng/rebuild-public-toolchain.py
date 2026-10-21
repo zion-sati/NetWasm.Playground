@@ -165,9 +165,18 @@ def package_members(package, version, members):
     return extracted
 
 
+def drop_uncatalogued_notices(stage, origins):
+    # The base toolchain can carry notices for components that a pinned release
+    # removed, such as BDWGC in NetWasm 0.10.0; the catalog lists what ships.
+    for target in [name for name in origins['files'] if name not in NOTICES.PUBLIC_CATALOG['files']]:
+        del origins['files'][target]
+        (stage / 'notices' / target).unlink()
+
+
 def rebind_notice_origins(stage, pins):
     origins_path = stage / 'notices/origins.json'
     origins = json.loads(origins_path.read_text())
+    drop_uncatalogued_notices(stage, origins)
     source_families = {source['repository']: family for family, source in pins.items()}
     for target, catalog_entry in NOTICES.PUBLIC_CATALOG['files'].items():
         source = catalog_entry['source']
@@ -255,7 +264,7 @@ def add_component_host(stage):
 def add_http_example(stage, library_version):
     member = 'lib/NetWasm,Version=v0.1/System.Net.Http.dll'
     assembly = package_members('netwasm.system.net.http', library_version, {
-        member: '4fb19c43fca35a94f7fe2bd1c86c5ab2491d007d301e362ae98b39380dddecec',
+        member: '4aae88d402258e5eba6ee105e469dc53d61d521aa81e12a3993fb9fd66974bc4',
     })[member]
     for role in ('references', 'implementations'):
         destination = stage / role / 'System.Net.Http.dll'

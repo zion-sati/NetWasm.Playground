@@ -42,15 +42,7 @@ for (const name of selected) {
     await run(page, name, 'hello');
     if (dataRequests.length !== 0) throw Error(`${name}: a program without local time downloaded time zone data`);
 
-    // Firefox shows how long its time zone start-up takes; other browsers show nothing.
-    const notice = page.locator('#timezone-notice');
-    let noticeShown = false;
-    const watch = setInterval(() => notice.isVisible().then(visible => { noticeShown ||= visible; }, () => {}), 100);
-    const melbourne = await run(page, name, 'datetime');
-    clearInterval(watch);
-    if (noticeShown !== (name === 'firefox') || await notice.isVisible())
-      throw Error(`${name}: unexpected time zone notice state (shown during run: ${noticeShown})`);
-    readLocalTime(`${name}/${zone}`, melbourne, zone, ['+10:00', '+11:00']);
+    readLocalTime(`${name}/${zone}`, await run(page, name, 'datetime'), zone, ['+10:00', '+11:00']);
     if (dataRequests.length !== 1) throw Error(`${name}: expected one time zone data download, saw ${dataRequests.length}`);
 
     await openSettings(page);

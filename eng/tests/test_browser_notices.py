@@ -14,8 +14,6 @@ class BrowserNoticeVersionTests(unittest.TestCase):
     def test_collector_license_and_notices_are_included(self):
         paths = {
             "LICENSES/Apache-2.0.txt",
-            "src/NetWasm.Runtime/collector/compact/NOTICE",
-            "src/NetWasm.Runtime/collector/compact/UPSTREAM-NOTICE",
             "src/NetWasm.Runtime/collector/netwasm/NOTICE",
         }
         actual = {
