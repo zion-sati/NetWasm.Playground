@@ -70,7 +70,7 @@ test('writes a deterministic portable project ZIP with settings and binary files
 
 test('project ZIP preserves each collector independently of optimization', () => {
   const project = createProject('Collectors', [{ path: 'Program.cs', text: 'System.Console.WriteLine(42);' }]);
-  for (const garbageCollector of ['Compact', 'NetWasm', 'Boehm', 'Bump']) {
+  for (const garbageCollector of ['Compact', 'NetWasm', 'Bump']) {
     const archive = buildProjectArchive(project, { language: '15', updatedMemorySafetyRules: false,
       runOptimization: 'O3', publishOptimization: 'Oz', garbageCollector });
     const manifest = JSON.parse(decoder.decode(readEntries(archive).get('netwasm-project.json')));

@@ -6,7 +6,7 @@ import { clearCompilationCache, openSettings, closeSettings, setOptimizations } 
 const output = process.env.PLAYGROUND_EVIDENCE;
 if (!output) throw Error('PLAYGROUND_EVIDENCE is required');
 mkdirSync(output, { recursive: true });
-const collectors = (process.env.PLAYGROUND_COLLECTORS ?? 'Compact,NetWasm,Boehm,Bump,Compact').split(',');
+const collectors = (process.env.PLAYGROUND_COLLECTORS ?? 'Compact,NetWasm,Bump,Compact').split(',');
 const mode = process.env.PLAYGROUND_OPTIMIZATION ?? 'Oz';
 const browser = await browserType.launch({ headless: true });
 try {

@@ -12,7 +12,7 @@ import { formatTestReport } from './tunit-report';
 import './style.css';
 import { browserSupportMessage } from './browser-support';
 import { optimizationLabels, optimizationModes, type OptimizationMode } from './optimization';
-import { garbageCollectors, garbageCollectorLabels, parseGarbageCollector } from './garbage-collector';
+import { garbageCollectors, garbageCollectorLabels, parseGarbageCollector, storedGarbageCollector } from './garbage-collector';
 import { browserTimeZone, browserTimeZoneSetting, parseTimeZoneSetting, resolveTimeZone, timeZoneChoices } from './time-zone';
 import { clearFrontendCache } from './workers/frontend-cache.mjs';
 import { cloneProjectFiles, createProject, inferNativeLibraryName, isTextProjectFile, normalizeProjectPath,
@@ -76,7 +76,7 @@ const garbageCollectorSelect = el<HTMLSelectElement>('garbage-collector');
 for (const collector of garbageCollectors) {
   const option = document.createElement('option'); option.value = collector; option.textContent = garbageCollectorLabels[collector]; garbageCollectorSelect.append(option);
 }
-garbageCollectorSelect.value = parseGarbageCollector(localStorage.getItem('netwasm.garbageCollector'));
+garbageCollectorSelect.value = storedGarbageCollector(localStorage.getItem('netwasm.garbageCollector'));
 function showCollectorHelp() {
   el('garbage-collector-help').textContent = garbageCollectorSelect.value === 'Bump'
     ? 'Bump never collects. Memory is reclaimed only when the application instance is discarded.'
