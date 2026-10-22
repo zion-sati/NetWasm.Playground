@@ -21,6 +21,7 @@ const descriptions: Readonly<Record<string, { description: string; category: Non
   'span-memory-unsafe': { description: 'Use Span, Memory, stackalloc, fixed pointers, and raw memory access.', category: 'Language and runtime' },
   'csharp15-tour': { description: 'Try the supported C# 15 preview language features.', category: 'Language and runtime' },
   datetime: { description: 'Read local time in the time zone chosen in Settings.', category: 'Language and runtime' },
+  async: { description: 'Await delays, run tasks together, stream values and cancel work from an asynchronous Main.', category: 'Language and runtime' },
   http: { description: 'Make an asynchronous HTTP request through browser fetch.', category: 'Libraries' },
   allocation: { description: 'Allocate managed objects and exercise the precise garbage collector.', category: 'Language and runtime' },
   linq: { description: 'Filter, project, and aggregate a sequence with LINQ.', category: 'Libraries' },
@@ -226,6 +227,49 @@ Console.WriteLine($"Time zone: {zone.Id}");
 Console.WriteLine($"UTC offset: {zone.GetUtcOffset(DateTime.UtcNow)}");
 Console.WriteLine($"DateTime.Now: {DateTime.Now:O}");
 Console.WriteLine($"UtcNow: {DateTime.UtcNow:O}");
+`,
+  },
+  {
+    id: 'async',
+    name: 'Async and await',
+    source: `using System;
+using System.Collections.Generic;
+using System.Threading;
+using System.Threading.Tasks;
+
+// Main can await. The Playground runs the program's event loop, so delays,
+// tasks that run together, async streams and cancellation need no threads.
+Console.WriteLine("Starting three tasks...");
+var squares = await Task.WhenAll(Square(1, 30), Square(2, 20), Square(3, 10));
+Console.WriteLine($"Squares: {string.Join(", ", squares)}");
+
+await foreach (var tick in Ticks(3))
+    Console.WriteLine($"Tick {tick}");
+
+using var timeout = new CancellationTokenSource(TimeSpan.FromMilliseconds(50));
+try
+{
+    await Task.Delay(TimeSpan.FromSeconds(10), timeout.Token);
+}
+catch (OperationCanceledException)
+{
+    Console.WriteLine("Cancelled the 10-second delay after 50 ms.");
+}
+
+static async Task<int> Square(int value, int delayMilliseconds)
+{
+    await Task.Delay(delayMilliseconds);
+    return value * value;
+}
+
+static async IAsyncEnumerable<int> Ticks(int count)
+{
+    for (var tick = 1; tick <= count; tick++)
+    {
+        await Task.Delay(10);
+        yield return tick;
+    }
+}
 `,
   },
   {
