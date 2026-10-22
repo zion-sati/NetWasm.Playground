@@ -63,6 +63,7 @@ serveWorker(async (data, emit) => {
        !['none', 'O0', 'O1', 'O2', 'O3', 'Os', 'Oz'].includes(data.optimization) ||
        typeof (data.garbageCollector ?? 'Compact') !== 'string' ||
        typeof data.updatedMemorySafetyRules !== 'boolean' ||
+       typeof (data.structuredDiagnostics ?? false) !== 'boolean' ||
        (data.updatedMemorySafetyRules && data.language !== 'preview')))
     throw Error('Invalid compiler source, recipe, language, or optimization settings');
   if (data.operation === 'prune' &&

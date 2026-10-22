@@ -19,6 +19,13 @@ component size for the current source so the tradeoff can be compared directly.
 C# remains a Release compilation for every setting; these controls change the
 final WebAssembly optimization pass.
 
+Each profile can also report unhandled exceptions. Run does by default: an
+exception that escapes `Main`, synchronous or asynchronous, prints `Unhandled
+exception.` with its type and message, as desktop .NET does. Publish does not by
+default, so the downloaded component matches the SDK's Release build byte for
+byte. `eng/browser-smoke/exception-report.mjs` qualifies both kinds of `Main`
+and the setting.
+
 The browser compiler uses NativeAOT-LLVM in a dedicated worker. When the page
 has cross-origin isolation and shared WebAssembly memory, `wasm-opt` uses a
 bounded native pthread pool; otherwise the result panel identifies the
@@ -106,19 +113,19 @@ is compiled as a separate Roslyn syntax tree, so diagnostics retain their
 project path. `eng/browser-smoke/multifile.mjs` qualifies a two-file run,
 publish, and path-aware compiler error.
 
-Compiler preferences, independent Run and Publish optimization profiles, the
-Run time zone, and the bottom-dock layout are stored in browser local storage.
-Run passes the selected IANA zone, by default the browser's own, as `TZ`. A
-program that reads local time in a zone other than UTC loads the complete IANA
-time zone data, published with the toolchain from the released NetWasm SDK, the
-first time it runs; other programs never fetch it. `eng/browser-smoke/timezone.mjs`
-checks both paths in a browser pinned to `Australia/Melbourne`. **Project** exports
-the current project to a ZIP without compiling it. Supporting browsers open a
-native save dialog; other browsers use their normal download flow. The
-deterministic ZIP contains
-every text and binary project file plus `netwasm-project.json`, which records
-the project kind, native-library metadata, language options, and build profiles.
-No project source or archive bytes are uploaded.
+Compiler preferences, independent Run and Publish optimization and exception
+reporting profiles, the Run time zone, and the bottom-dock layout are stored in
+browser local storage. Run passes the selected IANA zone, by default the
+browser's own, as `TZ`. A program that reads local time in a zone other than UTC
+loads the complete IANA time zone data, published with the toolchain from the
+released NetWasm SDK, the first time it runs; other programs never fetch it.
+`eng/browser-smoke/timezone.mjs` checks both paths in a browser pinned to
+`Australia/Melbourne`. **Project** exports the current project to a ZIP without
+compiling it. Supporting browsers open a native save dialog; other browsers use
+their normal download flow. The deterministic ZIP contains every text and binary
+project file plus `netwasm-project.json`, which records the project kind,
+native-library metadata, language options, and build profiles. No project source
+or archive bytes are uploaded.
 
 Native archives remain binary project assets and are validated as WebAssembly
 archives before entering the workspace. The LZ4 sample compiles a real `.a`

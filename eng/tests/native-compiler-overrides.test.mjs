@@ -48,7 +48,7 @@ test('native transport forwards the entire override record on every compilation 
   };
   const request = { operation: 'compile', sourceSet: '{}', language: '15',
     updatedMemorySafetyRules: false, optimization: 'O3', garbageCollector: 'NetWasm',
-    optimizationOverrides: overrides };
+    structuredDiagnostics: true, optimizationOverrides: overrides };
   try {
     for (const [recipe, projectKind, cached, operation] of [
       ['hello', 'command', false, 'compileRecipe'],
@@ -63,13 +63,16 @@ test('native transport forwards the entire override record on every compilation 
       await channel.request({ ...request, recipe, projectKind, frontendCache: cached });
       const actual = native.requests.at(-1);
       assert.equal(actual.operation, operation);
-      assert.equal(actual.arguments.at(-2), 'NetWasm');
+      assert.equal(actual.arguments.at(-3), 'NetWasm');
+      assert.equal(actual.arguments.at(-2), 'true');
       assert.deepEqual(JSON.parse(actual.arguments.at(-1)), overrides);
       channel.reset();
     }
     const channel = createNativeAotCompilerChannel({ assetLoader: loader });
-    await channel.request({ ...request, recipe: 'hello', optimizationOverrides: undefined });
+    await channel.request({ ...request, recipe: 'hello', optimizationOverrides: undefined,
+      structuredDiagnostics: undefined });
     assert.equal(native.requests.at(-1).arguments.at(-1), 'null');
+    assert.equal(native.requests.at(-1).arguments.at(-2), 'false');
     channel.reset();
   } finally {
     if (previousLocation) Object.defineProperty(globalThis, 'location', previousLocation);

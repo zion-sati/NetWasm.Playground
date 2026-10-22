@@ -20,6 +20,16 @@ export interface SourceSnapshot {
   optimizationOverrides?: Readonly<Record<string, string>>;
   language: LanguageMode;
   updatedMemorySafetyRules: boolean;
+  /** Whether an unhandled exception reports its type and message; Run turns it on by default. */
+  structuredDiagnostics?: boolean;
+}
+
+/** The compiler's artifacts that name the exception types a failure report carries. */
+export interface DiagnosticArtifacts {
+  wasm: Uint8Array;
+  exceptionTypeMap: Uint8Array;
+  mapMediaType: string;
+  manifest: Uint8Array;
 }
 
 export interface Diagnostic {
@@ -78,6 +88,8 @@ export interface CompilationResult {
   optimizationOverrides?: Readonly<Record<string, string>>;
   language?: LanguageMode;
   updatedMemorySafetyRules?: boolean;
+  structuredDiagnostics?: boolean;
+  diagnosticArtifacts?: DiagnosticArtifacts;
   cancelled?: boolean;
   component?: Uint8Array;
   componentContract?: 'command' | 'async-command' | 'jsexport-worker';

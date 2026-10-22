@@ -269,7 +269,7 @@ export function createNativeAotCompilerChannel(options = {}) {
       const compilerInputs = inputs.slice();
       if (supportJson !== undefined) compilerInputs[1] = supportJson;
       const settings = [data.language, data.updatedMemorySafetyRules, data.optimization, data.garbageCollector ?? 'Compact',
-        JSON.stringify(data.optimizationOverrides ?? null)];
+        data.structuredDiagnostics === true, JSON.stringify(data.optimizationOverrides ?? null)];
       const projectKind = data.projectKind ?? 'command';
       const nativeLibrariesJson = data.nativeLibrariesJson ?? '[]';
       const projectCompilation = projectKind !== 'command' || nativeLibrariesJson !== '[]';
@@ -297,6 +297,12 @@ export function createNativeAotCompilerChannel(options = {}) {
       }
       if (typeof result.application === 'string') result.application = fromBase64(result.application);
       if (typeof result.pe === 'string') result.pe = fromBase64(result.pe);
+      if (result.diagnosticArtifacts) result.diagnosticArtifacts = {
+        wasm: fromBase64(result.diagnosticArtifacts.wasm),
+        exceptionTypeMap: fromBase64(result.diagnosticArtifacts.exceptionTypeMap),
+        mapMediaType: result.diagnosticArtifacts.mapMediaType,
+        manifest: fromBase64(result.diagnosticArtifacts.manifest),
+      };
       if (result.success) {
         validateRuntimeLinkPlan(result.runtimeLinkPlan, data.optimization);
         if (result.runtimeLinkPlan.GarbageCollector !== (data.garbageCollector ?? 'Compact'))

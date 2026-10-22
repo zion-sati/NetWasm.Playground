@@ -68,6 +68,19 @@ test('writes a deterministic portable project ZIP with settings and binary files
   });
 });
 
+test('project ZIP records whether each profile reports unhandled exceptions', () => {
+  const project = createProject('Diagnostics', [{ path: 'Program.cs', text: 'throw new System.Exception();' }]);
+  const archive = buildProjectArchive(project, { language: '15', updatedMemorySafetyRules: false,
+    runOptimization: 'none', publishOptimization: 'Oz',
+    runStructuredDiagnostics: true, publishStructuredDiagnostics: false });
+  const manifest = JSON.parse(decoder.decode(readEntries(archive).get('netwasm-project.json')));
+
+  assert.deepEqual(manifest.profiles, {
+    run: { optimization: 'none', structuredDiagnostics: true },
+    publish: { optimization: 'Oz', structuredDiagnostics: false },
+  });
+});
+
 test('project ZIP preserves each collector independently of optimization', () => {
   const project = createProject('Collectors', [{ path: 'Program.cs', text: 'System.Console.WriteLine(42);' }]);
   for (const garbageCollector of ['Compact', 'NetWasm', 'Bump']) {

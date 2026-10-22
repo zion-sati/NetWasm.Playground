@@ -373,7 +373,7 @@ export class PlaygroundPipeline {
     this.optimizerWorkerCount = undefined; this.optimizerLinearMemoryBytes = undefined;
     const result = { requestId: snapshot.requestId, revision: snapshot.revision, optimization, garbageCollector,
       language: snapshot.language, updatedMemorySafetyRules: snapshot.updatedMemorySafetyRules,
-      diagnostics: [], timings };
+      structuredDiagnostics: snapshot.structuredDiagnostics === true, diagnostics: [], timings };
     try {
       if (!['hello', 'multi-file', 'span-memory-unsafe', 'csharp15-tour', 'datetime', 'async', 'http',
         'allocation', 'linq', 'async-linq', 'pipelines', 'web-encoding', 'xml', 'json-dom',
@@ -396,6 +396,7 @@ export class PlaygroundPipeline {
         projectKind: snapshot.projectKind ?? 'command', nativeLibrariesJson: nativeLibraries.json,
         language: snapshot.language, updatedMemorySafetyRules: snapshot.updatedMemorySafetyRules,
         optimization, garbageCollector, optimizationOverrides: snapshot.optimizationOverrides,
+        structuredDiagnostics: snapshot.structuredDiagnostics === true,
       }, [], compilerTimeoutMilliseconds));
       for (const timing of compilation.timings ?? []) this.emit({ type: 'stage', stage: timing.stage, state: 'complete', milliseconds: timing.milliseconds });
       if (!compilation.success) return { ...result, success: false, diagnostics: compilation.diagnostics ?? [],
@@ -516,9 +517,13 @@ export class PlaygroundPipeline {
       if (!['command', 'async-command'].includes(compilation.componentContract))
         throw new Error('Compiler returned an invalid component contract');
       const asynchronous = compilation.componentContract === 'async-command';
-      const witName = asynchronous ? 'async-command.wit.wasm' : 'command.wit.wasm';
+      // A synchronous command with structured diagnostics also exports the
+      // diagnostic command, which reports an escaping exception.
+      const diagnosticCommand = !asynchronous && snapshot.structuredDiagnostics === true;
+      const witName = asynchronous || diagnosticCommand ? 'async-command.wit.wasm' : 'command.wit.wasm';
       const witWorld = snapshot.recipeId === 'http' ? 'netwasm:component/async-http-command@1.0.0'
-        : asynchronous ? 'netwasm:component/async-command@1.0.0' : 'wasi:cli/command@0.2.11';
+        : asynchronous ? 'netwasm:component/async-command@1.0.0'
+        : diagnosticCommand ? 'netwasm:component/diagnostic-command@1.0.0' : 'wasi:cli/command@0.2.11';
       const wit = await this.loadAsset(witName);
       const component = await this.stage('componentization', timings, async () => {
         const embedded = await this.tool('wasm-tools', ['component', 'embed', witName, 'linked.wasm', '--encoding', 'utf8', '--output', 'embedded.wasm', '--world', witWorld], { [witName]: wit, 'linked.wasm': linked }, ['embedded.wasm']);
@@ -529,7 +534,7 @@ export class PlaygroundPipeline {
       });
       if (epoch !== this.epoch) throw new Error('Stopped');
       return { ...result, success: true, component, componentContract: compilation.componentContract,
-        runtimeFeatures: compilation.runtimeFeatures,
+        runtimeFeatures: compilation.runtimeFeatures, diagnosticArtifacts: compilation.diagnosticArtifacts,
         frontendCacheMetrics: compilation.frontendCacheMetrics,
         compilerHostLinearMemoryBytes: compilation.hostLinearMemoryBytes,
         optimizerHost: this.optimizerHost,
@@ -603,6 +608,7 @@ export class PlaygroundPipeline {
         return this.channel('guest').request({ operation: 'run', component, recipe: snapshot.recipeId,
           componentContract, timeZone: snapshot.timeZone ?? 'UTC',
           localTime: compilation.runtimeFeatures?.includes('local-time') === true,
+          diagnosticArtifacts: compilation.diagnosticArtifacts,
           sampleHttpUrl }, [component.buffer], 60_000, 5_000);
       });
       for (const timing of result.timings ?? []) this.emit({ type: 'stage', stage: timing.stage, state: 'complete', milliseconds: timing.milliseconds });
