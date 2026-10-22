@@ -375,7 +375,7 @@ export class PlaygroundPipeline {
       language: snapshot.language, updatedMemorySafetyRules: snapshot.updatedMemorySafetyRules,
       diagnostics: [], timings };
     try {
-      if (!['hello', 'multi-file', 'span-memory-unsafe', 'csharp15-tour', 'datetime', 'http',
+      if (!['hello', 'multi-file', 'span-memory-unsafe', 'csharp15-tour', 'datetime', 'async', 'http',
         'allocation', 'linq', 'async-linq', 'pipelines', 'web-encoding', 'xml', 'json-dom',
         'json-generated', 'tunit', 'regex', 'di', 'logging', 'hashing',
         'fluentvalidation', 'native-lz4', 'web-worker'].includes(snapshot.recipeId)) throw new Error('Unknown compilation recipe');

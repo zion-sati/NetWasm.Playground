@@ -7,7 +7,7 @@ const toBase64 = bytes => {
   return btoa(text);
 };
 const fromBase64 = text => Uint8Array.from(atob(text), character => character.charCodeAt(0));
-const coreRecipes = new Set(['hello', 'multi-file', 'span-memory-unsafe', 'datetime', 'csharp15-tour', 'native-lz4', 'web-worker']);
+const coreRecipes = new Set(['hello', 'multi-file', 'span-memory-unsafe', 'datetime', 'async', 'csharp15-tour', 'native-lz4', 'web-worker']);
 const generatedRecipes = new Set(['json-generated', 'tunit', 'di', 'logging']);
 const validStringArray = (value, maximumLength = 256) => Array.isArray(value) &&
   value.length <= maximumLength && value.every(item => typeof item === 'string' && item.length <= 4096);

@@ -10,7 +10,7 @@ const compiler = createNativeAotCompilerChannel({
   report: event => report(event),
 });
 const recipes = new Set([
-  'hello', 'multi-file', 'span-memory-unsafe', 'datetime', 'csharp15-tour', 'http', 'allocation', 'linq', 'async-linq',
+  'hello', 'multi-file', 'span-memory-unsafe', 'datetime', 'async', 'csharp15-tour', 'http', 'allocation', 'linq', 'async-linq',
   'pipelines', 'web-encoding', 'xml', 'json-dom', 'json-generated', 'tunit', 'regex',
   'di', 'logging', 'hashing', 'fluentvalidation',
   'native-lz4',
