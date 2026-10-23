@@ -7,6 +7,9 @@ export interface ProjectArchiveSettings {
   updatedMemorySafetyRules: boolean;
   runOptimization: OptimizationMode;
   publishOptimization: OptimizationMode;
+  /** Whether each profile reports unhandled exceptions. */
+  runStructuredDiagnostics?: boolean;
+  publishStructuredDiagnostics?: boolean;
   garbageCollector?: GarbageCollector;
 }
 
@@ -103,8 +106,8 @@ export function buildProjectArchive(project: PlaygroundProject, settings: Projec
     updatedMemorySafetyRules: settings.updatedMemorySafetyRules,
     garbageCollector: parseGarbageCollector(settings.garbageCollector),
     profiles: {
-      run: { optimization: settings.runOptimization },
-      publish: { optimization: settings.publishOptimization },
+      run: { optimization: settings.runOptimization, structuredDiagnostics: settings.runStructuredDiagnostics },
+      publish: { optimization: settings.publishOptimization, structuredDiagnostics: settings.publishStructuredDiagnostics },
     },
     files: sortedFiles.map(file => ({
       path: file.path,

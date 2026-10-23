@@ -5,6 +5,37 @@ import { createAssetLoader, serveWorker, digest, errorText } from './asset-loade
 // The structured logging example produces a measured 4.12 MiB component.
 const maximumComponentBytes = 5 * 1048576;
 
+// Reads the compiler's diagnostic artifacts, which name the exception types a
+// structured failure report carries by number.
+function readDiagnosticArtifacts(value) {
+  if (value === undefined) return undefined;
+  if (value === null || typeof value !== 'object' || !(value.wasm instanceof Uint8Array) ||
+      !(value.exceptionTypeMap instanceof Uint8Array) || !(value.manifest instanceof Uint8Array) ||
+      typeof value.mapMediaType !== 'string') throw Error('Invalid diagnostic artifacts');
+  const decoder = new TextDecoder();
+  const map = JSON.parse(decoder.decode(value.exceptionTypeMap));
+  const names = new Map((Array.isArray(map.entries) ? map.entries : [])
+    .filter(entry => Number.isSafeInteger(entry?.typeId) && typeof entry.displayName === 'string')
+    .map(entry => [entry.typeId, entry.displayName]));
+  return {
+    typeName: typeId => names.get(typeId) ?? `<exception type #${typeId}>`,
+    // The component host verifies these against each other before naming a type.
+    load: () => ({ manifest: JSON.parse(decoder.decode(value.manifest)), mapBytes: value.exceptionTypeMap,
+      wasmBytes: value.wasm, mapMediaType: value.mapMediaType }),
+  };
+}
+
+// Desktop .NET's wording for an exception that escapes Main.
+function unhandledExceptionText(typeName, message, stackTrace) {
+  return `Unhandled exception. ${typeName}${message ? `: ${message}` : ''}${stackTrace ? `\n${stackTrace}` : ''}\n`;
+}
+
+const utf16Decoder = new TextDecoder('utf-16le');
+function utf16Text(value) {
+  return value == null ? undefined
+    : utf16Decoder.decode(value instanceof Uint16Array ? value : Uint16Array.from(value));
+}
+
 serveWorker(async (data, report) => {
   // These captures survive both instantiation failures and execution traps.
   const output = { stdout: '', stderr: '' };
@@ -44,6 +75,7 @@ serveWorker(async (data, report) => {
     if (data.operation !== 'run' || !(data.component instanceof Uint8Array)) throw Error('Invalid guest run request');
     if (!['command', 'async-command'].includes(data.componentContract)) throw Error('Invalid guest component contract');
     const managedProcess = data.componentContract === 'async-command';
+    const diagnosticArtifacts = readDiagnosticArtifacts(data.diagnosticArtifacts);
     const timeZone = data.timeZone ?? 'UTC';
     if (typeof timeZone !== 'string' || !/^[A-Za-z][A-Za-z0-9_+\-/]{0,63}$/.test(timeZone) ||
         typeof (data.localTime ?? false) !== 'boolean') throw Error('Invalid guest time zone');
@@ -191,7 +223,12 @@ serveWorker(async (data, report) => {
       } });
       const outcome = await executeComponent({ contractKey, adapter, loadCoreModule, instantiateCore,
         imports: { ...imports, 'wasi:io/poll': io.poll,
-          'wasi:clocks/monotonic-clock': clockModule.monotonicClock } });
+          'wasi:clocks/monotonic-clock': clockModule.monotonicClock },
+        ...(diagnosticArtifacts ? {
+          diagnosticArtifacts: diagnosticArtifacts.load,
+          managedExceptionReporting: { reportEnriched: event => append('stderr',
+            unhandledExceptionText(event.typeName, event.message, event.stackTrace)) },
+        } : {}) });
       complete(); finishOutput();
       const failureContext = httpBudgetFailure ?? (fetchFailure && outcome.completionKind === 'managedFailure'
         ? `A browser Fetch request also failed: ${fetchFailure}. Check the URL, network access and CORS policy.`
@@ -208,12 +245,29 @@ serveWorker(async (data, report) => {
     checkCoreGraph();
     const command = guest['wasi:cli/run@0.2.11'];
     if (!command || typeof command.run !== 'function') throw Error('Missing guest command export');
+    // A command built with structured diagnostics reports an escaping exception
+    // through this export instead of trapping.
+    const diagnosticCommand = guest['netwasm:diagnostics/command@1.0.0'];
+    if (diagnosticCommand !== undefined && typeof diagnosticCommand?.run !== 'function')
+      throw Error('Invalid guest diagnostic command export');
     complete();
     begin('execute');
     running = true;
     report({ guestEntered: true });
     let exitCode = 0;
-    try { await command.run(); }
+    try {
+      if (diagnosticCommand) {
+        const completion = await diagnosticCommand.run();
+        if (completion?.tag === 'failed') {
+          const event = completion.val;
+          append('stderr', unhandledExceptionText(
+            diagnosticArtifacts?.typeName(event.typeId) ?? `<exception type #${event.typeId}>`,
+            utf16Text(event.message), utf16Text(event.stackTrace)));
+          exitCode = 1;
+        } else if (completion?.tag === 'exited') exitCode = completion.val;
+        else throw Error('Invalid guest diagnostic completion');
+      } else await command.run();
+    }
     catch (error) {
       if (error?.exitError) exitCode = error.code;
       else if (Object.hasOwn(error ?? {}, 'payload') && error.payload === undefined) exitCode = 1;

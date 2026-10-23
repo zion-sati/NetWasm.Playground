@@ -10,7 +10,7 @@ const compiler = createNativeAotCompilerChannel({
   report: event => report(event),
 });
 const recipes = new Set([
-  'hello', 'multi-file', 'span-memory-unsafe', 'datetime', 'csharp15-tour', 'http', 'allocation', 'linq', 'async-linq',
+  'hello', 'multi-file', 'span-memory-unsafe', 'datetime', 'async', 'csharp15-tour', 'http', 'allocation', 'linq', 'async-linq',
   'pipelines', 'web-encoding', 'xml', 'json-dom', 'json-generated', 'tunit', 'regex',
   'di', 'logging', 'hashing', 'fluentvalidation',
   'native-lz4',
@@ -63,6 +63,7 @@ serveWorker(async (data, emit) => {
        !['none', 'O0', 'O1', 'O2', 'O3', 'Os', 'Oz'].includes(data.optimization) ||
        typeof (data.garbageCollector ?? 'Compact') !== 'string' ||
        typeof data.updatedMemorySafetyRules !== 'boolean' ||
+       typeof (data.structuredDiagnostics ?? false) !== 'boolean' ||
        (data.updatedMemorySafetyRules && data.language !== 'preview')))
     throw Error('Invalid compiler source, recipe, language, or optimization settings');
   if (data.operation === 'prune' &&

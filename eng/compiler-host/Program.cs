@@ -19,6 +19,7 @@ using Microsoft.CodeAnalysis.CSharp;
 using NetWasm.Compiler;
 using NetWasm.Compiler.Browser;
 using NetWasm.Compiler.Core;
+using NetWasm.Compiler.ExceptionTypes;
 using NetWasm.Compiler.Wasm;
 using System.Collections.Generic;
 using NetWasm.Runtime.Pack.Planning;
@@ -83,6 +84,8 @@ public static partial class Program
         string ToolchainFingerprint, long RuntimeGlobalBase, long HeapBase, long InitialMemorySizeBytes,
         long MaximumMemorySizeBytes, RuntimeCacheInfo Cache, RuntimeLinkExportInfo[] InternalRuntimeExports, string GarbageCollector);
     private sealed record RuntimeLinkExportInfo(string Name, byte Kind);
+    // Base64 bytes that name the exception types a structured failure report carries.
+    private sealed record DiagnosticArtifactsInfo(string wasm, string exceptionTypeMap, string mapMediaType, string manifest);
     private sealed record RawCoreImportInfo(string Module, string Name, int[] Parameters, int[] Results);
     private sealed record RequiredImportInfo(string Interface, string Name, string[] Parameters, string[] Results);
     private sealed record RawBindingResponse(int schemaVersion, bool success, string? error = null,
@@ -120,7 +123,8 @@ public static partial class Program
         string? trustedRecipe = null,
         int? catalogCaseCount = null,
         string? componentContract = null,
-        string? pe = null
+        string? pe = null,
+        DiagnosticArtifactsInfo? diagnosticArtifacts = null
 #if FRONTEND_CACHE_TRANSPORT
         , FrontendCacheInfo? frontendCache = null,
         FrontendPublicationInfo? frontendPublication = null,
@@ -169,7 +173,8 @@ public static partial class Program
         string ComponentContract,
         string RuntimeManifest,
         string RuntimeSystemLibrariesJson,
-        RuntimeWasmOptimization Optimization, string GarbageCollector, WasmOptimizationOverrides? OptimizationOverrides);
+        RuntimeWasmOptimization Optimization, string GarbageCollector, bool StructuredDiagnostics,
+        WasmOptimizationOverrides? OptimizationOverrides);
     private static PendingFrontendCompilation? pendingFrontendCompilation;
     private static FrontendArtifactCachePublication? pendingFrontendPublication;
     private static FrontendArtifactCacheBatch? pendingFrontendBatch;
@@ -220,6 +225,10 @@ public static partial class Program
             value.ExportName, value.Parameters.ToArray(), value.Result)).ToArray(),
         manifest.WitImports.Select(value => new WitImportInfo(value.Interface, value.Function)).ToArray());
 
+    private static DiagnosticArtifactsInfo? Describe(DiagnosticArtifactBundle? artifacts) => artifacts is null ? null : new(
+        Convert.ToBase64String(artifacts.Wasm), Convert.ToBase64String(artifacts.ExceptionTypeMap.Bytes),
+        artifacts.ExceptionTypeMap.MediaType, Convert.ToBase64String(artifacts.ManifestBytes));
+
     private static EntryPointInfo Describe(BrowserCompilationEntryPoint entryPoint) => new(entryPoint.AssemblyPath,
         entryPoint.TypeName, entryPoint.MethodName, entryPoint.Token, (int)entryPoint.Kind,
         entryPoint.Abi is null ? null : new((int)entryPoint.Abi.ParameterShape, (int)entryPoint.Abi.ReturnShape,
@@ -251,40 +260,40 @@ public static partial class Program
     [JSExport]
     public static string Compile(string source, string reference, string supportJson, string implementation, string witJson, string witBytes,
         string syncWitInventory, string asyncWitInventory, string runtimeManifest,
-        string runtimeSystemLibrariesJson, string languageVersion, bool updatedMemorySafetyRules, string optimization, string garbageCollector, string optimizationOverridesJson)
+        string runtimeSystemLibrariesJson, string languageVersion, bool updatedMemorySafetyRules, string optimization, string garbageCollector, bool structuredDiagnostics, string optimizationOverridesJson)
         => CompileRecipe(source, reference, supportJson, implementation, witJson, witBytes,
             syncWitInventory, asyncWitInventory, runtimeManifest,
-            runtimeSystemLibrariesJson, "{}", "{}", languageVersion, updatedMemorySafetyRules, optimization, garbageCollector, optimizationOverridesJson);
+            runtimeSystemLibrariesJson, "{}", "{}", languageVersion, updatedMemorySafetyRules, optimization, garbageCollector, structuredDiagnostics, optimizationOverridesJson);
 
     [JSExport]
     public static string CompileRecipe(string source, string reference, string supportJson, string implementation, string witJson, string witBytes,
         string syncWitInventory, string asyncWitInventory, string runtimeManifest,
         string runtimeSystemLibrariesJson, string additionalReferencesJson, string additionalImplementationsJson,
-        string languageVersion, bool updatedMemorySafetyRules, string optimization, string garbageCollector, string optimizationOverridesJson)
+        string languageVersion, bool updatedMemorySafetyRules, string optimization, string garbageCollector, bool structuredDiagnostics, string optimizationOverridesJson)
         => CompileCore(source, reference, supportJson, implementation, witJson, witBytes,
             syncWitInventory, asyncWitInventory, runtimeManifest,
             runtimeSystemLibrariesJson, additionalReferencesJson, additionalImplementationsJson, null, false,
-            languageVersion, updatedMemorySafetyRules, optimization, garbageCollector, optimizationOverridesJson);
+            languageVersion, updatedMemorySafetyRules, optimization, garbageCollector, structuredDiagnostics, optimizationOverridesJson);
 
     [JSExport]
     public static string CompileHttpRecipe(string source, string reference, string supportJson, string implementation, string witJson, string witBytes,
         string syncWitInventory, string asyncWitInventory, string runtimeManifest,
         string runtimeSystemLibrariesJson, string additionalReferencesJson, string additionalImplementationsJson,
-        string languageVersion, bool updatedMemorySafetyRules, string optimization, string garbageCollector, string optimizationOverridesJson)
+        string languageVersion, bool updatedMemorySafetyRules, string optimization, string garbageCollector, bool structuredDiagnostics, string optimizationOverridesJson)
         => CompileCore(source, reference, supportJson, implementation, witJson, witBytes,
             syncWitInventory, asyncWitInventory, runtimeManifest,
             runtimeSystemLibrariesJson, additionalReferencesJson, additionalImplementationsJson, null, false,
-            languageVersion, updatedMemorySafetyRules, optimization, garbageCollector, optimizationOverridesJson, useAsyncPlatform: true);
+            languageVersion, updatedMemorySafetyRules, optimization, garbageCollector, structuredDiagnostics, optimizationOverridesJson, useAsyncPlatform: true);
 
     [JSExport]
     public static string CompileGeneratedRecipe(string source, string reference, string supportJson, string implementation, string witJson, string witBytes,
         string syncWitInventory, string asyncWitInventory, string runtimeManifest,
         string runtimeSystemLibrariesJson, string additionalReferencesJson, string additionalImplementationsJson, string trustedRecipe, bool includeGeneratedSourceText,
-        string languageVersion, bool updatedMemorySafetyRules, string optimization, string garbageCollector, string optimizationOverridesJson)
+        string languageVersion, bool updatedMemorySafetyRules, string optimization, string garbageCollector, bool structuredDiagnostics, string optimizationOverridesJson)
         => CompileCore(source, reference, supportJson, implementation, witJson, witBytes,
             syncWitInventory, asyncWitInventory, runtimeManifest,
             runtimeSystemLibrariesJson, additionalReferencesJson, additionalImplementationsJson, trustedRecipe, includeGeneratedSourceText,
-            languageVersion, updatedMemorySafetyRules, optimization, garbageCollector, optimizationOverridesJson);
+            languageVersion, updatedMemorySafetyRules, optimization, garbageCollector, structuredDiagnostics, optimizationOverridesJson);
 
     [JSExport]
     public static string CompileProject(string source, string projectKind, string reference, string supportJson,
@@ -292,11 +301,11 @@ public static partial class Program
         string asyncWitInventory, string runtimeManifest, string runtimeSystemLibrariesJson,
         string additionalReferencesJson, string additionalImplementationsJson,
         string nativeLibrariesJson, string languageVersion, bool updatedMemorySafetyRules,
-        string optimization, string garbageCollector, string optimizationOverridesJson)
+        string optimization, string garbageCollector, bool structuredDiagnostics, string optimizationOverridesJson)
         => CompileCore(source, reference, supportJson, implementation, witJson, witBytes,
             syncWitInventory, asyncWitInventory, runtimeManifest, runtimeSystemLibrariesJson,
             additionalReferencesJson, additionalImplementationsJson, null, false,
-            languageVersion, updatedMemorySafetyRules, optimization, garbageCollector, optimizationOverridesJson,
+            languageVersion, updatedMemorySafetyRules, optimization, garbageCollector, structuredDiagnostics, optimizationOverridesJson,
             projectKind: projectKind, nativeLibrariesJson: nativeLibrariesJson);
 
 #if FRONTEND_CACHE_TRANSPORT
@@ -304,37 +313,37 @@ public static partial class Program
     public static string PrepareRecipe(string source, string reference, string supportJson, string implementation, string witJson, string witBytes,
         string syncWitInventory, string asyncWitInventory, string runtimeManifest,
         string runtimeSystemLibrariesJson, string additionalReferencesJson, string additionalImplementationsJson,
-        string languageVersion, bool updatedMemorySafetyRules, string optimization, string garbageCollector, string optimizationOverridesJson)
+        string languageVersion, bool updatedMemorySafetyRules, string optimization, string garbageCollector, bool structuredDiagnostics, string optimizationOverridesJson)
         => CompileCore(source, reference, supportJson, implementation, witJson, witBytes,
             syncWitInventory, asyncWitInventory, runtimeManifest,
             runtimeSystemLibrariesJson, additionalReferencesJson, additionalImplementationsJson, null, false,
-            languageVersion, updatedMemorySafetyRules, optimization, garbageCollector, optimizationOverridesJson, prepareFrontendCache: true);
+            languageVersion, updatedMemorySafetyRules, optimization, garbageCollector, structuredDiagnostics, optimizationOverridesJson, prepareFrontendCache: true);
 
     [JSExport]
     public static string PrepareHttpRecipe(string source, string reference, string supportJson, string implementation, string witJson, string witBytes,
         string syncWitInventory, string asyncWitInventory, string runtimeManifest,
         string runtimeSystemLibrariesJson, string additionalReferencesJson, string additionalImplementationsJson,
-        string languageVersion, bool updatedMemorySafetyRules, string optimization, string garbageCollector, string optimizationOverridesJson)
+        string languageVersion, bool updatedMemorySafetyRules, string optimization, string garbageCollector, bool structuredDiagnostics, string optimizationOverridesJson)
         => CompileCore(source, reference, supportJson, implementation, witJson, witBytes,
             syncWitInventory, asyncWitInventory, runtimeManifest,
             runtimeSystemLibrariesJson, additionalReferencesJson, additionalImplementationsJson, null, false,
-            languageVersion, updatedMemorySafetyRules, optimization, garbageCollector, optimizationOverridesJson, useAsyncPlatform: true, prepareFrontendCache: true);
+            languageVersion, updatedMemorySafetyRules, optimization, garbageCollector, structuredDiagnostics, optimizationOverridesJson, useAsyncPlatform: true, prepareFrontendCache: true);
 
     [JSExport]
     public static string PrepareGeneratedRecipe(string source, string reference, string supportJson, string implementation, string witJson, string witBytes,
         string syncWitInventory, string asyncWitInventory, string runtimeManifest,
         string runtimeSystemLibrariesJson, string additionalReferencesJson, string additionalImplementationsJson, string trustedRecipe,
-        string languageVersion, bool updatedMemorySafetyRules, string optimization, string garbageCollector, string optimizationOverridesJson)
+        string languageVersion, bool updatedMemorySafetyRules, string optimization, string garbageCollector, bool structuredDiagnostics, string optimizationOverridesJson)
         => CompileCore(source, reference, supportJson, implementation, witJson, witBytes,
             syncWitInventory, asyncWitInventory, runtimeManifest,
             runtimeSystemLibrariesJson, additionalReferencesJson, additionalImplementationsJson, trustedRecipe, false,
-            languageVersion, updatedMemorySafetyRules, optimization, garbageCollector, optimizationOverridesJson, prepareFrontendCache: true);
+            languageVersion, updatedMemorySafetyRules, optimization, garbageCollector, structuredDiagnostics, optimizationOverridesJson, prepareFrontendCache: true);
 #endif
 
     private static string CompileCore(string source, string reference, string supportJson, string implementation, string witJson, string witBytes,
         string syncWitInventory, string asyncWitInventory, string runtimeManifest,
         string runtimeSystemLibrariesJson, string additionalReferencesJson, string additionalImplementationsJson, string? trustedRecipe, bool includeGeneratedSourceText,
-        string languageVersion, bool updatedMemorySafetyRules, string optimization, string garbageCollector, string optimizationOverridesJson,
+        string languageVersion, bool updatedMemorySafetyRules, string optimization, string garbageCollector, bool structuredDiagnostics, string optimizationOverridesJson,
         bool useAsyncPlatform = false,
         string projectKind = "command",
         string nativeLibrariesJson = "[]"
@@ -449,6 +458,8 @@ public static partial class Program
                     ? CompilerEntryPointKind.Library
                     : CompilerEntryPointKind.ManagedExecutable,
                 UseJavaScriptExportBoundary: javaScriptExportWorker,
+                // A command reports an unhandled exception's type and message when the profile asks for it.
+                StructuredDiagnostics: structuredDiagnostics && !javaScriptExportWorker,
                 Optimization: Enum.Parse<FinalWasmOptimization>(runtimeOptimization.ToString()),
                 OptimizationOverrides: optimizationOverrides);
             var request = new BrowserCompilationRequest(options, images,
@@ -473,7 +484,8 @@ public static partial class Program
                     pendingFrontendCompilation = new(session, preparation, [], pe.ToArray(), timings.ToArray(),
                         generatedSources, generatorDiagnostics.Take(128).Select(Describe).ToArray(), trustedRecipe,
                         tunit ? CountCatalogCases(generatedCompilation) : 0, componentContract, runtimeManifest,
-                        runtimeSystemLibrariesJson, runtimeOptimization, garbageCollector, optimizationOverrides);
+                        runtimeSystemLibrariesJson, runtimeOptimization, garbageCollector, structuredDiagnostics,
+                        optimizationOverrides);
                     return Serialize(new(1, true, timings: timings.ToArray(), generatedSources: generatedSources,
                         generatorDiagnostics: generatorDiagnostics.Take(128).Select(Describe).ToArray(),
                         trustedRecipe: trustedRecipe, catalogCaseCount: tunit ? CountCatalogCases(generatedCompilation) : 0,
@@ -539,7 +551,8 @@ public static partial class Program
                 coreLinkPlan = SerializeLinkPlan(BrowserComponentCoreModules.CreateOrderedLinkPlan(
                     new("/netwasm-link/application.wasm", "/netwasm-link/runtime.wasm", "/netwasm-link/linked.wasm",
                         ComponentTarget.Wasm32Wasi02, compiled.EntryPoint.Abi,
-                        Optimization: Enum.Parse<FinalWasmOptimization>(runtimeOptimization.ToString()))
+                        Optimization: Enum.Parse<FinalWasmOptimization>(runtimeOptimization.ToString()),
+                        StructuredDiagnostics: structuredDiagnostics)
                     { OptimizationOverrides = optimizationOverrides },
                     new("/netwasm-link/environment.wasm", "/netwasm-link/host.wasm", "/netwasm-link/command.wasm",
                         "/netwasm-link/merged.wasm", "/netwasm-link/sanitized.wasm", "/netwasm-link/runtime-sanitized.wasm")));
@@ -555,7 +568,9 @@ public static partial class Program
                 rawCoreLinkPlan: rawCoreLinkPlan, rawBindingHandle: rawBindingHandle,
                 trustedRecipe: trustedRecipe,
                 catalogCaseCount: tunit ? CountCatalogCases(generatedCompilation) : 0, componentContract: componentContract,
-                pe: emitted.Success ? Convert.ToBase64String(pe.ToArray()) : null));
+                pe: emitted.Success ? Convert.ToBase64String(pe.ToArray()) : null,
+                // The bundle carries a copy of the module; send it only when it can be used.
+                diagnosticArtifacts: structuredDiagnostics && !javaScriptExportWorker ? Describe(compiled.DiagnosticArtifacts) : null));
         }
         catch (CompilerException error)
         {
@@ -733,7 +748,8 @@ public static partial class Program
             var coreLinkPlan = BrowserComponentCoreModules.CreateOrderedLinkPlan(
                 new("/netwasm-link/application.wasm", "/netwasm-link/runtime.wasm", "/netwasm-link/linked.wasm",
                     ComponentTarget.Wasm32Wasi02, compiled.EntryPoint.Abi,
-                    Optimization: Enum.Parse<FinalWasmOptimization>(pending.Optimization.ToString()))
+                    Optimization: Enum.Parse<FinalWasmOptimization>(pending.Optimization.ToString()),
+                    StructuredDiagnostics: pending.StructuredDiagnostics)
                 { OptimizationOverrides = pending.OptimizationOverrides },
                 new("/netwasm-link/environment.wasm", "/netwasm-link/host.wasm", "/netwasm-link/command.wasm",
                     "/netwasm-link/merged.wasm", "/netwasm-link/sanitized.wasm", "/netwasm-link/runtime-sanitized.wasm"));
@@ -750,6 +766,7 @@ public static partial class Program
                 trustedRecipe: pending.TrustedRecipe, catalogCaseCount: pending.CatalogCaseCount,
                 componentContract: pending.ComponentContract,
                 pe: Convert.ToBase64String(pending.Pe),
+                diagnosticArtifacts: pending.StructuredDiagnostics ? Describe(compiled.DiagnosticArtifacts) : null,
                 frontendPublication: prepared.FrontendPublication is null ? null : new(
                     prepared.FrontendPublication.Token, prepared.FrontendPublication.EntryCount,
                     prepared.FrontendPublication.TotalBytes),

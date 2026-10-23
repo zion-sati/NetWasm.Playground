@@ -12,6 +12,7 @@ from xml.sax.saxutils import escape
 ROOT = Path(__file__).resolve().parents[1]
 PACKAGES = {
     'hello': [],
+    'async': [],
     'allocation': [],
     'linq': ['NetWasm.System.Linq'],
     'async-linq': ['NetWasm.System.Linq.AsyncEnumerable'],
@@ -26,7 +27,7 @@ PACKAGES = {
     'logging': ['NetWasm.Microsoft.Extensions.Logging'],
     'hashing': ['NetWasm.System.IO.Hashing'],
 }
-ASYNC_RECIPES = {'async-linq', 'pipelines'}
+ASYNC_RECIPES = {'async', 'async-linq', 'pipelines'}
 def package_version(pins, package):
     if package == 'NetWasm.FluentValidation':
         return pins['sources']['fluentvalidation']['packageVersion']
@@ -93,6 +94,7 @@ def main():
             'logging':'info WidgetClient[1]\n      Fetched 42 widgets in 12.5 ms\n',
             'hashing':'CRC32: CBF43926\n',
             'hello':'42\n',
+            'async':'Starting three tasks...\nSquares: 1, 4, 9\nTick 1\nTick 2\nTick 3\nCancelled the 10-second delay after 50 ms.\n',
             'linq':'Even sum: 120\n',
             'async-linq':'Async values: 20, 40, 60\n',
             'pipelines':'Buffered bytes: 3\nFirst byte: 13\n',
