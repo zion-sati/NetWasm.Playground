@@ -479,6 +479,9 @@ def refresh_public_assets(stage, pins, runtime_plan=None, candidate_toolchain=No
             raise ValueError('Public hosting package lacks the component execution closure')
         required_raw = {
             f'{hosting_prefix}browser-raw-export-session.mjs',
+            f'{hosting_prefix}deployment-manifest-validator.mjs',
+            f'{hosting_prefix}platform-provider-catalog.generated.mjs',
+            f'{hosting_prefix}preview2-filesystem-scope.mjs',
             f'{hosting_prefix}worker-import-bindings.mjs',
         }
         if not required_raw.issubset(hosting_members):

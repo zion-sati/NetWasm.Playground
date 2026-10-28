@@ -3,7 +3,10 @@ import {
   bindWorkerImports,
   createBrowserRawExportSession,
   createFilesystem,
+  createPreview2FilesystemScope,
   InMemoryFilesystemAdapter,
+  platformProviderCatalog,
+  validateDeploymentManifest,
   WASIShim,
 } from '../jco/raw-worker-runtime.mjs';
 
@@ -120,10 +123,13 @@ serveWorker(async (data, emit) => {
       manifestUrl,
       platform: Object.freeze({
         compileCoreModule: WebAssembly.compile.bind(WebAssembly),
-        createFilesystem({ preopens }) {
-          if (Object.keys(preopens).length !== 0) throw new TypeError('Playground worker preopens are unavailable');
-          return createFilesystem({ adapter: new InMemoryFilesystemAdapter(), preopens: Object.freeze({}) });
-        },
+        createFilesystemScope: preopens => createPreview2FilesystemScope({
+          createFilesystem({ preopens }) {
+            if (Object.keys(preopens).length !== 0) throw new TypeError('Playground worker preopens are unavailable');
+            return createFilesystem({ adapter: new InMemoryFilesystemAdapter(), preopens: Object.freeze({}) });
+          },
+          preopens,
+        }),
         createModuleUrl: bytes => URL.createObjectURL(new Blob([bytes], { type: 'text/javascript' })),
         createShim: configuration => new WASIShim(configuration),
         digest: crypto.subtle.digest.bind(crypto.subtle),
@@ -131,6 +137,9 @@ serveWorker(async (data, emit) => {
         importModule: url => import(url),
         revokeModuleUrl: URL.revokeObjectURL.bind(URL),
       }),
+      // Any program can be compiled here, so the worker offers every WASI provider.
+      platformProviderCatalog,
+      snapshotDeploymentManifest: validateDeploymentManifest,
       stderr: output('stderr'),
       stdout: output('stdout'),
     });

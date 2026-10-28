@@ -55,6 +55,9 @@ const specifications = [
     source: `
       export { bindWorkerImports } from ${JSON.stringify(pathToFileURL(join(stage, 'hosting/worker-import-bindings.mjs')).href)};
       export { createBrowserRawExportSession } from ${JSON.stringify(pathToFileURL(join(stage, 'hosting/browser-raw-export-session.mjs')).href)};
+      export { validateDeploymentManifest } from ${JSON.stringify(pathToFileURL(join(stage, 'hosting/deployment-manifest-validator.mjs')).href)};
+      export { platformProviderCatalog } from ${JSON.stringify(pathToFileURL(join(stage, 'hosting/platform-provider-catalog.generated.mjs')).href)};
+      export { createPreview2FilesystemScope } from ${JSON.stringify(pathToFileURL(join(stage, 'hosting/preview2-filesystem-scope.mjs')).href)};
       export { WASIShim } from ${JSON.stringify(pathToFileURL(join(stage, 'jco/preview2/instantiation.js')).href)};
       export { createFilesystem, InMemoryFilesystemAdapter } from ${JSON.stringify(pathToFileURL(join(stage, 'jco/preview2/filesystem.js')).href)};
     `,
