@@ -58,20 +58,6 @@ public static partial class Program
     private sealed record GeneratorFailure(string? producer, string? errorType, string? message);
     private sealed record FunctionTypeInfo(int[] Parameters, int Result);
     private sealed record FunctionImportInfo(string Module, string Name, FunctionTypeInfo Type);
-    private sealed record StatusAbiInfo(int SuccessStatus, int HostFailureStatus, int ScalarResultOffset);
-    private sealed record TargetLayoutInfo(int ManagedReferenceSize, int StringLengthOffset, int StringDataOffset,
-        int ArrayLengthOffset, int ArrayDataPointerOffset);
-    private sealed record InteropImportInfo(string Module, string Name, string[] Parameters, string Result,
-        string? AsyncReturn, string? ResolveExport, string? RejectExport, string? CancelExport);
-    private sealed record InteropExportInfo(string Name, string[] Parameters, string Result,
-        string? AsyncReturn, string? StatusExport, string? ResultExport, string? CompleteExport,
-        string? CompletionResult);
-    private sealed record InteropCallbackInfo(string Module, string ImportName, int ParameterIndex, string ExportName,
-        string[] Parameters, string Result);
-    private sealed record WitImportInfo(string Interface, string Function);
-    private sealed record InteropManifestInfo(int Version, string Target, StatusAbiInfo StatusAbi,
-        TargetLayoutInfo TargetLayout, InteropImportInfo[] Imports, InteropExportInfo[] Exports,
-        InteropCallbackInfo[] Callbacks, WitImportInfo[] WitImports);
     private sealed record EntryPointAbiInfo(int ParameterShape, int ReturnShape, int CompletionShape);
     private sealed record EntryPointInfo(string AssemblyPath, string TypeName, string MethodName, int? Token,
         int Kind, EntryPointAbiInfo? Abi);
@@ -114,7 +100,8 @@ public static partial class Program
         int? staticDataEnd = null,
         string[]? runtimeFeatures = null,
         FunctionImportInfo[]? imports = null,
-        InteropManifestInfo? interopManifest = null,
+        // The compiler's own manifest, so every field it writes reaches the host's reader.
+        HostInteropManifest? interopManifest = null,
         EntryPointInfo? entryPoint = null,
         RuntimeLinkPlanInfo? runtimeLinkPlan = null,
         string? coreLinkPlan = null,
@@ -210,20 +197,6 @@ public static partial class Program
 
     private static FunctionImportInfo Describe(WasmFunctionImport import) => new(import.Module, import.Name,
         new(import.Type.Parameters.Select(value => (int)value).ToArray(), (int)import.Type.Result));
-
-    private static InteropManifestInfo Describe(HostInteropManifest manifest) => new(manifest.Version, manifest.Target,
-        new(manifest.StatusAbi.SuccessStatus, manifest.StatusAbi.HostFailureStatus, manifest.StatusAbi.ScalarResultOffset),
-        new(manifest.TargetLayout.ManagedReferenceSize, manifest.TargetLayout.StringLengthOffset,
-            manifest.TargetLayout.StringDataOffset, manifest.TargetLayout.ArrayLengthOffset,
-            manifest.TargetLayout.ArrayDataPointerOffset),
-        manifest.Imports.Select(value => new InteropImportInfo(value.Module, value.Name, value.Parameters.ToArray(), value.Result,
-            value.AsyncReturn, value.ResolveExport, value.RejectExport, value.CancelExport)).ToArray(),
-        manifest.Exports.Select(value => new InteropExportInfo(value.Name, value.Parameters.ToArray(), value.Result,
-            value.AsyncReturn, value.StatusExport, value.ResultExport, value.CompleteExport,
-            value.CompletionResult)).ToArray(),
-        manifest.Callbacks.Select(value => new InteropCallbackInfo(value.Module, value.ImportName, value.ParameterIndex,
-            value.ExportName, value.Parameters.ToArray(), value.Result)).ToArray(),
-        manifest.WitImports.Select(value => new WitImportInfo(value.Interface, value.Function)).ToArray());
 
     private static DiagnosticArtifactsInfo? Describe(DiagnosticArtifactBundle? artifacts) => artifacts is null ? null : new(
         Convert.ToBase64String(artifacts.Wasm), Convert.ToBase64String(artifacts.ExceptionTypeMap.Bytes),
@@ -563,7 +536,7 @@ public static partial class Program
                 generatorDiagnostics: generatorDiagnostics.Take(128).Select(Describe).ToArray(),
                 application: Convert.ToBase64String(compiled.ApplicationModule), staticDataEnd: compiled.StaticDataEnd,
                 runtimeFeatures: compiled.RuntimeFeatures.ToArray(), imports: compiled.FunctionImports.Select(Describe).ToArray(),
-                interopManifest: Describe(compiled.InteropManifest), entryPoint: Describe(compiled.EntryPoint),
+                interopManifest: compiled.InteropManifest, entryPoint: Describe(compiled.EntryPoint),
                 runtimeLinkPlan: Describe(runtimeLinkPlan), coreLinkPlan: coreLinkPlan,
                 rawCoreLinkPlan: rawCoreLinkPlan, rawBindingHandle: rawBindingHandle,
                 trustedRecipe: trustedRecipe,
@@ -761,7 +734,7 @@ public static partial class Program
                 generatorDiagnostics: pending.GeneratorDiagnostics,
                 application: Convert.ToBase64String(compiled.ApplicationModule), staticDataEnd: compiled.StaticDataEnd,
                 runtimeFeatures: compiled.RuntimeFeatures.ToArray(), imports: compiled.FunctionImports.Select(Describe).ToArray(),
-                interopManifest: Describe(compiled.InteropManifest), entryPoint: Describe(compiled.EntryPoint),
+                interopManifest: compiled.InteropManifest, entryPoint: Describe(compiled.EntryPoint),
                 runtimeLinkPlan: Describe(runtimeLinkPlan), coreLinkPlan: SerializeLinkPlan(coreLinkPlan),
                 trustedRecipe: pending.TrustedRecipe, catalogCaseCount: pending.CatalogCaseCount,
                 componentContract: pending.ComponentContract,
