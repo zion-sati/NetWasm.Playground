@@ -24,25 +24,25 @@
   "sources": {
     "netwasm": {
       "repository": "https://github.com/zion-sati/NetWasm",
-      "commit": "0c018f7f361a83995ad48852770cbc673f4b2add",
-      "tag": "v0.10.6",
-      "packageVersion": "0.10.6",
+      "commit": "edc7b7560a0cf92cac9a3fd9bd85548287a6cd11",
+      "tag": "v0.10.8",
+      "packageVersion": "0.10.8",
       "toolchainManifest": "eng/toolchain.json",
-      "browserCompilerCommit": "0c018f7f361a83995ad48852770cbc673f4b2add",
-      "browserLinkerCommit": "0c018f7f361a83995ad48852770cbc673f4b2add",
-      "browserToolHostCommit": "0c018f7f361a83995ad48852770cbc673f4b2add"
+      "browserCompilerCommit": "edc7b7560a0cf92cac9a3fd9bd85548287a6cd11",
+      "browserLinkerCommit": "edc7b7560a0cf92cac9a3fd9bd85548287a6cd11",
+      "browserToolHostCommit": "edc7b7560a0cf92cac9a3fd9bd85548287a6cd11"
     },
     "libraries": {
       "repository": "https://github.com/zion-sati/NetWasm.Libraries",
-      "commit": "273d44e2e3c720f604314e8c813eac149d92ab6b",
-      "tag": "v0.10.0",
-      "packageVersion": "0.10.0"
+      "commit": "60defa65ab2c693822ed0fd616bff88ad70f93b7",
+      "tag": "v0.10.8",
+      "packageVersion": "0.10.8"
     },
     "tunit": {
       "repository": "https://github.com/zion-sati/TUnit-NetWasm",
-      "commit": "4900d4ca4636413b4d590fd9dac2d6d5d278aeb1",
-      "tag": "netwasm-v0.10.6",
-      "packageVersion": "0.10.6"
+      "commit": "58d67ade213e7946032a8ea4eed9e6375e1fcabc",
+      "tag": "netwasm-v0.10.8",
+      "packageVersion": "0.10.8"
     },
     "fluentvalidation": {
       "repository": "https://github.com/zion-sati/FluentValidation",
@@ -57,25 +57,25 @@
         "source": "libraries",
         "package": "netwasm.system.text.json",
         "path": "analyzers/dotnet/cs/System.Text.Json.SourceGeneration.dll",
-        "sha256": "bdef5ce75fa321acf8d2c2a5b2a9f9eb2a30ef4a28b1694fbca978176c8dd6c9"
+        "sha256": "b43a11e2c5c5a8f09d53430387089c84a37442431ebbec5a63e381ce05ee7c27"
       },
       "tunit-generator": {
         "source": "tunit",
         "package": "netwasm.tunit.core",
         "path": "analyzers/dotnet/roslyn4.14/cs/TUnit.Core.SourceGenerator.dll",
-        "sha256": "6665adee8623bc00a66a8ce298d83252ee249ea1b5012260666aa40fdc458000"
+        "sha256": "a1ffc2a5062f4cd83c033f7e15089b48775ed9ba4c01731ad044922bd10e970e"
       },
       "di": {
         "source": "libraries",
         "package": "netwasm.microsoft.extensions.dependencyinjection",
         "path": "analyzers/dotnet/cs/NetWasm.Microsoft.Extensions.DependencyInjection.Generator.dll",
-        "sha256": "60d25e6fc2ad24e70ebabcfab5618cc0c4e19f4d764fec310958902beb5cdce4"
+        "sha256": "c77d11f5286ad06a94ce8df9ced9b2330b0e0183b962e0421d713deaa5296a3c"
       },
       "logging": {
         "source": "libraries",
         "package": "netwasm.microsoft.extensions.logging.abstractions",
         "path": "analyzers/dotnet/cs/NetWasm.Microsoft.Extensions.Logging.Generators.dll",
-        "sha256": "b26533af01450c4ad0a9715ae39d89f0705ef4efa07ad3a39badb3c14a4d1554"
+        "sha256": "7bf903c240d0c73d514f8c3d7d9f9a84307a52bbae5867cb2aa6471e726a0d3f"
       },
       "tunit-program": {
         "source": "tunit",
