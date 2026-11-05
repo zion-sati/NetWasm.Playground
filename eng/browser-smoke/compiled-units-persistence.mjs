@@ -7,7 +7,8 @@ if (!output) throw Error('PLAYGROUND_EVIDENCE is required');
 mkdirSync(output, { recursive: true });
 
 // A compilation keeps each method's compiled code in IndexedDB; after a reload the new compiler
-// worker restores it and reuses every unit the unchanged source still holds.
+// worker restores it. Unchanged source reuses the whole kept compilation, and an edit to a
+// method body patches the last compile with that method alone.
 const browser = await browserType.launch({ headless: true });
 try {
   const page = await browser.newPage();
@@ -21,14 +22,14 @@ try {
         super(specifier, options);
         this.addEventListener('message', ({ data }) => {
           if (data?.result?.compiledUnitsCache)
-            globalThis.compiledUnits.push({ ...data.result.compiledUnitsCache, summary: data.result.compiledUnits });
+            globalThis.compiledUnits.push({ ...data.result.compiledUnitsCache, summary: data.result.compiledUnits,
+              netwasmMilliseconds: data.result.timings?.find(timing => timing.stage === 'netwasm')?.milliseconds });
         });
       }
     };
   });
 
   const url = process.env.PLAYGROUND_URL ?? 'http://127.0.0.1:4173/';
-  const restored = summary => Number(/^restored (\d+) /.exec(summary ?? '')?.[1] ?? NaN);
   const compile = async () => {
     await page.locator('.monaco-editor').waitFor();
     await setOptimizations(page, 'none');
@@ -42,9 +43,9 @@ try {
         .map(item => [item.dataset.stage, item.dataset.state])));
     const units = await page.evaluate(() => globalThis.compiledUnits.at(-1));
     if (stages['cache-lookup'] !== 'complete' || stages['cache-hydrate'] !== 'complete' ||
-        stages['cache-write'] !== 'complete' || !units || Number.isNaN(restored(units.summary)))
+        stages['cache-write'] !== 'complete' || typeof units?.summary !== 'string')
       throw Error(`Compiled unit evidence is missing: ${JSON.stringify({ stages, units })}`);
-    return { stages, units, restored: restored(units.summary) };
+    return { stages, units };
   };
   const storage = () => page.evaluate(async () => {
     const request = indexedDB.open('netwasm-playground-frontend-cache');
@@ -82,24 +83,35 @@ try {
   await clearCompilationCache(page);
   const cold = await compile();
   const afterCold = await storage();
-  if (cold.restored !== 0 || cold.units.restoredBytes !== 0 || !(cold.units.storedBytes > 0) ||
+  if (!cold.units.summary.startsWith('restored 0 ') || cold.units.restoredBytes !== 0 ||
+      !(cold.units.storedBytes > 0) ||
       afterCold.entries !== 1 || afterCold.totalBytes !== cold.units.storedBytes)
     throw Error(`Cold compilation did not persist its compiled units: ${JSON.stringify({ cold, afterCold })}`);
 
   await page.reload();
   const warm = await compile();
   const afterReload = await storage();
-  if (warm.units.restoredBytes !== cold.units.storedBytes || !(warm.restored > 0) ||
-      afterReload.entries !== 1 ||
+  if (warm.units.restoredBytes !== cold.units.storedBytes ||
+      !warm.units.summary.includes('early cutoff: nothing changed') || afterReload.entries !== 1 ||
       JSON.stringify(afterReload.partitions) !== JSON.stringify(afterCold.partitions))
-    throw Error(`Reload did not reuse the persisted compiled units: ${JSON.stringify({
+    throw Error(`Reload did not restore the persisted compiled units: ${JSON.stringify({
       cold, warm, afterCold, afterReload,
     })}`);
+
+  // After an edit, the next compiler worker restores the units again and patches the last
+  // compile with the edited method.
+  await page.locator('#editor .view-lines').click({ position: { x: 80, y: 12 } });
+  await page.keyboard.press('ControlOrMeta+End');
+  await page.keyboard.insertText('\nConsole.WriteLine(43);\n');
+  const edited = await compile();
+  const patched = Number(/early cutoff: patched (\d+) /.exec(edited.units.summary)?.[1]);
+  if (!(edited.units.restoredBytes > 0) || !(patched > 0))
+    throw Error(`An edit did not reuse the persisted compiled units: ${JSON.stringify({ cold, warm, edited })}`);
   if (errors.length) throw Error(`Page errors: ${JSON.stringify(errors)}`);
 
-  const result = { passed: true, cold, warm, afterCold, afterReload, errors };
+  const result = { passed: true, cold, warm, edited, afterCold, afterReload, errors };
   writeFileSync(`${output}/results.json`, JSON.stringify(result, null, 2));
-  console.log(`PASS: persisted ${afterCold.totalBytes} bytes of compiled units and restored ${warm.restored} after reload`);
+  console.log(`PASS: persisted ${afterCold.totalBytes} bytes of compiled units; after reload an edit patched ${patched} functions of the last compile`);
 } finally {
   await browser.close();
 }
