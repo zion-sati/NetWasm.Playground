@@ -170,12 +170,9 @@ export function createNativeAotCompilerChannel(options = {}) {
     return Array.from(digest, byte => byte.toString(16).padStart(2, '0')).join('');
   }
 
-  // A worker restores the units it compiles with from IndexedDB once, and stores them again
-  // after each compilation; the compiler reuses only the units that still hold.
-  async function compileWithUnits(name, operation, arguments_) {
-    const identity = await sha256Hex(encoder.encode(name));
-    const descriptor = { schema: 'compiled-units', namespace: identity, slot: identity,
-      key: await sha256Hex(encoder.encode('netwasm.compiled-units/1')) };
+  // Finishes a compilation whose C# compiled. With compiled units, the worker restores them
+  // from IndexedDB once before the first such compilation and stores them again after each.
+  async function compileWebAssembly(name) {
     const timings = [];
     const timed = async (stage, action) => {
       report({ stage, state: 'running' });
@@ -186,26 +183,36 @@ export function createNativeAotCompilerChannel(options = {}) {
         report({ stage, state: 'complete', milliseconds });
       }
     };
-    let restoredBytes = 0, storedBytes = 0;
-    if (!importedUnits.has(name)) {
-      const stored = await timed('cache-lookup', () => unitStore.loadRuntime(descriptor));
-      await timed('cache-hydrate', async () => {
-        if (!stored.hit) return;
-        invoke('importCompiledUnits', [name, toBase64(stored.payload)]);
-        restoredBytes = stored.payload.byteLength;
-      });
-      importedUnits.add(name);
+    let descriptor, restoredBytes = 0, storedBytes = 0;
+    if (name) {
+      const identity = await sha256Hex(encoder.encode(name));
+      descriptor = { schema: 'compiled-units', namespace: identity, slot: identity,
+        key: await sha256Hex(encoder.encode('netwasm.compiled-units/1')) };
+      if (!importedUnits.has(name)) {
+        const stored = await timed('cache-lookup', () => unitStore.loadRuntime(descriptor));
+        await timed('cache-hydrate', async () => {
+          if (!stored.hit) return;
+          invoke('importCompiledUnits', [name, toBase64(stored.payload)]);
+          restoredBytes = stored.payload.byteLength;
+        });
+        importedUnits.add(name);
+      }
     }
     invoke('useCompiledUnits', [name]);
-    const result = JSON.parse(invoke(operation, arguments_));
-    if (result.success) {
-      await timed('cache-write', async () => {
-        const units = fromBase64(invoke('exportCompiledUnits', [name]));
-        const checksum = new Uint8Array(await crypto.subtle.digest('SHA-256', units));
-        if (await unitStore.writeRuntime(descriptor, units, checksum)) storedBytes = units.byteLength;
-      });
+    report({ stage: 'netwasm', state: 'running' });
+    const started = performance.now();
+    const result = JSON.parse(invoke('compileWebAssembly', []));
+    report({ stage: 'netwasm', state: 'complete', milliseconds: performance.now() - started });
+    if (name) {
+      if (result.success) {
+        await timed('cache-write', async () => {
+          const units = fromBase64(invoke('exportCompiledUnits', [name]));
+          const checksum = new Uint8Array(await crypto.subtle.digest('SHA-256', units));
+          if (await unitStore.writeRuntime(descriptor, units, checksum)) storedBytes = units.byteLength;
+        });
+      }
+      result.compiledUnitsCache = { restoredBytes, storedBytes };
     }
-    result.compiledUnitsCache = { restoredBytes, storedBytes };
     result.timings = [...(result.timings ?? []), ...timings];
     return result;
   }
@@ -268,14 +275,8 @@ export function createNativeAotCompilerChannel(options = {}) {
         : generated
         ? [data.sourceSet, ...compilerInputs, ...images, trustedRecipe, false, ...settings]
         : [data.sourceSet, ...compilerInputs, ...images, ...settings];
-      const units = unitsName(data);
-      let result;
-      if (units && unitStore) {
-        result = await compileWithUnits(units, operation, arguments_);
-      } else {
-        invoke('useCompiledUnits', [units]);
-        result = JSON.parse(invoke(operation, arguments_));
-      }
+      let result = JSON.parse(invoke(operation, arguments_));
+      if (result.prepared) result = await compileWebAssembly(unitStore ? unitsName(data) : '');
       if (typeof result.application === 'string') result.application = fromBase64(result.application);
       if (typeof result.pe === 'string') result.pe = fromBase64(result.pe);
       if (result.diagnosticArtifacts) result.diagnosticArtifacts = {

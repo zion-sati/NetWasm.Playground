@@ -48,6 +48,7 @@ public static unsafe class NativeAotBridge
                 "compileHttpRecipe" => CompileHttpRecipe(arguments),
                 "compileGeneratedRecipe" => CompileGeneratedRecipe(arguments),
                 "compileProject" => CompileProject(arguments),
+                "compileWebAssembly" => CompileWebAssembly(arguments),
                 "buildRawBindings" => BuildRawBindings(arguments),
                 "useCompiledUnits" => UseCompiledUnits(arguments),
                 "importCompiledUnits" => ImportCompiledUnits(arguments),
@@ -133,6 +134,12 @@ public static unsafe class NativeAotBridge
     {
         RequireCount(value, 5);
         return Program.BuildRawBindings(value[0], value[1], value[2], value[3], value[4]);
+    }
+
+    private static string CompileWebAssembly(string[] value)
+    {
+        RequireCount(value, 0);
+        return Program.CompileWebAssembly();
     }
 
     private static string UseCompiledUnits(string[] value)

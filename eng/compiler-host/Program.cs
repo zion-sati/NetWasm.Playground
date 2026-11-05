@@ -105,7 +105,9 @@ public static partial class Program
         string? pe = null,
         DiagnosticArtifactsInfo? diagnosticArtifacts = null,
         // What the compilation reused of the compiled units it kept, when it kept units.
-        string? compiledUnits = null
+        string? compiledUnits = null,
+        // The C# compiled; CompileWebAssembly finishes the compilation.
+        bool? prepared = null
         );
 
     [JsonSourceGenerationOptions(DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull)]
@@ -274,6 +276,7 @@ public static partial class Program
         string nativeLibrariesJson = "[]"
         )
     {
+        preparedCompilation = null;
         var generatedSources = Array.Empty<GeneratedSource>();
         var generatorDiagnostics = ImmutableArray<Diagnostic>.Empty;
         var timings = new List<StageTiming>();
@@ -359,126 +362,159 @@ public static partial class Program
             if (!emitted.Success) return Serialize(new(1, false, "roslyn", "source-diagnostics", true,
                 emitted.Diagnostics.Take(128).Select(Describe).ToArray(), timings.ToArray(), generatedSources,
                 generatorDiagnostics.Take(128).Select(Describe).ToArray()));
-            Stage("netwasm");
-            started = Stopwatch.GetTimestamp();
-            var entryPoint = generatedCompilation.GetEntryPoint(CancellationToken.None);
-            var inferredAsyncPlatform = entryPoint?.ReturnType is INamedTypeSymbol returnType &&
-                returnType.Name == "Task" && returnType.ContainingNamespace.ToDisplayString() == "System.Threading.Tasks";
-            var asynchronous = javaScriptExportWorker || tunit || useAsyncPlatform || inferredAsyncPlatform;
-            var componentContract = javaScriptExportWorker ? "jsexport-worker"
-                : asynchronous ? "async-command" : "command";
-            var images = new Dictionary<string,byte[]> { ["NetWasmApp.dll"] = pe.ToArray(), ["NetWasm.CoreLib.dll"] = Convert.FromBase64String(implementation) };
-            var additionalImplementations = JsonSerializer.Deserialize(additionalImplementationsJson, CompilerHostJsonContext.Default.DictionaryStringString)!;
-            foreach (var image in additionalImplementations) images.Add(image.Key, Convert.FromBase64String(image.Value));
-            images["compiler.wit.wasm"] = Convert.FromBase64String(witBytes);
-            var options = new CompilerOptions(
-                "NetWasmApp.dll", ["NetWasm.CoreLib.dll", .. additionalImplementations.Keys],
-                javaScriptExportWorker ? string.Empty : "Program",
-                javaScriptExportWorker ? string.Empty : "<Main>$", [],
-                WitPath: "compiler.wit.wasm", WitWorld: asynchronous ? "netwasm:platform@1.0.0/async-platform" : "netwasm:platform@1.0.0/platform",
-                EntryPointKind: javaScriptExportWorker
-                    ? CompilerEntryPointKind.Library
-                    : CompilerEntryPointKind.ManagedExecutable,
-                UseJavaScriptExportBoundary: javaScriptExportWorker,
-                // A command reports an unhandled exception's type and message when the profile asks for it.
-                StructuredDiagnostics: structuredDiagnostics && !javaScriptExportWorker,
-                Optimization: Enum.Parse<FinalWasmOptimization>(runtimeOptimization.ToString()),
-                OptimizationOverrides: optimizationOverrides,
-                IntermediateOutputPath: compiledUnitsName)
+            var image = pe.ToArray();
+            string CompileWebAssembly()
             {
-                CompiledUnits = compiledUnitsName is not null,
-            };
-            var request = new BrowserCompilationRequest(options, images,
-                new Dictionary<string,string> { ["compiler.wit.wasm"] = witJson },
-                new Dictionary<string,string>
+                try
                 {
-                    ["compiler.wit.wasm"] = asynchronous ? asyncWitInventory : syncWitInventory,
-                },
-                selectManagedExecutableEntryPoint: !javaScriptExportWorker);
-            var compiled = compilerSession.Compile(request);
-            if (compiled.NativeCallbackSupport is not null)
-                throw new InvalidOperationException("Browser native callbacks are not supported.");
-            timings.Add(new("netwasm", Stopwatch.GetElapsedTime(started).TotalMilliseconds));
-            var systemLibraries = JsonSerializer.Deserialize(runtimeSystemLibrariesJson,
-                CompilerHostJsonContext.Default.RuntimeSystemLibraryArray)!
-                .Select(asset => new RuntimeLinkPlanAsset(asset.Path, asset.Sha256)).ToImmutableArray();
-            var nativeLibraries = JsonSerializer.Deserialize(nativeLibrariesJson,
-                CompilerHostJsonContext.Default.RuntimeNativeLibraryArray)!;
-            var runtimeLinkPlan = RuntimeLinkPlanner.Plan(new(runtimeManifest, "wasm32", compiled.StaticDataEnd,
-                AssetRoot: "/netwasm-link/runtime", OutputPath: "/netwasm-link/runtime.wasm",
-                MaximumMemorySizeBytes: guestMemoryMaximum, SystemLibraries: systemLibraries,
-                Optimization: runtimeOptimization)
-            {
-                GarbageCollector = garbageCollector,
-                RuntimeFeatures = compiled.RuntimeFeatures,
-                NativeImports = [.. compiled.NativeImports.Select(import => new RuntimeLinkPlanNativeImport(
-                    import.LibraryName,
-                    import.EntryPoint,
-                    [.. import.Parameters.Select(MapNativeType)],
-                    import.ReturnType is { } result ? MapNativeType(result) : null))],
-                NativeLibraries = [.. nativeLibraries.Select(library => new RuntimeLinkPlanNativeLibrary(
-                    library.LibraryName, library.Target, library.Path, library.Sha256))],
-            });
-            string? coreLinkPlan = null;
-            string? rawCoreLinkPlan = null;
-            string? rawBindingHandle = null;
-            if (javaScriptExportWorker)
-            {
-                var finalOptimization = Enum.Parse<FinalWasmOptimization>(optimization == "none" ? "None" : optimization);
-                var rawRequest = new RawModuleLinkRequest(
-                    "/netwasm-link/application.wasm", "/netwasm-link/runtime.wasm",
-                    "/netwasm-link/output.wasm", ComponentTarget.Wasm32Wasi02, finalOptimization)
-                {
-                    OptimizationOverrides = optimizationOverrides,
-                    InternalRuntimeExports = [.. runtimeLinkPlan.InternalRuntimeExports
-                        .Select(value => new WasmInternalExport(value.Name, value.Kind))],
-                    InternalApplicationExports = [],
-                };
-                rawCoreLinkPlan = SerializeLinkPlan(BrowserRawCoreModules.CreateOrderedLinkPlan(rawRequest,
-                    new("/netwasm-link/raw", "/netwasm-link/raw/linked.wasm")));
-                rawBindingHandle = Convert.ToHexStringLower(RandomNumberGenerator.GetBytes(16));
-                pendingRawBindingHandle = rawBindingHandle;
-                pendingRawBinding = new(new(compiled.FunctionImports, compiled.InteropManifest),
-                    witJson, asyncWitInventory);
-            }
-            else
-            {
-                coreLinkPlan = SerializeLinkPlan(BrowserComponentCoreModules.CreateOrderedLinkPlan(
-                    new("/netwasm-link/application.wasm", "/netwasm-link/runtime.wasm", "/netwasm-link/linked.wasm",
-                        ComponentTarget.Wasm32Wasi02, compiled.EntryPoint.Abi,
+                    Stage("netwasm");
+                    started = Stopwatch.GetTimestamp();
+                    var entryPoint = generatedCompilation.GetEntryPoint(CancellationToken.None);
+                    var inferredAsyncPlatform = entryPoint?.ReturnType is INamedTypeSymbol returnType &&
+                        returnType.Name == "Task" && returnType.ContainingNamespace.ToDisplayString() == "System.Threading.Tasks";
+                    var asynchronous = javaScriptExportWorker || tunit || useAsyncPlatform || inferredAsyncPlatform;
+                    var componentContract = javaScriptExportWorker ? "jsexport-worker"
+                        : asynchronous ? "async-command" : "command";
+                    var images = new Dictionary<string,byte[]> { ["NetWasmApp.dll"] = image, ["NetWasm.CoreLib.dll"] = Convert.FromBase64String(implementation) };
+                    var additionalImplementations = JsonSerializer.Deserialize(additionalImplementationsJson, CompilerHostJsonContext.Default.DictionaryStringString)!;
+                    foreach (var image in additionalImplementations) images.Add(image.Key, Convert.FromBase64String(image.Value));
+                    images["compiler.wit.wasm"] = Convert.FromBase64String(witBytes);
+                    var options = new CompilerOptions(
+                        "NetWasmApp.dll", ["NetWasm.CoreLib.dll", .. additionalImplementations.Keys],
+                        javaScriptExportWorker ? string.Empty : "Program",
+                        javaScriptExportWorker ? string.Empty : "<Main>$", [],
+                        WitPath: "compiler.wit.wasm", WitWorld: asynchronous ? "netwasm:platform@1.0.0/async-platform" : "netwasm:platform@1.0.0/platform",
+                        EntryPointKind: javaScriptExportWorker
+                            ? CompilerEntryPointKind.Library
+                            : CompilerEntryPointKind.ManagedExecutable,
+                        UseJavaScriptExportBoundary: javaScriptExportWorker,
+                        // A command reports an unhandled exception's type and message when the profile asks for it.
+                        StructuredDiagnostics: structuredDiagnostics && !javaScriptExportWorker,
                         Optimization: Enum.Parse<FinalWasmOptimization>(runtimeOptimization.ToString()),
-                        StructuredDiagnostics: structuredDiagnostics)
-                    { OptimizationOverrides = optimizationOverrides },
-                    new("/netwasm-link/environment.wasm", "/netwasm-link/host.wasm", "/netwasm-link/command.wasm",
-                        "/netwasm-link/merged.wasm", "/netwasm-link/sanitized.wasm", "/netwasm-link/runtime-sanitized.wasm")));
+                        OptimizationOverrides: optimizationOverrides,
+                        IntermediateOutputPath: compiledUnitsName)
+                    {
+                        CompiledUnits = compiledUnitsName is not null,
+                    };
+                    var request = new BrowserCompilationRequest(options, images,
+                        new Dictionary<string,string> { ["compiler.wit.wasm"] = witJson },
+                        new Dictionary<string,string>
+                        {
+                            ["compiler.wit.wasm"] = asynchronous ? asyncWitInventory : syncWitInventory,
+                        },
+                        selectManagedExecutableEntryPoint: !javaScriptExportWorker);
+                    var compiled = compilerSession.Compile(request);
+                    if (compiled.NativeCallbackSupport is not null)
+                        throw new InvalidOperationException("Browser native callbacks are not supported.");
+                    timings.Add(new("netwasm", Stopwatch.GetElapsedTime(started).TotalMilliseconds));
+                    var systemLibraries = JsonSerializer.Deserialize(runtimeSystemLibrariesJson,
+                        CompilerHostJsonContext.Default.RuntimeSystemLibraryArray)!
+                        .Select(asset => new RuntimeLinkPlanAsset(asset.Path, asset.Sha256)).ToImmutableArray();
+                    var nativeLibraries = JsonSerializer.Deserialize(nativeLibrariesJson,
+                        CompilerHostJsonContext.Default.RuntimeNativeLibraryArray)!;
+                    var runtimeLinkPlan = RuntimeLinkPlanner.Plan(new(runtimeManifest, "wasm32", compiled.StaticDataEnd,
+                        AssetRoot: "/netwasm-link/runtime", OutputPath: "/netwasm-link/runtime.wasm",
+                        MaximumMemorySizeBytes: guestMemoryMaximum, SystemLibraries: systemLibraries,
+                        Optimization: runtimeOptimization)
+                    {
+                        GarbageCollector = garbageCollector,
+                        RuntimeFeatures = compiled.RuntimeFeatures,
+                        NativeImports = [.. compiled.NativeImports.Select(import => new RuntimeLinkPlanNativeImport(
+                            import.LibraryName,
+                            import.EntryPoint,
+                            [.. import.Parameters.Select(MapNativeType)],
+                            import.ReturnType is { } result ? MapNativeType(result) : null))],
+                        NativeLibraries = [.. nativeLibraries.Select(library => new RuntimeLinkPlanNativeLibrary(
+                            library.LibraryName, library.Target, library.Path, library.Sha256))],
+                    });
+                    string? coreLinkPlan = null;
+                    string? rawCoreLinkPlan = null;
+                    string? rawBindingHandle = null;
+                    if (javaScriptExportWorker)
+                    {
+                        var finalOptimization = Enum.Parse<FinalWasmOptimization>(optimization == "none" ? "None" : optimization);
+                        var rawRequest = new RawModuleLinkRequest(
+                            "/netwasm-link/application.wasm", "/netwasm-link/runtime.wasm",
+                            "/netwasm-link/output.wasm", ComponentTarget.Wasm32Wasi02, finalOptimization)
+                        {
+                            OptimizationOverrides = optimizationOverrides,
+                            InternalRuntimeExports = [.. runtimeLinkPlan.InternalRuntimeExports
+                                .Select(value => new WasmInternalExport(value.Name, value.Kind))],
+                            InternalApplicationExports = [],
+                        };
+                        rawCoreLinkPlan = SerializeLinkPlan(BrowserRawCoreModules.CreateOrderedLinkPlan(rawRequest,
+                            new("/netwasm-link/raw", "/netwasm-link/raw/linked.wasm")));
+                        rawBindingHandle = Convert.ToHexStringLower(RandomNumberGenerator.GetBytes(16));
+                        pendingRawBindingHandle = rawBindingHandle;
+                        pendingRawBinding = new(new(compiled.FunctionImports, compiled.InteropManifest),
+                            witJson, asyncWitInventory);
+                    }
+                    else
+                    {
+                        coreLinkPlan = SerializeLinkPlan(BrowserComponentCoreModules.CreateOrderedLinkPlan(
+                            new("/netwasm-link/application.wasm", "/netwasm-link/runtime.wasm", "/netwasm-link/linked.wasm",
+                                ComponentTarget.Wasm32Wasi02, compiled.EntryPoint.Abi,
+                                Optimization: Enum.Parse<FinalWasmOptimization>(runtimeOptimization.ToString()),
+                                StructuredDiagnostics: structuredDiagnostics)
+                            { OptimizationOverrides = optimizationOverrides },
+                            new("/netwasm-link/environment.wasm", "/netwasm-link/host.wasm", "/netwasm-link/command.wasm",
+                                "/netwasm-link/merged.wasm", "/netwasm-link/sanitized.wasm", "/netwasm-link/runtime-sanitized.wasm")));
+                    }
+                    return Serialize(new(1, emitted.Success,
+                        diagnostics: emitted.Diagnostics.Take(128).Select(Describe).ToArray(),
+                        timings: timings.ToArray(), generatedSources: generatedSources,
+                        generatorDiagnostics: generatorDiagnostics.Take(128).Select(Describe).ToArray(),
+                        application: Convert.ToBase64String(compiled.ApplicationModule), staticDataEnd: compiled.StaticDataEnd,
+                        runtimeFeatures: compiled.RuntimeFeatures.ToArray(), imports: compiled.FunctionImports.Select(Describe).ToArray(),
+                        interopManifest: compiled.InteropManifest, entryPoint: Describe(compiled.EntryPoint),
+                        runtimeLinkPlan: Describe(runtimeLinkPlan), coreLinkPlan: coreLinkPlan,
+                        rawCoreLinkPlan: rawCoreLinkPlan, rawBindingHandle: rawBindingHandle,
+                        trustedRecipe: trustedRecipe,
+                        catalogCaseCount: tunit ? CountCatalogCases(generatedCompilation) : 0, componentContract: componentContract,
+                        pe: emitted.Success ? Convert.ToBase64String(image) : null,
+                        // The bundle carries a copy of the module; send it only when it can be used.
+                        diagnosticArtifacts: structuredDiagnostics && !javaScriptExportWorker ? Describe(compiled.DiagnosticArtifacts) : null,
+                        compiledUnits: compiledUnitsName is null ? null : compilerSession.CompiledUnitSummary(compiledUnitsName)));
+                }
+                catch (Exception error)
+                {
+                    return Failure(error, timings, generatedSources, generatorDiagnostics);
+                }
             }
-            return Serialize(new(1, emitted.Success,
-                diagnostics: emitted.Diagnostics.Take(128).Select(Describe).ToArray(),
-                timings: timings.ToArray(), generatedSources: generatedSources,
-                generatorDiagnostics: generatorDiagnostics.Take(128).Select(Describe).ToArray(),
-                application: Convert.ToBase64String(compiled.ApplicationModule), staticDataEnd: compiled.StaticDataEnd,
-                runtimeFeatures: compiled.RuntimeFeatures.ToArray(), imports: compiled.FunctionImports.Select(Describe).ToArray(),
-                interopManifest: compiled.InteropManifest, entryPoint: Describe(compiled.EntryPoint),
-                runtimeLinkPlan: Describe(runtimeLinkPlan), coreLinkPlan: coreLinkPlan,
-                rawCoreLinkPlan: rawCoreLinkPlan, rawBindingHandle: rawBindingHandle,
-                trustedRecipe: trustedRecipe,
-                catalogCaseCount: tunit ? CountCatalogCases(generatedCompilation) : 0, componentContract: componentContract,
-                pe: emitted.Success ? Convert.ToBase64String(pe.ToArray()) : null,
-                // The bundle carries a copy of the module; send it only when it can be used.
-                diagnosticArtifacts: structuredDiagnostics && !javaScriptExportWorker ? Describe(compiled.DiagnosticArtifacts) : null,
-                compiledUnits: compiledUnitsName is null ? null : compilerSession.CompiledUnitSummary(compiledUnitsName)));
-        }
-        catch (CompilerException error)
-        {
-            return Serialize(new(1, false, "netwasm", error.Diagnostic.Id, true,
-                [new(error.Diagnostic.Id, Bound(error.Diagnostic.Message), "Error", method: error.Diagnostic.Method,
-                    ilOffset: error.Diagnostic.IlOffset)], timings.ToArray(), generatedSources,
-                generatorDiagnostics.Take(128).Select(Describe).ToArray()));
+            if (!CompileInSteps) return CompileWebAssembly();
+            preparedCompilation = CompileWebAssembly;
+            return Serialize(new(1, true, timings: timings.ToArray(), prepared: true));
         }
         catch (Exception error)
         {
-            return Serialize(new(1, false, "compiler-host", "host-error", true, error: Bound(error.ToString())));
+            return Failure(error, timings, generatedSources, generatorDiagnostics);
         }
+    }
+
+    private static string Failure(Exception error, List<StageTiming> timings, GeneratedSource[] generatedSources,
+        ImmutableArray<Diagnostic> generatorDiagnostics) => error is CompilerException compiler
+        ? Serialize(new(1, false, "netwasm", compiler.Diagnostic.Id, true,
+            [new(compiler.Diagnostic.Id, Bound(compiler.Diagnostic.Message), "Error", method: compiler.Diagnostic.Method,
+                ilOffset: compiler.Diagnostic.IlOffset)], timings.ToArray(), generatedSources,
+            generatorDiagnostics.Take(128).Select(Describe).ToArray()))
+        : Serialize(new(1, false, "compiler-host", "host-error", true, error: Bound(error.ToString())));
+
+    // The native host cannot report progress during a call, so it compiles in two: a compile
+    // call stops once C# has compiled, and CompileWebAssembly finishes that compilation.
+#if NATIVEAOT_LLVM
+    private static readonly bool CompileInSteps = true;
+#else
+    private static readonly bool CompileInSteps = false;
+#endif
+    private static Func<string>? preparedCompilation;
+
+    [JSExport]
+    public static string CompileWebAssembly()
+    {
+        var compilation = preparedCompilation ??
+            throw new InvalidOperationException("No compilation has compiled its C#.");
+        preparedCompilation = null;
+        return compilation();
     }
 
     private static RuntimeLinkPlanNativeValueType MapNativeType(WasmValueType value) => value switch

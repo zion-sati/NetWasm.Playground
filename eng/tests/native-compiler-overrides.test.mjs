@@ -7,14 +7,20 @@ test('native transport forwards the entire override record on every compilation 
     export const requests = [];
     const heap = new Uint8Array(1048576);
     const encoder = new TextEncoder(), decoder = new TextDecoder();
-    const result = encoder.encode(JSON.stringify({success:false}));
+    // A compile call stops once C# has compiled; compileWebAssembly finishes it.
+    const prepared = encoder.encode(JSON.stringify({success:true,prepared:true}));
+    const finished = encoder.encode(JSON.stringify({success:false}));
+    let result = finished;
     let cursor = 16;
     export default async () => ({
       HEAPU8:heap,
       _NetWasmCompiler_Alloc(size) { const p=cursor; cursor+=size; return p; },
       _NetWasmCompiler_Free() {},
       _NetWasmCompiler_Invoke(p,n) {
-        requests.push(JSON.parse(decoder.decode(heap.subarray(p,p+n))));
+        const request = JSON.parse(decoder.decode(heap.subarray(p,p+n)));
+        requests.push(request);
+        result = request.operation.startsWith('compile') && request.operation !== 'compileWebAssembly'
+          ? prepared : finished;
         return result.length;
       },
       _NetWasmCompiler_CopyResult(p) { heap.set(result,p); return result.length; }
@@ -60,8 +66,9 @@ test('native transport forwards the entire override record on every compilation 
       await channel.request({ operation: 'initialize', toolchainId: 'test' });
       await channel.request({ ...request, recipe, projectKind, compiledUnits: false });
       // A compilation that asks for none keeps no compiled units.
-      assert.deepEqual(native.requests.at(-2), { operation: 'useCompiledUnits', arguments: [''] });
-      const actual = native.requests.at(-1);
+      assert.deepEqual(native.requests.slice(-2),
+        [{ operation: 'useCompiledUnits', arguments: [''] }, { operation: 'compileWebAssembly', arguments: [] }]);
+      const actual = native.requests.at(-3);
       assert.equal(actual.operation, operation);
       assert.equal(actual.arguments.at(-3), 'NetWasm');
       assert.equal(actual.arguments.at(-2), 'true');
@@ -82,10 +89,11 @@ test('native transport forwards the entire override record on every compilation 
     for (let compilation = 0; compilation < 2; compilation++)
       await units.request({ ...request, recipe: 'hello', optimization: 'None' });
     const name = 'units/None/NetWasm/true/' + JSON.stringify(overrides);
-    assert.deepEqual(native.requests.slice(-5).map(item => item.operation),
-      ['importCompiledUnits', 'useCompiledUnits', 'compileRecipe', 'useCompiledUnits', 'compileRecipe']);
-    assert.deepEqual(native.requests.at(-5).arguments, [name, Buffer.from('units').toString('base64')]);
-    assert.deepEqual(native.requests.at(-4).arguments, [name]);
+    assert.deepEqual(native.requests.slice(-7).map(item => item.operation),
+      ['compileRecipe', 'importCompiledUnits', 'useCompiledUnits', 'compileWebAssembly',
+        'compileRecipe', 'useCompiledUnits', 'compileWebAssembly']);
+    assert.deepEqual(native.requests.at(-6).arguments, [name, Buffer.from('units').toString('base64')]);
+    assert.deepEqual(native.requests.at(-5).arguments, [name]);
     assert.equal(loads.length, 1);
     assert.equal(loads[0].schema, 'compiled-units');
     assert.match(loads[0].slot, /^[a-f0-9]{64}$/);
@@ -93,8 +101,9 @@ test('native transport forwards the entire override record on every compilation 
     const channel = createNativeAotCompilerChannel({ assetLoader: loader });
     await channel.request({ ...request, recipe: 'hello', optimizationOverrides: undefined,
       structuredDiagnostics: undefined });
-    assert.equal(native.requests.at(-1).arguments.at(-1), 'null');
-    assert.equal(native.requests.at(-1).arguments.at(-2), 'false');
+    assert.equal(native.requests.at(-3).operation, 'compileRecipe');
+    assert.equal(native.requests.at(-3).arguments.at(-1), 'null');
+    assert.equal(native.requests.at(-3).arguments.at(-2), 'false');
     channel.reset();
   } finally {
     if (previousLocation) Object.defineProperty(globalThis, 'location', previousLocation);
