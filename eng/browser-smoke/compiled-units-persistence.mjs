@@ -1,5 +1,5 @@
 import { clearCompilationCache, setOptimizations } from './playground-ui.mjs';
-import { browserType } from './engine.mjs';
+import { browserName, browserType } from './engine.mjs';
 import { mkdirSync, writeFileSync } from 'node:fs';
 
 const output = process.env.PLAYGROUND_EVIDENCE;
@@ -100,9 +100,12 @@ try {
 
   // After an edit, the next compiler worker restores the units again and patches the last
   // compile with the edited method.
-  await page.locator('#editor .view-lines').click({ position: { x: 80, y: 12 } });
-  await page.keyboard.press('ControlOrMeta+End');
-  await page.keyboard.insertText('\nConsole.WriteLine(43);\n');
+  await page.locator('.monaco-editor').click();
+  await page.keyboard.press(browserName === 'webkit' ? 'Meta+A' : 'ControlOrMeta+A');
+  // One line: Firefox inserts multi-line text into Monaco twice.
+  await page.keyboard.insertText('using System; Console.WriteLine(42); Console.WriteLine(43);');
+  await page.waitForFunction(() => document.querySelectorAll('#editor .view-line').length === 1 &&
+    document.querySelector('#editor .view-lines')?.textContent?.includes('WriteLine(43)'));
   const edited = await compile();
   const patched = Number(/early cutoff: patched (\d+) /.exec(edited.units.summary)?.[1]);
   if (!(edited.units.restoredBytes > 0) || !(patched > 0))
