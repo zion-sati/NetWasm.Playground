@@ -40,7 +40,7 @@ try {
         language: '15',
         updatedMemorySafetyRules: false,
         optimization: 'Oz',
-        frontendCache: false,
+        compiledUnits: false,
       });
       if (!result.success) throw new Error(`Candidate compilation failed: ${result.error ?? 'unknown error'}`);
       const actual = result.runtimeLinkPlan;

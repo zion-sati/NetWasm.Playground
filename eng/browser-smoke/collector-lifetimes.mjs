@@ -27,7 +27,7 @@ try {
         for (const garbageCollector of ['Compact', 'Bump']) {
           const result = await channel.request({ operation: 'compile', recipe: 'hello', sourceSet,
             projectKind: 'command', nativeLibrariesJson: '[]', language: '15',
-            updatedMemorySafetyRules: false, optimization: 'Oz', garbageCollector, frontendCache: false });
+            updatedMemorySafetyRules: false, optimization: 'Oz', garbageCollector, compiledUnits: false });
           if (garbageCollector === 'Compact') {
             if (!result.success || !result.runtimeFeatures.includes(feature) ||
                 result.runtimeLinkPlan.GarbageCollector !== 'Compact')

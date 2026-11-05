@@ -32,19 +32,14 @@ function validateRuntimeLinkPlan(plan, optimization) {
     throw Error('Runtime optimization plan does not match the request');
 }
 
-function checksumBytes(value) {
-  if (typeof value !== 'string' || !/^[a-f0-9]{64}$/.test(value))
-    throw Error('Invalid frontend cache checksum');
-  return Uint8Array.from(value.match(/../g), byte => Number.parseInt(byte, 16));
-}
-
 export function createNativeAotCompilerChannel(options = {}) {
   if (typeof options === 'string') options = { candidateRoot: options };
   const candidateUrl = new URL(options.candidateRoot ?? '/nativeaot/', location.origin);
   const candidatePrefix = options.candidatePrefix ?? 'compiler/_framework/';
   const externalLoader = options.assetLoader;
   const report = options.report ?? (() => {});
-  let initialized, module, loader = externalLoader, compilerToolchainId, frontendCache;
+  let initialized, module, loader = externalLoader, compilerToolchainId, unitStore;
+  const importedUnits = new Set();
   const recipes = new Map();
 
   async function recipeInputs(id) {
@@ -162,67 +157,56 @@ export function createNativeAotCompilerChannel(options = {}) {
     })().catch(error => { initialized = undefined; throw error; });
   }
 
-  async function compileWithFrontendCache(operation, arguments_) {
-    const prepared = JSON.parse(invoke(operation, arguments_));
-    if (!prepared.frontendCache) return prepared;
-    report({ stage: 'cache-lookup', state: 'running' });
-    const cacheLookupStarted = performance.now();
-    const loaded = await frontendCache.load(prepared.frontendCache);
-    const cacheLookupMilliseconds = performance.now() - cacheLookupStarted;
-    report({ stage: 'cache-lookup', state: 'complete', milliseconds: cacheLookupMilliseconds });
-    report({ stage: 'cache-hydrate', state: 'running' });
-    const cacheHydrationStarted = performance.now();
-    for (const entry of loaded.entries)
-      invoke('importFrontendArtifact', [prepared.frontendCache.handle, entry.key,
-        toBase64(entry.payload), toBase64(entry.checksum)]);
-    const cacheHydrationMilliseconds = performance.now() - cacheHydrationStarted;
-    report({ stage: 'cache-hydrate', state: 'complete', milliseconds: cacheHydrationMilliseconds });
-    const loadedEntries = loaded.entries.length;
-    const readBytes = loaded.totalBytes;
-    loaded.entries.length = 0;
-    report({ stage: 'netwasm', state: 'running' });
-    const netwasmStarted = performance.now();
-    const result = JSON.parse(invoke('compilePreparedRecipe', [prepared.frontendCache.handle]));
-    report({ stage: 'netwasm', state: 'complete', milliseconds: performance.now() - netwasmStarted });
-    let cacheWriteMilliseconds = 0;
-    if (result.frontendPublication) {
-      report({ stage: 'cache-write', state: 'running' });
-      const cacheWriteStarted = performance.now();
-      const publication = result.frontendPublication;
-      try {
-        for (;;) {
-          const batch = JSON.parse(invoke('readFrontendArtifactBatch', [publication.token]));
-          const entries = batch.entries.map((entry, index) => ({
-            key: entry.key,
-            checksum: checksumBytes(entry.checksum),
-            payload: fromBase64(invoke('readFrontendArtifactPayload', [batch.token, index])),
-          }));
-          if (!await frontendCache.write(prepared.frontendCache, entries)) {
-            invoke('abandonFrontendArtifactPublication', [publication.token]);
-            break;
-          }
-          invoke('acknowledgeFrontendArtifactBatch', [publication.token, batch.token]);
-          if (batch.isFinal) break;
-        }
-      } catch {
-        try { invoke('abandonFrontendArtifactPublication', [publication.token]); } catch {}
+  // Compiled units serve every level, as the compiler cache before them did: one set for each
+  // setting that changes the code, so switching profiles keeps each of them warm.
+  function unitsName(data) {
+    if (data.compiledUnits === false) return '';
+    return ['units', data.optimization, data.garbageCollector ?? 'Compact', data.structuredDiagnostics === true,
+      JSON.stringify(data.optimizationOverrides ?? null)].join('/');
+  }
+
+  async function sha256Hex(value) {
+    const digest = new Uint8Array(await crypto.subtle.digest('SHA-256', value));
+    return Array.from(digest, byte => byte.toString(16).padStart(2, '0')).join('');
+  }
+
+  // A worker restores the units it compiles with from IndexedDB once, and stores them again
+  // after each compilation; the compiler reuses only the units that still hold.
+  async function compileWithUnits(name, operation, arguments_) {
+    const identity = await sha256Hex(encoder.encode(name));
+    const descriptor = { schema: 'compiled-units', namespace: identity, slot: identity,
+      key: await sha256Hex(encoder.encode('netwasm.compiled-units/1')) };
+    const timings = [];
+    const timed = async (stage, action) => {
+      report({ stage, state: 'running' });
+      const started = performance.now();
+      try { return await action(); } finally {
+        const milliseconds = performance.now() - started;
+        timings.push({ stage, milliseconds });
+        report({ stage, state: 'complete', milliseconds });
       }
-      cacheWriteMilliseconds = performance.now() - cacheWriteStarted;
-      report({ stage: 'cache-write', state: 'complete', milliseconds: cacheWriteMilliseconds });
-    }
-    result.frontendCacheMetrics = {
-      ...result.frontendCacheMetrics,
-      loadedEntries,
-      readBytes,
-      cacheReadMilliseconds: cacheLookupMilliseconds + cacheHydrationMilliseconds,
-      cacheLookupMilliseconds,
-      cacheHydrationMilliseconds,
-      cacheWriteMilliseconds,
     };
-    result.timings = [...(result.timings ?? []),
-      { stage: 'cache-lookup', milliseconds: cacheLookupMilliseconds },
-      { stage: 'cache-hydrate', milliseconds: cacheHydrationMilliseconds },
-      { stage: 'cache-write', milliseconds: cacheWriteMilliseconds }];
+    let restoredBytes = 0, storedBytes = 0;
+    if (!importedUnits.has(name)) {
+      const stored = await timed('cache-lookup', () => unitStore.loadRuntime(descriptor));
+      await timed('cache-hydrate', async () => {
+        if (!stored.hit) return;
+        invoke('importCompiledUnits', [name, toBase64(stored.payload)]);
+        restoredBytes = stored.payload.byteLength;
+      });
+      importedUnits.add(name);
+    }
+    invoke('useCompiledUnits', [name]);
+    const result = JSON.parse(invoke(operation, arguments_));
+    if (result.success) {
+      await timed('cache-write', async () => {
+        const units = fromBase64(invoke('exportCompiledUnits', [name]));
+        const checksum = new Uint8Array(await crypto.subtle.digest('SHA-256', units));
+        if (await unitStore.writeRuntime(descriptor, units, checksum)) storedBytes = units.byteLength;
+      });
+    }
+    result.compiledUnitsCache = { restoredBytes, storedBytes };
+    result.timings = [...(result.timings ?? []), ...timings];
     return result;
   }
 
@@ -232,7 +216,7 @@ export function createNativeAotCompilerChannel(options = {}) {
         if (compilerToolchainId && compilerToolchainId !== data.toolchainId)
           throw Error('Compiler toolchain identity changed');
         compilerToolchainId = data.toolchainId;
-        frontendCache ??= options.createFrontendCache?.(compilerToolchainId);
+        unitStore ??= options.createFrontendCache?.(compilerToolchainId);
         await initialize();
         return { success: true };
       }
@@ -276,23 +260,20 @@ export function createNativeAotCompilerChannel(options = {}) {
       const generated = generatedRecipes.has(data.recipe);
       const trustedRecipe = data.recipe === 'tunit' ? 'tunit'
         : data.recipe === 'di' ? 'di' : data.recipe === 'logging' ? 'logging' : 'json';
+      const operation = projectCompilation ? 'compileProject' : generated ? 'compileGeneratedRecipe'
+        : data.recipe === 'http' ? 'compileHttpRecipe' : 'compileRecipe';
+      const arguments_ = projectCompilation
+        ? [data.sourceSet, projectKind, ...compilerInputs, ...images,
+          nativeLibrariesJson, ...settings]
+        : generated
+        ? [data.sourceSet, ...compilerInputs, ...images, trustedRecipe, false, ...settings]
+        : [data.sourceSet, ...compilerInputs, ...images, ...settings];
+      const units = unitsName(data);
       let result;
-      if (!projectCompilation && data.frontendCache !== false && frontendCache) {
-        const operation = generated ? 'prepareGeneratedRecipe'
-          : data.recipe === 'http' ? 'prepareHttpRecipe' : 'prepareRecipe';
-        const arguments_ = generated
-          ? [data.sourceSet, ...compilerInputs, ...images, trustedRecipe, ...settings]
-          : [data.sourceSet, ...compilerInputs, ...images, ...settings];
-        result = await compileWithFrontendCache(operation, arguments_);
+      if (units && unitStore) {
+        result = await compileWithUnits(units, operation, arguments_);
       } else {
-        const operation = projectCompilation ? 'compileProject' : generated ? 'compileGeneratedRecipe'
-          : data.recipe === 'http' ? 'compileHttpRecipe' : 'compileRecipe';
-        const arguments_ = projectCompilation
-          ? [data.sourceSet, projectKind, ...compilerInputs, ...images,
-            nativeLibrariesJson, ...settings]
-          : generated
-          ? [data.sourceSet, ...compilerInputs, ...images, trustedRecipe, false, ...settings]
-          : [data.sourceSet, ...compilerInputs, ...images, ...settings];
+        invoke('useCompiledUnits', [units]);
         result = JSON.parse(invoke(operation, arguments_));
       }
       if (typeof result.application === 'string') result.application = fromBase64(result.application);
@@ -312,8 +293,9 @@ export function createNativeAotCompilerChannel(options = {}) {
       return result;
     },
     reset() {
-      frontendCache?.close();
-      frontendCache = undefined;
+      unitStore?.close();
+      unitStore = undefined;
+      importedUnits.clear();
       initialized = undefined;
       module = undefined;
       loader = externalLoader;

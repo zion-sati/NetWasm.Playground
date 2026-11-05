@@ -150,7 +150,6 @@ def main():
         }
         run_aot, publish_trimmed, enable_threads = mode_properties[args.compiler_mode]
         common = [f'-p:RuntimeFrameworkVersion={runtime}', f'-p:NetWasmCompilerPackageVersion={version}',
-                  '-p:DefineConstants=FRONTEND_CACHE_TRANSPORT',
                   '-p:WasmBuildNative=true', f'-p:RunAOTCompilation={run_aot}',
                   f'-p:PublishTrimmed={publish_trimmed}', f'-p:WasmEnableThreads={enable_threads}',
                   '-p:ILLinkTreatWarningsAsErrors=false']

@@ -12,7 +12,7 @@
     <InvariantGlobalization>true</InvariantGlobalization>
     <IlcGenerateStackTraceData>false</IlcGenerateStackTraceData>
     <EmccInitialHeapSize>268435456</EmccInitialHeapSize>
-    <DefineConstants>$(DefineConstants);NATIVEAOT_LLVM;FRONTEND_CACHE_TRANSPORT</DefineConstants>
+    <DefineConstants>$(DefineConstants);NATIVEAOT_LLVM</DefineConstants>
     <MSBuildEnableWorkloadResolver>false</MSBuildEnableWorkloadResolver>
     <RoslynCompilerPath Condition="'$(RoslynCompilerPath)' == ''">$(MSBuildSDKsPath)/../Roslyn/bincore</RoslynCompilerPath>
   </PropertyGroup>

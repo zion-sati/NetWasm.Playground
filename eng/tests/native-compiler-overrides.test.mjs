@@ -50,17 +50,17 @@ test('native transport forwards the entire override record on every compilation 
     updatedMemorySafetyRules: false, optimization: 'O3', garbageCollector: 'NetWasm',
     structuredDiagnostics: true, optimizationOverrides: overrides };
   try {
-    for (const [recipe, projectKind, cached, operation] of [
-      ['hello', 'command', false, 'compileRecipe'],
-      ['json-generated', 'command', false, 'compileGeneratedRecipe'],
-      ['hello', 'jsexport-worker', false, 'compileProject'],
-      ['hello', 'command', true, 'prepareRecipe'],
-      ['json-generated', 'command', true, 'prepareGeneratedRecipe'],
+    for (const [recipe, projectKind, operation] of [
+      ['hello', 'command', 'compileRecipe'],
+      ['json-generated', 'command', 'compileGeneratedRecipe'],
+      ['hello', 'jsexport-worker', 'compileProject'],
     ]) {
       const channel = createNativeAotCompilerChannel({ assetLoader: loader,
         createFrontendCache: () => ({ close() {} }) });
-      if (cached) await channel.request({ operation: 'initialize', toolchainId: 'test' });
-      await channel.request({ ...request, recipe, projectKind, frontendCache: cached });
+      await channel.request({ operation: 'initialize', toolchainId: 'test' });
+      await channel.request({ ...request, recipe, projectKind, compiledUnits: false });
+      // A compilation that asks for none keeps no compiled units.
+      assert.deepEqual(native.requests.at(-2), { operation: 'useCompiledUnits', arguments: [''] });
       const actual = native.requests.at(-1);
       assert.equal(actual.operation, operation);
       assert.equal(actual.arguments.at(-3), 'NetWasm');
@@ -68,6 +68,28 @@ test('native transport forwards the entire override record on every compilation 
       assert.deepEqual(JSON.parse(actual.arguments.at(-1)), overrides);
       channel.reset();
     }
+    // A compilation restores its stored units once per worker, under a name for its settings.
+    const loads = [];
+    const units = createNativeAotCompilerChannel({ assetLoader: loader,
+      createFrontendCache: () => ({
+        async loadRuntime(descriptor) {
+          loads.push(descriptor);
+          return { hit: true, available: true, payload: encoder.encode('units') };
+        },
+        close() {},
+      }) });
+    await units.request({ operation: 'initialize', toolchainId: 'test' });
+    for (let compilation = 0; compilation < 2; compilation++)
+      await units.request({ ...request, recipe: 'hello', optimization: 'None' });
+    const name = 'units/None/NetWasm/true/' + JSON.stringify(overrides);
+    assert.deepEqual(native.requests.slice(-5).map(item => item.operation),
+      ['importCompiledUnits', 'useCompiledUnits', 'compileRecipe', 'useCompiledUnits', 'compileRecipe']);
+    assert.deepEqual(native.requests.at(-5).arguments, [name, Buffer.from('units').toString('base64')]);
+    assert.deepEqual(native.requests.at(-4).arguments, [name]);
+    assert.equal(loads.length, 1);
+    assert.equal(loads[0].schema, 'compiled-units');
+    assert.match(loads[0].slot, /^[a-f0-9]{64}$/);
+    units.reset();
     const channel = createNativeAotCompilerChannel({ assetLoader: loader });
     await channel.request({ ...request, recipe: 'hello', optimizationOverrides: undefined,
       structuredDiagnostics: undefined });

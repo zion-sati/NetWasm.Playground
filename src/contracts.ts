@@ -50,20 +50,11 @@ export interface ToolchainPreloadProgress extends AssetMeasurement {
   totalBundleBytes: number;
 }
 
-export interface FrontendCacheMetrics {
-  lookups: number;
-  hits: number;
-  misses: number;
-  memoryHits: number;
-  diskHits: number;
-  stagedArtifacts: number;
-  stagedBytes: number;
-  loadedEntries: number;
-  readBytes: number;
-  cacheReadMilliseconds: number;
-  cacheLookupMilliseconds?: number;
-  cacheHydrationMilliseconds?: number;
-  cacheWriteMilliseconds: number;
+// What a compilation reused of the compiled units the worker kept for its settings.
+export interface CompiledUnitsMetrics {
+  summary?: string;
+  restoredBytes: number;
+  storedBytes: number;
 }
 
 export interface RuntimeCacheMetrics {
@@ -106,7 +97,7 @@ export interface CompilationResult {
   }[];
   diagnostics: Diagnostic[];
   timings: StageTiming[];
-  frontendCacheMetrics?: FrontendCacheMetrics;
+  compiledUnits?: CompiledUnitsMetrics;
   runtimeCacheMetrics?: RuntimeCacheMetrics;
   compilerHostLinearMemoryBytes?: number;
   optimizerHost?: 'native-threads' | 'javascript';

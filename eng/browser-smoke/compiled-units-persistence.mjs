@@ -6,6 +6,8 @@ const output = process.env.PLAYGROUND_EVIDENCE;
 if (!output) throw Error('PLAYGROUND_EVIDENCE is required');
 mkdirSync(output, { recursive: true });
 
+// A compilation keeps each method's compiled code in IndexedDB; after a reload the new compiler
+// worker restores it and reuses every unit the unchanged source still holds.
 const browser = await browserType.launch({ headless: true });
 try {
   const page = await browser.newPage();
@@ -13,19 +15,20 @@ try {
   page.on('pageerror', error => errors.push(String(error)));
   await page.addInitScript(() => {
     const NativeWorker = globalThis.Worker;
-    globalThis.frontendCacheMetrics = [];
+    globalThis.compiledUnits = [];
     globalThis.Worker = class ObservedWorker extends NativeWorker {
       constructor(specifier, options) {
         super(specifier, options);
         this.addEventListener('message', ({ data }) => {
-          if (data?.result?.frontendCacheMetrics)
-            globalThis.frontendCacheMetrics.push(structuredClone(data.result.frontendCacheMetrics));
+          if (data?.result?.compiledUnitsCache)
+            globalThis.compiledUnits.push({ ...data.result.compiledUnitsCache, summary: data.result.compiledUnits });
         });
       }
     };
   });
 
   const url = process.env.PLAYGROUND_URL ?? 'http://127.0.0.1:4173/';
+  const restored = summary => Number(/^restored (\d+) /.exec(summary ?? '')?.[1] ?? NaN);
   const compile = async () => {
     await page.locator('.monaco-editor').waitFor();
     await setOptimizations(page, 'none');
@@ -37,10 +40,11 @@ try {
     const stages = await page.locator('#stages li').evaluateAll(items => Object.fromEntries(
       items.filter(item => ['cache-lookup', 'cache-hydrate', 'cache-write'].includes(item.dataset.stage))
         .map(item => [item.dataset.stage, item.dataset.state])));
-    const metrics = await page.evaluate(() => globalThis.frontendCacheMetrics.at(-1));
-    if (stages['cache-lookup'] !== 'complete' || stages['cache-hydrate'] !== 'complete' || !metrics)
-      throw Error(`Compiler cache evidence is missing: ${JSON.stringify({ stages, metrics })}`);
-    return { stages, metrics };
+    const units = await page.evaluate(() => globalThis.compiledUnits.at(-1));
+    if (stages['cache-lookup'] !== 'complete' || stages['cache-hydrate'] !== 'complete' ||
+        stages['cache-write'] !== 'complete' || !units || Number.isNaN(restored(units.summary)))
+      throw Error(`Compiled unit evidence is missing: ${JSON.stringify({ stages, units })}`);
+    return { stages, units, restored: restored(units.summary) };
   };
   const storage = () => page.evaluate(async () => {
     const request = indexedDB.open('netwasm-playground-frontend-cache');
@@ -62,10 +66,11 @@ try {
         };
         cursor.onerror = () => reject(cursor.error);
       });
+      const units = rows.filter(row => row.partition?.split('/')[1] === 'compiled-units');
       return {
-        entries: rows.length,
-        totalBytes: rows.reduce((total, row) => total + (row.payload?.byteLength ?? 0), 0),
-        partitions: [...new Set(rows.map(row => row.partition))],
+        entries: units.length,
+        totalBytes: units.reduce((total, row) => total + (row.payload?.byteLength ?? 0), 0),
+        partitions: [...new Set(units.map(row => row.partition))],
       };
     } finally {
       database.close();
@@ -77,24 +82,24 @@ try {
   await clearCompilationCache(page);
   const cold = await compile();
   const afterCold = await storage();
-  if (afterCold.entries < 1 || afterCold.totalBytes < 1)
-    throw Error(`Cold compilation did not persist compiler artifacts: ${JSON.stringify(afterCold)}`);
+  if (cold.restored !== 0 || cold.units.restoredBytes !== 0 || !(cold.units.storedBytes > 0) ||
+      afterCold.entries !== 1 || afterCold.totalBytes !== cold.units.storedBytes)
+    throw Error(`Cold compilation did not persist its compiled units: ${JSON.stringify({ cold, afterCold })}`);
 
   await page.reload();
   const warm = await compile();
   const afterReload = await storage();
-  if (!(warm.metrics.loadedEntries > 0) || !(warm.metrics.readBytes > 0) ||
-      afterReload.entries !== afterCold.entries ||
-      afterReload.totalBytes !== afterCold.totalBytes ||
+  if (warm.units.restoredBytes !== cold.units.storedBytes || !(warm.restored > 0) ||
+      afterReload.entries !== 1 ||
       JSON.stringify(afterReload.partitions) !== JSON.stringify(afterCold.partitions))
-    throw Error(`Reload did not reuse the persisted compiler cache: ${JSON.stringify({
+    throw Error(`Reload did not reuse the persisted compiled units: ${JSON.stringify({
       cold, warm, afterCold, afterReload,
     })}`);
   if (errors.length) throw Error(`Page errors: ${JSON.stringify(errors)}`);
 
   const result = { passed: true, cold, warm, afterCold, afterReload, errors };
   writeFileSync(`${output}/results.json`, JSON.stringify(result, null, 2));
-  console.log(`PASS: persisted ${afterReload.entries} compiler artifacts and reused ${warm.metrics.loadedEntries} after reload`);
+  console.log(`PASS: persisted ${afterCold.totalBytes} bytes of compiled units and restored ${warm.restored} after reload`);
 } finally {
   await browser.close();
 }
