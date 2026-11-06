@@ -535,7 +535,8 @@ export class PlaygroundPipeline {
       if (epoch !== this.epoch) throw new Error('Stopped');
       return { ...result, success: true, component, componentContract: compilation.componentContract,
         runtimeFeatures: compilation.runtimeFeatures, diagnosticArtifacts: compilation.diagnosticArtifacts,
-        frontendCacheMetrics: compilation.frontendCacheMetrics,
+        compiledUnits: compilation.compiledUnitsCache
+          ? { summary: compilation.compiledUnits ?? undefined, ...compilation.compiledUnitsCache } : undefined,
         compilerHostLinearMemoryBytes: compilation.hostLinearMemoryBytes,
         optimizerHost: this.optimizerHost,
         optimizerWorkerCount: this.optimizerWorkerCount,

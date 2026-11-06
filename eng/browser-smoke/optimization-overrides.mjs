@@ -15,13 +15,13 @@ try {
     const { createNativeAotCompilerChannel } = await import('/src/workers/native-compiler-channel.mjs');
     const { createFrontendCache, clearFrontendCache } = await import('/src/workers/frontend-cache.mjs');
     await clearFrontendCache();
-    const namespaces = [];
+    const slots = [];
     const channel = createNativeAotCompilerChannel({ assetLoader: createAssetLoader(),
       createFrontendCache(toolchain) {
         const cache = createFrontendCache(toolchain);
         return {
-          load(descriptor) { namespaces.push(descriptor.namespace); return cache.load(descriptor); },
-          write: (descriptor, entries) => cache.write(descriptor, entries),
+          loadRuntime(descriptor) { slots.push(descriptor.slot); return cache.loadRuntime(descriptor); },
+          writeRuntime: (descriptor, payload, checksum) => cache.writeRuntime(descriptor, payload, checksum),
           close: () => cache.close(),
         };
       },
@@ -36,9 +36,11 @@ try {
         optimizationOverrides });
       if (!result.success) throw Error(`Override compilation failed: ${label}`);
       const plan = JSON.parse(result.coreLinkPlan).plan;
-      const proof = { label, namespace: namespaces.at(-1),
-        loadedEntries: result.frontendCacheMetrics.loadedEntries,
-        hits: result.frontendCacheMetrics.hits,
+      // Each override set keeps compiled units of its own; the first compilation under one
+      // restores none.
+      const proof = { label, slot: slots.at(-1),
+        restored: Number(/^restored (\d+) /.exec(result.compiledUnits ?? '')?.[1] ?? NaN),
+        storedBytes: result.compiledUnitsCache?.storedBytes,
         inlineSelection: plan.operations.find(operation => operation.kind === 'inline').selection };
       results.push(proof);
       return proof;
@@ -47,27 +49,26 @@ try {
       await channel.request({ operation: 'initialize', toolchainId: index.id });
       const cold = await compile('default-cold');
       const warm = await compile('default-warm');
-      if (cold.namespace !== warm.namespace || warm.loadedEntries < 1 || warm.hits < 1)
-        throw Error('Default frontend cache did not warm');
+      if (cold.restored !== 0 || !(cold.storedBytes > 0) || !(warm.restored > 0))
+        throw Error(`Default compiled units did not warm: ${JSON.stringify({ cold, warm })}`);
       for (const policy of ['loopInvariantFieldHoisting', 'staticDataViewElimination',
         'addressTakenValuePromotion', 'managedMethodInlining', 'branchPrefixDuplication',
         'arrayBoundsCheckElimination', 'loopUnrolling',
         'constantArgumentPropagation', 'staticArrayPopulationElimination']) {
         const enabled = await compile(`${policy}-enabled`, { [policy]: 'Enabled' });
         const disabled = await compile(`${policy}-disabled`, { [policy]: 'Disabled' });
-        if (enabled.namespace === disabled.namespace)
-          throw Error(`Managed policy reused an incompatible frontend namespace: ${policy}`);
+        if (enabled.slot === disabled.slot || enabled.restored !== 0 || disabled.restored !== 0)
+          throw Error(`Managed policy reused another policy's compiled units: ${policy}`);
       }
       for (const value of ['Enabled', 'Disabled']) {
         const scalar = await compile(`scalar-call-preservation-${value}`, { scalarCallPreservation: value });
-        if (scalar.namespace !== cold.namespace)
-          throw Error('Post-cache scalar-call emission policy changed the frontend namespace');
+        if (scalar.slot === cold.slot || scalar.restored !== 0)
+          throw Error('Scalar-call emission policy reused the default compiled units');
       }
       const preserve = await compile('hints-preserve', { managedInliningHints: 'Preserve' });
       const sizeAware = await compile('hints-ignore-aggressive', { managedInliningHints: 'IgnoreAggressive' });
-      if (preserve.namespace !== cold.namespace || sizeAware.namespace !== cold.namespace ||
-          preserve.inlineSelection !== 'Preserve' || sizeAware.inlineSelection !== 'SizeAware')
-        throw Error('Backend-only hint selection or frontend cache partition is incorrect');
+      if (preserve.inlineSelection !== 'Preserve' || sizeAware.inlineSelection !== 'SizeAware')
+        throw Error('Backend-only hint selection is incorrect');
       return results;
     } finally { channel.reset(); }
   });

@@ -51,7 +51,9 @@ try {
         const cursor = transaction.objectStore('artifacts').openCursor();
         cursor.onsuccess = () => {
           if (!cursor.result) { resolve(values); return; }
-          if (cursor.result.value?.slot) values.push(cursor.result.value);
+          // Compiled units share the store under a schema of their own.
+          const value = cursor.result.value;
+          if (value?.slot && value.partition?.split('/')[1] !== 'compiled-units') values.push(value);
           cursor.result.continue();
         };
         cursor.onerror = () => reject(cursor.error);

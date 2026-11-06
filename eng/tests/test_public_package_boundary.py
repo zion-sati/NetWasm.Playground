@@ -87,15 +87,16 @@ class PublicPackageBoundaryTests(unittest.TestCase):
             "NetWasm.Compiler.Browser": "[$(NetWasmCompilerPackageVersion)]",
             "NetWasm.Runtime.Pack": "[$(NetWasmCompilerPackageVersion)]",
         }, references)
+        # NetWasm removed its frontend artifact cache; compiled units replace it.
         define_constants = project.findtext(".//DefineConstants", default="")
-        self.assertIn("FRONTEND_CACHE_TRANSPORT", define_constants.split(";"))
+        self.assertNotIn("FRONTEND_CACHE_TRANSPORT", define_constants.split(";"))
         self.assertEqual("net11.0", project.findtext(".//TargetFramework"))
         self.assertEqual("11.0.0-rc.1.26425.128", json.loads(
             (ROOT / "eng/browser-host.json").read_text())["runtimeFrameworkVersion"])
 
         release_builder = (ROOT / 'eng/build-release-compiler.py').read_text()
         self.assertIn("11.0.100-rc.1.26425.128", release_builder)
-        self.assertIn("'-p:DefineConstants=FRONTEND_CACHE_TRANSPORT'", release_builder)
+        self.assertNotIn("FRONTEND_CACHE_TRANSPORT", release_builder)
         self.assertIn("'-p:WasmBuildNative=true'", release_builder)
         self.assertIn("'interpreted': ('false', 'false', 'false')", release_builder)
         self.assertIn("'trimmed': ('false', 'true', 'false')", release_builder)
@@ -106,7 +107,7 @@ class PublicPackageBoundaryTests(unittest.TestCase):
         self.assertIn("f'-p:WasmEnableThreads={enable_threads}'", release_builder)
         self.assertIn("'-p:ILLinkTreatWarningsAsErrors=false'", release_builder)
 
-    def test_nativeaot_candidate_is_pinned_and_preserves_frontend_cache_transport(self):
+    def test_nativeaot_candidate_is_pinned(self):
         upstream = json.loads((ROOT / 'eng/upstream-sources.json').read_text())
         candidate = upstream['nativeAotLlvmCandidate']
         self.assertEqual('https://github.com/dotnet/runtimelab', candidate['repository'])
@@ -117,7 +118,7 @@ class PublicPackageBoundaryTests(unittest.TestCase):
             ROOT / 'eng/nativeaot-compiler-host/NativeAotCompilerHost.csproj').getroot()
         constants = project.findtext('.//DefineConstants', default='').split(';')
         self.assertIn('NATIVEAOT_LLVM', constants)
-        self.assertIn('FRONTEND_CACHE_TRANSPORT', constants)
+        self.assertNotIn('FRONTEND_CACHE_TRANSPORT', constants)
         packages = {item.attrib['Include']: item.attrib['Version']
                     for item in project.findall('.//PackageReference')}
         self.assertEqual('[$(NativeAotLlvmVersion)]',

@@ -48,16 +48,11 @@ public static unsafe class NativeAotBridge
                 "compileHttpRecipe" => CompileHttpRecipe(arguments),
                 "compileGeneratedRecipe" => CompileGeneratedRecipe(arguments),
                 "compileProject" => CompileProject(arguments),
+                "compileWebAssembly" => CompileWebAssembly(arguments),
                 "buildRawBindings" => BuildRawBindings(arguments),
-                "prepareRecipe" => PrepareRecipe(arguments),
-                "prepareHttpRecipe" => PrepareHttpRecipe(arguments),
-                "prepareGeneratedRecipe" => PrepareGeneratedRecipe(arguments),
-                "importFrontendArtifact" => ImportFrontendArtifact(arguments),
-                "compilePreparedRecipe" => CompilePreparedRecipe(arguments),
-                "readFrontendArtifactBatch" => ReadFrontendArtifactBatch(arguments),
-                "readFrontendArtifactPayload" => ReadFrontendArtifactPayload(arguments),
-                "acknowledgeFrontendArtifactBatch" => AcknowledgeFrontendArtifactBatch(arguments),
-                "abandonFrontendArtifactPublication" => AbandonFrontendArtifactPublication(arguments),
+                "useCompiledUnits" => UseCompiledUnits(arguments),
+                "importCompiledUnits" => ImportCompiledUnits(arguments),
+                "exportCompiledUnits" => ExportCompiledUnits(arguments),
                 "retainComponentExports" => RetainComponentExports(arguments),
                 "filterInlineAnnotations" => FilterInlineAnnotations(arguments),
                 "removeRawExports" => RemoveRawExports(arguments),
@@ -141,68 +136,30 @@ public static unsafe class NativeAotBridge
         return Program.BuildRawBindings(value[0], value[1], value[2], value[3], value[4]);
     }
 
-    private static string PrepareRecipe(string[] value)
+    private static string CompileWebAssembly(string[] value)
     {
-        RequireCount(value, 18);
-        return Program.PrepareRecipe(value[0], value[1], value[2], value[3], value[4], value[5], value[6], value[7],
-            value[8], value[9], value[10], value[11], value[12], bool.Parse(value[13]), value[14], value[15],
-            bool.Parse(value[16]), value[17]);
+        RequireCount(value, 0);
+        return Program.CompileWebAssembly();
     }
 
-    private static string PrepareHttpRecipe(string[] value)
+    private static string UseCompiledUnits(string[] value)
     {
-        RequireCount(value, 18);
-        return Program.PrepareHttpRecipe(value[0], value[1], value[2], value[3], value[4], value[5], value[6], value[7],
-            value[8], value[9], value[10], value[11], value[12], bool.Parse(value[13]), value[14], value[15],
-            bool.Parse(value[16]), value[17]);
-    }
-
-    private static string PrepareGeneratedRecipe(string[] value)
-    {
-        RequireCount(value, 19);
-        return Program.PrepareGeneratedRecipe(value[0], value[1], value[2], value[3], value[4], value[5], value[6], value[7],
-            value[8], value[9], value[10], value[11], value[12], value[13], bool.Parse(value[14]), value[15], value[16],
-            bool.Parse(value[17]), value[18]);
-    }
-
-    private static string ImportFrontendArtifact(string[] value)
-    {
-        RequireCount(value, 4);
-        Program.ImportFrontendArtifact(value[0], value[1], Convert.FromBase64String(value[2]), Convert.FromBase64String(value[3]));
+        RequireCount(value, 1);
+        Program.UseCompiledUnits(value[0]);
         return "{}";
     }
 
-    private static string CompilePreparedRecipe(string[] value)
-    {
-        RequireCount(value, 1);
-        return Program.CompilePreparedRecipe(value[0]);
-    }
-
-    private static string ReadFrontendArtifactBatch(string[] value)
-    {
-        RequireCount(value, 1);
-        return Program.ReadFrontendArtifactBatch(value[0]);
-    }
-
-    private static string ReadFrontendArtifactPayload(string[] value)
+    private static string ImportCompiledUnits(string[] value)
     {
         RequireCount(value, 2);
-        return Convert.ToBase64String(Program.ReadFrontendArtifactPayload(
-            value[0], int.Parse(value[1], System.Globalization.CultureInfo.InvariantCulture)));
-    }
-
-    private static string AcknowledgeFrontendArtifactBatch(string[] value)
-    {
-        RequireCount(value, 2);
-        Program.AcknowledgeFrontendArtifactBatch(value[0], value[1]);
+        Program.ImportCompiledUnits(value[0], value[1]);
         return "{}";
     }
 
-    private static string AbandonFrontendArtifactPublication(string[] value)
+    private static string ExportCompiledUnits(string[] value)
     {
         RequireCount(value, 1);
-        Program.AbandonFrontendArtifactPublication(value[0]);
-        return "{}";
+        return Program.ExportCompiledUnits(value[0]);
     }
 
     private static string RetainComponentExports(string[] value)
