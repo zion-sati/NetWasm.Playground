@@ -283,7 +283,7 @@ def add_guest_host(stage):
 def add_http_example(stage, library_version):
     member = 'lib/NetWasm,Version=v0.1/System.Net.Http.dll'
     assembly = package_members('netwasm.system.net.http', library_version, {
-        member: '32ce1b3b253980dd1cf98d648cdbcc7b0f2ff6915d25e022a9f049e1a3a016c1',
+        member: '745247929c9e308a9811360fe928cd6478bec09cddc1e203a4ec94b8d0c18524',
     })[member]
     for role in ('references', 'implementations'):
         destination = stage / role / 'System.Net.Http.dll'
