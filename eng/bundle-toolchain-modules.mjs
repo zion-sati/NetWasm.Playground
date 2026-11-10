@@ -78,7 +78,7 @@ const specifications = [
 const hostingSources = async () => (await readdir(join(stage, 'hosting')))
   .filter(name => name.endsWith('.mjs')).map(name => `hosting/${name}`);
 
-// The base toolchain build (eng/prepare-web.py) also inlines the tool and linker hosts.
+// The pinned public base also inlines the tool and linker hosts.
 const baseSources = [
   'hosts/binaryen-host.mjs', 'hosts/tool-inputs.mjs', 'hosts/wasm-tools-host.mjs',
   'hosts/wasm32-memory-ceiling.mjs', 'lld/netwasm-browser-lld.mjs', 'lld/netwasm-lld.mjs',

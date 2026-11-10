@@ -38,16 +38,17 @@ Use the pinned Node version in the public NetWasm toolchain manifest.
 
 ```sh
 npm ci
-python3 eng/browser-notices.py --packages <verified-baseline>/packages --packages <verified-generator-host>/packages --packages <verified-tunit-template>/packages --cache <notice-cache> --output <verified-notices>
-python3 eng/prepare-web.py --baseline <verified-baseline> --compiler <verified-compiler-host> --tools <verified-tools> --lld <verified-browser-lld> --component <verified-component-probe> --examples <verified-desktop-examples> --generated-json <verified-generated-json> --additional-examples <verified-extra-examples> --tunit <verified-tunit-template> --notices <verified-notices>
+python3 eng/build-nativeaot-compiler.py --emsdk <emsdk-3.1.56-x64> --output <compiler-framework>
+python3 eng/rebuild-public-toolchain.py --compiler-framework <compiler-framework>
 npm run dev
 ```
 
-The asset preparation command checks the existing verification receipts and
-stages assets under an ignored, content-addressed `public/toolchain/` directory.
-It consumes the public NuGet.org packages and verified inputs produced by the
-runners under `eng/`; it does not read NetWasm source checkouts.
-It does not rebuild LLVM. Release builds run on a clean GitHub Actions runner:
+`eng/build-nativeaot-compiler.py` builds the browser compiler from the pinned
+public packages (see the [NativeAOT-LLVM host](eng/nativeaot-compiler-host/README.md)).
+`eng/rebuild-public-toolchain.py` stages it with the receipt-verified public base,
+the pinned NetWasm, TUnit and library packages from NuGet.org and the workers in
+`src/workers`, under an ignored, content-addressed `public/toolchain/` directory.
+It does not read NetWasm source checkouts or rebuild LLVM. Release builds run on a clean GitHub Actions runner:
 they compile the browser compiler host from pinned public NuGet packages,
 rebuild the four phase bundles from the receipt-verified public base, generate
 the manifest that maps each phase to a SHA-256-named `.bin` file, and verify
@@ -161,8 +162,7 @@ Playwright's Chromium installed. It exercises the actual compiler and guest.
 `eng/desktop-examples.py` creates the example inputs using a fresh NuGet.org-only
 workspace; `--recipe` selects a particular example. The Regex, DI and hashing
 recipes use their public NetWasm library packages. The compiler host includes
-the package-owned DI generator through `eng/roslyn-worker.py --di-example`
-with that verified workspace; it closes constructor activation at compile time.
+the package-owned DI generator, which closes constructor activation at compile time.
 `eng/tunit-example.py` downloads the exact released public TUnit template
 package from NuGet.org and checks it using ordinary `dotnet test`.
 `eng/browser-smoke/examples.mjs` checks the ordinary examples and compares
@@ -175,15 +175,9 @@ to its verified native template workspace. Set `PLAYGROUND_COMPARE_DESKTOP_BYTES
 for exact ordinary/JSON download comparison when the desktop build uses the same
 memory policy; Playground uses NetWasm's 2 GiB wasm32 guest-memory policy.
 
-Build the compiler host with `eng/roslyn-worker.py`, supplying the verified
-baseline, an output directory, `--compiler-package-version`, `--json-example`
-and `--tunit-example`. The compiler and runtime planner restore only their exact
-pinned public NuGet.org packages; source checkouts and local package feeds are
-rejected. Only the pinned JSON and TUnit generators run; user code
-cannot supply packages or analyzers. Repeat host builds can use
-`--reuse-verified-host <previous-host>` for Playwright, while the compiler
-packages still restore into a fresh cache. `--skip-trusted-probes` keeps a
-focused compiler-only check while retaining verification of generator inputs.
+The compiler host restores only its exact pinned public NuGet.org packages.
+Only the pinned JSON, TUnit, DI and logging generators run; user code cannot
+supply packages or analyzers.
 
 ## Limits and browser checks
 
