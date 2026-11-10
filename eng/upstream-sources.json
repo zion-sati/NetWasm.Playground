@@ -24,13 +24,13 @@
   "sources": {
     "netwasm": {
       "repository": "https://github.com/zion-sati/NetWasm",
-      "commit": "ad4d9835643b304015e332c57247bb683245357d",
-      "tag": "v0.11.3",
-      "packageVersion": "0.11.3",
+      "commit": "f1a00a2328f608fc5cee5ebf3b82a2d586ef66fd",
+      "tag": "v0.12.0",
+      "packageVersion": "0.12.0",
       "toolchainManifest": "eng/toolchain.json",
-      "browserCompilerCommit": "ad4d9835643b304015e332c57247bb683245357d",
-      "browserLinkerCommit": "ad4d9835643b304015e332c57247bb683245357d",
-      "browserToolHostCommit": "ad4d9835643b304015e332c57247bb683245357d"
+      "browserCompilerCommit": "f1a00a2328f608fc5cee5ebf3b82a2d586ef66fd",
+      "browserLinkerCommit": "f1a00a2328f608fc5cee5ebf3b82a2d586ef66fd",
+      "browserToolHostCommit": "f1a00a2328f608fc5cee5ebf3b82a2d586ef66fd"
     },
     "libraries": {
       "repository": "https://github.com/zion-sati/NetWasm.Libraries",
