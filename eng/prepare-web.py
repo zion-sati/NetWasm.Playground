@@ -21,27 +21,16 @@ def encoded(value):
 
 
 BUNDLE_ROLES = {'compiler', 'linker', 'tools', 'guest'}
+# The NetWasm hosting modules the guest workers' bundles start from (eng/bundle-toolchain-modules.mjs).
 HOSTING_MODULES = (
-    'canonical-component-binder.mjs',
-    'command-executor.mjs',
-    'component-execution-preparation.mjs',
+    'browser-file-mounts.mjs',
     'component-executor.mjs',
-    'component-managed-exception-host.mjs',
-    'diagnostic-command-export.mjs',
-    'execution-contracts.mjs',
-    'execution-result.mjs',
-    'execution-scope-closer.mjs',
-    'guest-wake-notifier.mjs',
-    'managed-errors.mjs',
-    'managed-exception-details.mjs',
-    'managed-exception-reporter.mjs',
-    'managed-process-observer.mjs',
-    'pollable-reactor.mjs',
-    'preview2-filesystem.mjs',
-    'read-only-file-directory.mjs',
-    'resource-disposal.mjs',
-    'terminal-managed-export.mjs',
+    'output-sink-stream.mjs',
+    'provider-module-identity.mjs',
     'timezone-sidecar-zones.mjs',
+    'wasi-filesystem.mjs',
+    'wasi-http-fetch.mjs',
+    'wasi-platform.mjs',
 )
 
 
@@ -303,7 +292,6 @@ def main():
             (stage / 'recipes/tunit-support.json').write_bytes(encoded(support))
             (stage / 'recipes/tunit.json').write_bytes(encoded({'schemaVersion': 1, 'id': 'tunit', 'references': references,
                 'implementations': implementations, 'support': 'recipes/tunit-support.json', 'version': pins['tunit']['packageVersion']}))
-            copy(args.tunit / recipe['componentWitBinary'], 'async-command.wit.wasm')
             # Exact browser-safe closure used by the async guest proof.
             for name in HOSTING_MODULES:
                 (stage / 'hosting').mkdir(exist_ok=True)

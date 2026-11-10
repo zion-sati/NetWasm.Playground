@@ -514,16 +514,13 @@ export class PlaygroundPipeline {
           },
           assets: { ...this.assets } };
       }
-      if (!['command', 'async-command'].includes(compilation.componentContract))
+      if (compilation.componentContract !== 'command')
         throw new Error('Compiler returned an invalid component contract');
-      const asynchronous = compilation.componentContract === 'async-command';
-      // A synchronous command with structured diagnostics also exports the
-      // diagnostic command, which reports an escaping exception.
-      const diagnosticCommand = !asynchronous && snapshot.structuredDiagnostics === true;
-      const witName = asynchronous || diagnosticCommand ? 'async-command.wit.wasm' : 'command.wit.wasm';
-      const witWorld = snapshot.recipeId === 'http' ? 'netwasm:component/async-http-command@1.0.0'
-        : asynchronous ? 'netwasm:component/async-command@1.0.0'
-        : diagnosticCommand ? 'netwasm:component/diagnostic-command@1.0.0' : 'wasi:cli/command@0.2.11';
+      // A command with structured diagnostics also exports the diagnostic
+      // command, which reports an escaping exception.
+      const diagnosticCommand = snapshot.structuredDiagnostics === true;
+      const witName = diagnosticCommand ? 'diagnostic-command.wit.wasm' : 'command.wit.wasm';
+      const witWorld = diagnosticCommand ? 'netwasm:component/diagnostic-command@1.0.0' : 'command';
       const wit = await this.loadAsset(witName);
       const component = await this.stage('componentization', timings, async () => {
         const embedded = await this.tool('wasm-tools', ['component', 'embed', witName, 'linked.wasm', '--encoding', 'utf8', '--output', 'embedded.wasm', '--world', witWorld], { [witName]: wit, 'linked.wasm': linked }, ['embedded.wasm']);
@@ -566,7 +563,7 @@ export class PlaygroundPipeline {
     try {
       if (!compilation.component) throw new Error('No compiled component');
       const componentContract = compilation.componentContract ?? 'command';
-      if (!['command', 'async-command', 'jsexport-worker'].includes(componentContract))
+      if (!['command', 'jsexport-worker'].includes(componentContract))
         throw new Error('Invalid compiled component contract');
       await this.initialize();
       if (componentContract === 'jsexport-worker') {

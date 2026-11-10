@@ -45,7 +45,6 @@ public static unsafe class NativeAotBridge
                 "configureGuestMemoryMaximum" => ConfigureGuestMemoryMaximum(arguments),
                 "compile" => Compile(arguments),
                 "compileRecipe" => CompileRecipe(arguments),
-                "compileHttpRecipe" => CompileHttpRecipe(arguments),
                 "compileGeneratedRecipe" => CompileGeneratedRecipe(arguments),
                 "compileProject" => CompileProject(arguments),
                 "compileWebAssembly" => CompileWebAssembly(arguments),
@@ -87,17 +86,17 @@ public static unsafe class NativeAotBridge
 
     private static string Compile(string[] value)
     {
-        RequireCount(value, 16);
+        RequireCount(value, 15);
         return Program.Compile(value[0], value[1], value[2], value[3], value[4], value[5], value[6], value[7],
-            value[8], value[9], value[10], bool.Parse(value[11]), value[12], value[13], bool.Parse(value[14]), value[15]);
+            value[8], value[9], bool.Parse(value[10]), value[11], value[12], bool.Parse(value[13]), value[14]);
     }
 
     private static string CompileRecipe(string[] value)
     {
-        RequireCount(value, 18);
+        RequireCount(value, 17);
         return Program.CompileRecipe(value[0], value[1], value[2], value[3], value[4], value[5], value[6], value[7],
-            value[8], value[9], value[10], value[11], value[12], bool.Parse(value[13]), value[14], value[15],
-            bool.Parse(value[16]), value[17]);
+            value[8], value[9], value[10], value[11], bool.Parse(value[12]), value[13], value[14],
+            bool.Parse(value[15]), value[16]);
     }
 
     private static string FilterInlineAnnotations(string[] value)
@@ -106,28 +105,20 @@ public static unsafe class NativeAotBridge
         return Program.FilterInlineAnnotations(value[0], value[1]);
     }
 
-    private static string CompileHttpRecipe(string[] value)
-    {
-        RequireCount(value, 18);
-        return Program.CompileHttpRecipe(value[0], value[1], value[2], value[3], value[4], value[5], value[6], value[7],
-            value[8], value[9], value[10], value[11], value[12], bool.Parse(value[13]), value[14], value[15],
-            bool.Parse(value[16]), value[17]);
-    }
-
     private static string CompileGeneratedRecipe(string[] value)
     {
-        RequireCount(value, 20);
+        RequireCount(value, 19);
         return Program.CompileGeneratedRecipe(value[0], value[1], value[2], value[3], value[4], value[5], value[6], value[7],
-            value[8], value[9], value[10], value[11], value[12], bool.Parse(value[13]), value[14],
-            bool.Parse(value[15]), value[16], value[17], bool.Parse(value[18]), value[19]);
+            value[8], value[9], value[10], value[11], bool.Parse(value[12]), value[13],
+            bool.Parse(value[14]), value[15], value[16], bool.Parse(value[17]), value[18]);
     }
 
     private static string CompileProject(string[] value)
     {
-        RequireCount(value, 20);
+        RequireCount(value, 19);
         return Program.CompileProject(value[0], value[1], value[2], value[3], value[4], value[5], value[6], value[7],
-            value[8], value[9], value[10], value[11], value[12], value[13], value[14], bool.Parse(value[15]), value[16], value[17],
-            bool.Parse(value[18]), value[19]);
+            value[8], value[9], value[10], value[11], value[12], value[13], bool.Parse(value[14]), value[15], value[16],
+            bool.Parse(value[17]), value[18]);
     }
 
     private static string BuildRawBindings(string[] value)

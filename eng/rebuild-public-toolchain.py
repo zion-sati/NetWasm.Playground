@@ -20,6 +20,10 @@ ROOT = Path(__file__).resolve().parents[1]
 ARCHIVES = {}
 CANDIDATE_FEED = None
 CANDIDATE_VERSION = None
+# The jco build NetWasm's hosting adapters are generated for: upstream jco with a patched
+# bindgen core (the toolchain package's tools/jco/patch-provenance.json).
+JCO_VERSION = '1.41.0+netwasm.1'
+JCO_MODULES = ('jco', 'jco-transpile', 'preview2-shim')
 SPEC = importlib.util.spec_from_file_location('prepare_web', ROOT / 'eng/prepare-web.py')
 PREPARE = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(PREPARE)
@@ -193,18 +197,17 @@ def rebind_notice_origins(stage, pins):
         url, archive, restore_hash = verified_archive(package, version)
         packages[package] = (version, url, archive, restore_hash)
     for target, entry in origins['files'].items():
-        catalog_entry = NOTICES.PUBLIC_CATALOG['files'].get(target)
-        if catalog_entry is not None:
-            entry['covers'] = catalog_entry['covers']
+        catalog_entry = NOTICES.PUBLIC_CATALOG['files'][target]
+        entry['covers'] = catalog_entry['covers']
         source = entry['source']
-        if catalog_entry is not None:
-            catalog_source = catalog_entry['source']
-            same_nuget_source = (source.get('kind') == catalog_source.get('kind') == 'nuget' and
-                                  source.get('package') == catalog_source.get('package'))
-            same_git_source = (source.get('kind') == catalog_source.get('kind') == 'git' and
-                                source.get('repository') == catalog_source.get('repository'))
-            if same_nuget_source or same_git_source:
-                source['path'] = catalog_source['path']
+        catalog_source = catalog_entry['source']
+        if any(source.get(key) != catalog_source.get(key) for key in ('kind', 'package', 'repository')):
+            # The catalog moved this notice to another origin, as jco's licence moved from the
+            # toolchain package, whose jco no longer ships it, to the jco repository.
+            entry.clear()
+            entry.update(json.loads(json.dumps(catalog_entry)))
+            source = entry['source']
+        source['path'] = catalog_source['path']
         source_family = (source_families.get(source.get('repository'))
                          if source.get('kind') == 'git' else None)
         if source_family:
@@ -218,14 +221,29 @@ def rebind_notice_origins(stage, pins):
             source['commit'] = commit
             entry.update(bytes=len(notice), sha256=sha256(notice))
             continue
+        notice_path = stage / 'notices' / target
+        if source.get('kind') == 'git':
+            # A notice from another project's repository is pinned to a commit; fetch it only
+            # when the base lacks the catalogued bytes.
+            if not notice_path.is_file() or sha256(notice_path.read_bytes()) != catalog_entry['sha256']:
+                repository = source['repository'].removeprefix('https://github.com/')
+                notice = download(f"https://raw.githubusercontent.com/{repository}/{source['commit']}/{source['path']}",
+                                  64 * 1024)
+                if sha256(notice) != catalog_entry['sha256']:
+                    raise ValueError(f'Notice changed in public repository: {repository}/{source["path"]}')
+                notice_path.parent.mkdir(parents=True, exist_ok=True)
+                notice_path.write_bytes(notice)
+            continue
         package = source.get('package')
         if package not in packages:
             continue
         version, url, archive, restore_hash = packages[package]
         with zipfile.ZipFile(io.BytesIO(archive)) as package_zip:
             notice = package_zip.read(source['path'])
-        if notice != (stage / 'notices' / target).read_bytes():
+        if len(notice) != catalog_entry['bytes'] or sha256(notice) != catalog_entry['sha256']:
             raise ValueError(f'Notice changed in public package: {package}/{source["path"]}')
+        notice_path.write_bytes(notice)
+        entry.update(bytes=len(notice), sha256=sha256(notice))
         source.update(version=version, url=url, archiveSha256=sha256(archive),
                       archiveSha512=base64.b64encode(hashlib.sha512(archive).digest()).decode(),
                       restoreContentHash=restore_hash)
@@ -234,31 +252,32 @@ def rebind_notice_origins(stage, pins):
     return packages
 
 
-def add_guest_providers(stage, toolchain_archive):
-    prefix = 'tools/jco/node_modules/@bytecodealliance/preview2-shim/dist/browser/'
-    browser = stage / 'jco/preview2'
-    browser.mkdir(parents=True)
+def add_guest_runtime(stage, toolchain_archive):
+    """Bundle jco's in-browser transpiler from the public toolchain package's jco closure."""
+    prefix = 'tools/jco/node_modules/@bytecodealliance/'
     with zipfile.ZipFile(io.BytesIO(toolchain_archive)) as package:
-        names = [name for name in package.namelist() if name.startswith(prefix) and
-                 name.endswith('.js') and '/' not in name[len(prefix):]]
-        required = {'cli.js', 'clocks.js', 'filesystem.js', 'http.js', 'io.js', 'random.js'}
-        if not required.issubset({name[len(prefix):] for name in names}):
-            raise ValueError('Public package lacks browser WASI providers')
-        for name in names:
-            (browser / name[len(prefix):]).write_bytes(package.read(name))
-        instantiation = ('tools/jco/node_modules/@bytecodealliance/preview2-shim/'
-                         'dist/common/instantiation.js')
-        if instantiation not in package.namelist():
-            raise ValueError('Public package lacks browser WASI instantiation support')
-        (browser / 'instantiation.js').write_bytes(package.read(instantiation))
-    subprocess.run(['node', str(ROOT / 'eng/bundle-toolchain-modules.mjs'), str(stage),
-                    '--providers-only'], check=True)
+        provenance = json.loads(package.read('tools/jco/patch-provenance.json'))
+        if provenance.get('effectiveVersion') != JCO_VERSION:
+            raise ValueError(f"Public toolchain jco is {provenance.get('effectiveVersion')}, not {JCO_VERSION}")
+        core = package.read(prefix + 'jco-transpile/vendor/' + provenance['replacement']['path'])
+        if sha256(core) != provenance['replacement']['sha256']:
+            raise ValueError('Public toolchain jco bindgen core does not match its patch provenance')
+        with tempfile.TemporaryDirectory(prefix='.jco-', dir=stage.parent) as temporary:
+            modules = Path(temporary) / 'node_modules'
+            for name in package.namelist():
+                relative = name.removeprefix(prefix)
+                if (name.startswith(prefix) and not name.endswith('/') and
+                        relative.split('/', 1)[0] in JCO_MODULES):
+                    destination = modules / '@bytecodealliance' / safe_path(relative)
+                    destination.parent.mkdir(parents=True, exist_ok=True)
+                    destination.write_bytes(package.read(name))
+            subprocess.run(['node', str(ROOT / 'eng/bundle-toolchain-modules.mjs'), str(stage),
+                            '--guest-runtime', str(modules)], check=True)
 
 
-def add_component_host(stage):
+def add_guest_host(stage):
     subprocess.run(['node', str(ROOT / 'eng/bundle-toolchain-modules.mjs'), str(stage),
                     '--hosting-only'], check=True)
-    shutil.rmtree(stage / 'jco/preview2')
 
 
 def add_http_example(stage, library_version):
@@ -388,7 +407,6 @@ def add_wit_inventories(stage, version):
         add(stage / 'compiler/compiler.wit.wasm',
             stage / 'compiler/compiler-wit.json', (
                 ('netwasm:platform/platform@1.0.0', stage / 'compiler/compiler-wit-platform.wat'),
-                ('netwasm:platform/async-platform@1.0.0', stage / 'compiler/compiler-wit-async-platform.wat'),
             ), 'compiler')
         add(stage / 'command.wit.wasm', stage / 'compiler/command-wit.json', (
                 ('command', stage / 'compiler/command-wit-command.wat'),
@@ -464,8 +482,11 @@ def refresh_public_assets(stage, pins, runtime_plan=None, candidate_toolchain=No
     replace('command.wit.wasm', 'netwasm.toolchain', core,
             'tools/wit-packages/command.wit.wasm')
     add_wit_inventories(stage, core)
-    replace('async-command.wit.wasm', 'netwasm.toolchain', core,
-            'tools/wit-packages/async-command.wit.wasm')
+    # A WASI 0.3 command builds against one world, or the diagnostic command's
+    # with structured diagnostics; the base's asynchronous command world is gone.
+    (stage / 'async-command.wit.wasm').unlink()
+    (stage / 'diagnostic-command.wit.wasm').write_bytes(public_member(
+        'netwasm.toolchain', core, 'tools/wit-packages/diagnostic-command.wit.wasm'))
     hosting_directory = stage / 'hosting'
     hosting_directory.mkdir(exist_ok=True)
     for existing in hosting_directory.glob('*.mjs'):
@@ -481,7 +502,6 @@ def refresh_public_assets(stage, pins, runtime_plan=None, candidate_toolchain=No
             f'{hosting_prefix}browser-raw-export-session.mjs',
             f'{hosting_prefix}deployment-manifest-validator.mjs',
             f'{hosting_prefix}platform-provider-catalog.generated.mjs',
-            f'{hosting_prefix}preview2-filesystem-scope.mjs',
             f'{hosting_prefix}worker-import-bindings.mjs',
         }
         if not required_raw.issubset(hosting_members):
@@ -733,8 +753,8 @@ def main():
         pins['browserWasmOpt'] = upstream['browserWasmOpt']
         refresh_public_assets(stage, pins, runtime_plan, candidate_toolchain)
         rebind_notice_origins(stage, release_pins)
-        add_guest_providers(stage, package_archive('netwasm.toolchain', pins['netwasm']['packageVersion']))
-        add_component_host(stage)
+        add_guest_runtime(stage, package_archive('netwasm.toolchain', pins['netwasm']['packageVersion']))
+        add_guest_host(stage)
         add_http_example(stage, pins['libraries']['packageVersion'])
         add_timezone_data(stage, pins['netwasm']['packageVersion'])
         framework = stage / 'compiler/_framework'

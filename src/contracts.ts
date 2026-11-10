@@ -83,7 +83,7 @@ export interface CompilationResult {
   diagnosticArtifacts?: DiagnosticArtifacts;
   cancelled?: boolean;
   component?: Uint8Array;
-  componentContract?: 'command' | 'async-command' | 'jsexport-worker';
+  componentContract?: 'command' | 'jsexport-worker';
   /** Runtime features the compiled program reaches, such as 'local-time'. */
   runtimeFeatures?: readonly string[];
   rawAdapter?: Uint8Array;

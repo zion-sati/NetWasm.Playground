@@ -1,6 +1,6 @@
 (component
   (type $i (instance (export "attack" (func))))
-  (import "wasi:io/poll@0.2.11" (instance $import (type $i)))
+  (import "wasi:clocks/monotonic-clock@0.3.2" (instance $import (type $i)))
   (alias export $import "attack" (func $attack))
   (core func $lowered (canon lower (func $attack)))
   (core module $m

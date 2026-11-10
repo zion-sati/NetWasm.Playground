@@ -173,8 +173,7 @@ The JSON generator smoke is `eng/browser-smoke/json-generated.mjs`. The TUnit
 smoke is `eng/browser-smoke/tunit.mjs`, with `PLAYGROUND_TUNIT_EXAMPLE` pointing
 to its verified native template workspace. Set `PLAYGROUND_COMPARE_DESKTOP_BYTES=1`
 for exact ordinary/JSON download comparison when the desktop build uses the same
-memory policy; Playground uses NetWasm's 2 GiB wasm32 guest-memory policy. TUnit
-downloads use NetWasm's asynchronous component contract and require its host.
+memory policy; Playground uses NetWasm's 2 GiB wasm32 guest-memory policy.
 
 Build the compiler host with `eng/roslyn-worker.py`, supplying the verified
 baseline, an output directory, `--compiler-package-version`, `--json-example`
@@ -199,11 +198,11 @@ focused compiler-only check while retaining verification of generator inputs.
 | Guest transpilation / compiler and tool stages | 60 / 120 seconds |
 | Completed compiler job recycling | At least 512 MiB retained linear memory |
 
-Guest imports are explicit; environment and arguments are empty by default.
-Filesystem, sockets and arbitrary JavaScript imports are excluded. Ordinary
-programs can read the monotonic clock for elapsed-time and Regex timeout checks.
-TUnit alone receives clock subscriptions, polling and reactor capabilities
-needed by its asynchronous host.
+Programs run as WASI 0.3 components on NetWasm's own browser host. They get
+clocks, random numbers, an in-memory file system and HTTP through the browser's
+`fetch`; sockets and arbitrary JavaScript imports are excluded. The environment
+holds `TZ`, plus the sample URL for the HTTP example, and only TUnit's `--list`
+passes arguments.
 Workers inherit the page CSP and are terminated on Stop or timeout.
 
 Trusted compiler/tool binaries have finite linear-memory maxima: .NET 2 GiB,
