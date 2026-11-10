@@ -2,8 +2,8 @@ import { checkGuestMemory } from './guest-memory.mjs';
 import { meterGuestHttpBodies } from './guest-http-budget.mjs';
 import { createAssetLoader, serveWorker, digest, errorText } from './asset-loader.mjs';
 
-// The structured logging example produces a measured 4.12 MiB component.
-const maximumComponentBytes = 5 * 1048576;
+// An HttpClient program, with .NET 11's System.Net.Http, is a measured 6.45 MB component at O3.
+const maximumComponentBytes = 8 * 1048576;
 // The command contract NetWasm's hosting generates component adapters for.
 const contractKey = 'wasi-command@0.3.2';
 // Main's arguments follow the program name, as on any WASI host.
@@ -145,7 +145,7 @@ serveWorker(async (data, report) => {
       await import(loader.url('jco/guest-host.mjs'));
     const generated = await generate(component, transpileOptions);
     generatedImports = generated.imports;
-    if (generated.files.reduce((total, [, bytes]) => total + bytes.byteLength, 0) > 8388608)
+    if (generated.files.reduce((total, [, bytes]) => total + bytes.byteLength, 0) > 16 * 1048576)
       throw Error('Generated graph limit exceeded');
     const javascript = generated.files.filter(([name]) => name.endsWith('.js'));
     if (javascript.length !== 1 || javascript[0][0] !== 'guest.js') throw Error('Unsupported generated JavaScript graph');

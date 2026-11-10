@@ -19,7 +19,7 @@ async function sha256(bytes) {
 }
 
 function validate(data) {
-  if (!(data.module instanceof Uint8Array) || data.module.byteLength > 8 * 1048576 ||
+  if (!(data.module instanceof Uint8Array) || data.module.byteLength > 16 * 1048576 ||
       !(data.adapter instanceof Uint8Array) || data.adapter.byteLength > 1048576 ||
       !(data.runtimeLayout instanceof Uint8Array) || data.runtimeLayout.byteLength > 1048576 ||
       !(data.interopManifest instanceof Uint8Array) || data.interopManifest.byteLength > 1048576 ||

@@ -3,7 +3,8 @@ let report = () => {}, initialized;
 const loader = createAssetLoader(assets => report({ assets }));
 // Structured logging supplies 4.03 MiB and emits a 4.11 MiB merged module.
 // Keep bounded headroom for user edits.
-const limits = { maximumInputBytes: 5 * 1048576, maximumOutputBytes: 5 * 1048576 };
+// .NET 11's System.Net.Http makes an HttpClient program's core module 8.1 MB at O3.
+const limits = { maximumInputBytes: 16 * 1048576, maximumOutputBytes: 16 * 1048576 };
 async function initialize() {
   return initialized ??= (async () => {
     await loader.verifyGraph('hosts/');

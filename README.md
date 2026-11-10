@@ -192,7 +192,7 @@ focused compiler-only check while retaining verification of generator inputs.
 | Source | 64 KiB UTF-8 |
 | Diagnostics | 128, with a visible limit label |
 | Guest console | 64 KiB across stdout and stderr |
-| Component / generated execution graph | 4 MiB / 8 MiB |
+| Component / generated execution graph | 8 MiB / 16 MiB |
 | Guest defined memories | 2 GiB combined, counted per instance |
 | Guest execution, including core start functions | 5 seconds |
 | Guest transpilation / compiler and tool stages | 60 / 120 seconds |
