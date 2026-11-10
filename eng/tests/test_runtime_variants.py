@@ -16,17 +16,22 @@ def target(collector):
             'systemLibraries': {'names': ['libc.a']},
             'runtimeArchive': asset('runtime.a'), 'collectorArchive': asset('gc.a'),
             'allowedUndefinedSymbols': asset('allowed.txt'),
-            'speed': {'runtimeArchive': asset('speed/runtime.a'), 'collectorArchive': asset('speed/gc.a')}}
+            'platformArchives': {'wasi': asset('wasi.a'), 'noWasi': asset('nowasi.a')},
+            'speed': {'runtimeArchive': asset('speed/runtime.a'), 'collectorArchive': asset('speed/gc.a'),
+                      'platformArchives': {'wasi': asset('speed/wasi.a'), 'noWasi': asset('speed/nowasi.a')}}}
 
 
 class RuntimeVariantTests(unittest.TestCase):
     def test_all_collectors_and_profiles_are_retained(self):
         targets = [target(name) for name in ['Compact', 'NetWasm', 'Bump']]
         assets = MODULE.runtime_variant_assets(targets)
-        self.assertEqual(15, len(assets))
+        self.assertEqual(27, len(assets))
         for item in targets:
             self.assertIn(PurePosixPath(item['speed']['collectorArchive']['path']), assets)
             self.assertIn(PurePosixPath(item['allowedUndefinedSymbols']['path']), assets)
+            for profile in (item, item['speed']):
+                for archive in profile['platformArchives'].values():
+                    self.assertIn(PurePosixPath(archive['path']), assets)
 
     def test_invalid_and_conflicting_variants_fail(self):
         original = target('Compact')
@@ -37,6 +42,14 @@ class RuntimeVariantTests(unittest.TestCase):
             cases.append([invalid])
         invalid = copy.deepcopy(original)
         invalid['speed']['collectorArchive']['sha256'] = 'bad'
+        cases.append([invalid])
+        for profile in (lambda item: item, lambda item: item['speed']):
+            for platform in ({}, None):
+                invalid = copy.deepcopy(original)
+                profile(invalid)['platformArchives'] = platform
+                cases.append([invalid])
+        invalid = copy.deepcopy(original)
+        invalid['platformArchives']['wasi']['path'] = '../escape'
         cases.append([invalid])
         other = target('Bump')
         other['systemLibraries'] = {'names': ['different.a']}
@@ -49,7 +62,7 @@ class RuntimeVariantTests(unittest.TestCase):
         targets = [target(name) for name in ['Compact', 'NetWasm', 'Bump']]
         for item in targets:
             item['allowedUndefinedSymbols'] = {'path': 'wasm32/shared.txt', 'sha256': 'b' * 64}
-        self.assertEqual(13, len(MODULE.runtime_variant_assets(targets)))
+        self.assertEqual(25, len(MODULE.runtime_variant_assets(targets)))
         targets[-1]['allowedUndefinedSymbols']['sha256'] = 'c' * 64
         with self.assertRaises(ValueError):
             MODULE.runtime_variant_assets(targets)

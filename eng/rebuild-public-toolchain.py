@@ -435,8 +435,14 @@ def runtime_variant_assets(targets):
                 raise ValueError('Invalid runtime speed profile')
             profiles.append((target['speed'], ('runtimeArchive', 'collectorArchive')))
         for profile, fields in profiles:
-            for field in fields:
-                asset = profile.get(field)
+            # Each profile links one platform archive: the WASI one, or the one for a plain
+            # core module without WASI.
+            platform = profile.get('platformArchives')
+            if not isinstance(platform, dict) or not platform:
+                raise ValueError('Invalid runtime platform archives')
+            named = [(field, profile.get(field)) for field in fields]
+            named += [(f'platformArchives.{name}', asset) for name, asset in sorted(platform.items())]
+            for field, asset in named:
                 if (not isinstance(asset, dict) or set(asset) != {'path', 'sha256'} or
                         not isinstance(asset['path'], str) or not isinstance(asset['sha256'], str) or
                         not re.fullmatch(r'[a-f0-9]{64}', asset['sha256'])):
