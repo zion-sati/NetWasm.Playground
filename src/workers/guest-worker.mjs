@@ -19,18 +19,18 @@ const transpileOptions = Object.freeze({
 // A worker reads a mounted Blob in place.
 const readBlobSync = (blob, start, end) => new Uint8Array(new FileReaderSync().readAsArrayBuffer(blob.slice(start, end)));
 
-// Reads the compiler's diagnostic artifacts, which name the exception types a
-// structured failure report carries by number.
-function readDiagnosticArtifacts(value) {
+// The program's symbols files, which a published NetWasm program finds beside it: type names by runtime type ID
+// (a structured failure report names the exception type from them) and method names for stack traces.
+function readSymbols(value) {
   if (value === undefined) return undefined;
-  if (value === null || typeof value !== 'object' || !(value.wasm instanceof Uint8Array) ||
-      !(value.exceptionTypeMap instanceof Uint8Array) || !(value.manifest instanceof Uint8Array) ||
-      typeof value.mapMediaType !== 'string') throw Error('Invalid diagnostic artifacts');
-  const decoder = new TextDecoder();
-  // The component host verifies these against each other before naming a type.
-  return () => ({ manifest: JSON.parse(decoder.decode(value.manifest)), mapBytes: value.exceptionTypeMap,
-    wasmBytes: value.wasm, mapMediaType: value.mapMediaType });
+  if (value === null || typeof value !== 'object' || !(value.typeSymbols instanceof Uint8Array) ||
+      (value.methodSymbols !== undefined && !(value.methodSymbols instanceof Uint8Array)))
+    throw Error('Invalid program symbols');
+  return value;
 }
+
+// The program opens each file beside it under this folder, by the name the build gave it.
+const sidecarPath = name => `/netwasm-sidecars/${programName}.wasm.${name}`;
 
 // Desktop .NET's wording for an exception that escapes Main.
 function unhandledExceptionText(typeName, message, stackTrace) {
@@ -106,7 +106,7 @@ serveWorker(async (data, report) => {
   try {
     if (data.operation !== 'run' || !(data.component instanceof Uint8Array)) throw Error('Invalid guest run request');
     if (data.componentContract !== 'command') throw Error('Invalid guest component contract');
-    const diagnosticArtifacts = readDiagnosticArtifacts(data.diagnosticArtifacts);
+    const symbols = readSymbols(data.symbols);
     const timeZone = data.timeZone ?? 'UTC';
     if (typeof timeZone !== 'string' || !/^[A-Za-z][A-Za-z0-9_+\-/]{0,63}$/.test(timeZone) ||
         typeof (data.localTime ?? false) !== 'boolean') throw Error('Invalid guest time zone');
@@ -141,7 +141,8 @@ serveWorker(async (data, report) => {
     loader.installFetchAdapter();
     const { generate } = await import(loader.url('jco/guest-runtime.mjs'));
     const { executeComponent, createWasiPlatform, createWasiFilesystem, createBrowserFileMounts,
-      createWasiHttpFetch, projectProviderModuleIdentity, createGuestByteReader, readTimeZoneNames } =
+      createWasiHttpFetch, projectProviderModuleIdentity, createGuestByteReader, readTimeZoneNames,
+      readOptionalStackTraceSymbols } =
       await import(loader.url('jco/guest-host.mjs'));
     const generated = await generate(component, transpileOptions);
     generatedImports = generated.imports;
@@ -186,7 +187,10 @@ serveWorker(async (data, report) => {
     const mounts = createBrowserFileMounts(Object.freeze({ readBlobSync }));
     filesystem = createWasiFilesystem(Object.freeze({ hostFiles: mounts.hostFiles,
       preopens: Object.freeze([Object.freeze({ access: 'readWrite', guestPath: '/', hostPath: '/' })]) }));
-    if (timeZoneData) filesystem.mountReadOnlyFile({ guestPath: '/netwasm-timezones/netwasm-timezones.nwtz', bytes: timeZoneData });
+    if (timeZoneData) filesystem.mountReadOnlyFile({ guestPath: sidecarPath('tz-info'), bytes: timeZoneData });
+    if (symbols) filesystem.mountReadOnlyFile({ guestPath: sidecarPath('type-symbols'), bytes: symbols.typeSymbols });
+    if (symbols?.methodSymbols)
+      filesystem.mountReadOnlyFile({ guestPath: sidecarPath('method-symbols'), bytes: symbols.methodSymbols });
     const platform = createWasiPlatform(Object.freeze({ initialDirectory: null, network: Object.freeze({ modules: network }) }))(
       Object.freeze({ arguments: providedArguments, environment, filesystem, grants: Object.freeze({ network: 'allowAll' }),
         signal: null, stdout: sink('stdout'), stderr: sink('stderr'), stdin: null }));
@@ -228,8 +232,9 @@ serveWorker(async (data, report) => {
     const outcome = await executeComponent({ contractKey, adapter, imports, loadCoreModule, instantiateCore,
       releaseActions: [Object.freeze({ phase: 'output', code: 'host.platform-output',
         message: 'The execution host could not deliver application output.', release: () => platform.release() })],
-      ...(diagnosticArtifacts ? {
-        diagnosticArtifacts,
+      ...(symbols ? {
+        diagnosticArtifacts: () => ({ typeSymbols: symbols.typeSymbols }),
+        stackTraceSymbols: readOptionalStackTraceSymbols(symbols.methodSymbols),
         managedExceptionReporting: { reportEnriched: event => append('stderr',
           unhandledExceptionText(event.typeName, event.message, event.stackTrace)) },
       } : {}) });

@@ -19,7 +19,7 @@ using Microsoft.CodeAnalysis.CSharp;
 using NetWasm.Compiler;
 using NetWasm.Compiler.Browser;
 using NetWasm.Compiler.Core;
-using NetWasm.Compiler.ExceptionTypes;
+using NetWasm.Compiler.Symbols;
 using NetWasm.Compiler.Wasm;
 using System.Collections.Generic;
 using NetWasm.Runtime.Pack.Planning;
@@ -71,7 +71,9 @@ public static partial class Program
         long MaximumMemorySizeBytes, RuntimeCacheInfo Cache, RuntimeLinkExportInfo[] InternalRuntimeExports, string GarbageCollector);
     private sealed record RuntimeLinkExportInfo(string Name, byte Kind);
     // Base64 bytes that name the exception types a structured failure report carries.
-    private sealed record DiagnosticArtifactsInfo(string wasm, string exceptionTypeMap, string mapMediaType, string manifest);
+    // The program's symbols files: its exception types' names, every type's names with names on, and its method
+    // names with stack traces on.
+    private sealed record SymbolsInfo(string typeSymbols, string? methodSymbols);
     private sealed record RawCoreImportInfo(string Module, string Name, int[] Parameters, int[] Results);
     private sealed record RequiredImportInfo(string Interface, string Name, string[] Parameters, string[] Results);
     private sealed record RawBindingResponse(int schemaVersion, bool success, string? error = null,
@@ -103,7 +105,7 @@ public static partial class Program
         int? catalogCaseCount = null,
         string? componentContract = null,
         string? pe = null,
-        DiagnosticArtifactsInfo? diagnosticArtifacts = null,
+        SymbolsInfo? symbols = null,
         // What the compilation reused of the compiled units it kept, when it kept units.
         string? compiledUnits = null,
         // The C# compiled; CompileWebAssembly finishes the compilation.
@@ -183,9 +185,9 @@ public static partial class Program
     private static FunctionImportInfo Describe(WasmFunctionImport import) => new(import.Module, import.Name,
         new(import.Type.Parameters.Select(value => (int)value).ToArray(), (int)import.Type.Result));
 
-    private static DiagnosticArtifactsInfo? Describe(DiagnosticArtifactBundle? artifacts) => artifacts is null ? null : new(
-        Convert.ToBase64String(artifacts.Wasm), Convert.ToBase64String(artifacts.ExceptionTypeMap.Bytes),
-        artifacts.ExceptionTypeMap.MediaType, Convert.ToBase64String(artifacts.ManifestBytes));
+    private static SymbolsInfo? Describe(SymbolSidecarArtifact? types, SymbolSidecarArtifact? methods) => types is null
+        ? null
+        : new(Convert.ToBase64String(types.Bytes), methods is null ? null : Convert.ToBase64String(methods.Bytes));
 
     private static EntryPointInfo Describe(BrowserCompilationEntryPoint entryPoint) => new(entryPoint.AssemblyPath,
         entryPoint.TypeName, entryPoint.MethodName, entryPoint.Token, (int)entryPoint.Kind,
@@ -373,8 +375,11 @@ public static partial class Program
                             ? CompilerEntryPointKind.Library
                             : CompilerEntryPointKind.ManagedExecutable,
                         UseJavaScriptExportBoundary: javaScriptExportWorker,
-                        // A command reports an unhandled exception's type and message when the profile asks for it.
+                        // A command reports an unhandled exception's type and message when the profile asks for it,
+                        // and then reads type names and stack frames as a Debug build does.
                         StructuredDiagnostics: structuredDiagnostics && !javaScriptExportWorker,
+                        EmitTypeNames: structuredDiagnostics && !javaScriptExportWorker,
+                        EmitStackTrace: structuredDiagnostics && !javaScriptExportWorker,
                         Optimization: Enum.Parse<FinalWasmOptimization>(runtimeOptimization.ToString()),
                         OptimizationOverrides: optimizationOverrides,
                         IntermediateOutputPath: compiledUnitsName)
@@ -457,8 +462,8 @@ public static partial class Program
                         trustedRecipe: trustedRecipe,
                         catalogCaseCount: tunit ? CountCatalogCases(generatedCompilation) : 0, componentContract: componentContract,
                         pe: emitted.Success ? Convert.ToBase64String(image) : null,
-                        // The bundle carries a copy of the module; send it only when it can be used.
-                        diagnosticArtifacts: structuredDiagnostics && !javaScriptExportWorker ? Describe(compiled.DiagnosticArtifacts) : null,
+                        symbols: structuredDiagnostics && !javaScriptExportWorker
+                            ? Describe(compiled.TypeSymbols, compiled.MethodSymbols) : null,
                         compiledUnits: compiledUnitsName is null ? null : compilerSession.CompiledUnitSummary(compiledUnitsName)));
                 }
                 catch (Exception error)
