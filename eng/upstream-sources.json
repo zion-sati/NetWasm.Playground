@@ -24,13 +24,13 @@
   "sources": {
     "netwasm": {
       "repository": "https://github.com/zion-sati/NetWasm",
-      "commit": "f1a00a2328f608fc5cee5ebf3b82a2d586ef66fd",
-      "tag": "v0.12.0",
-      "packageVersion": "0.12.0",
+      "commit": "af2bee0300942b9849dc2a774f3b0d801032f07f",
+      "tag": "v0.12.2",
+      "packageVersion": "0.12.2",
       "toolchainManifest": "eng/toolchain.json",
-      "browserCompilerCommit": "f1a00a2328f608fc5cee5ebf3b82a2d586ef66fd",
-      "browserLinkerCommit": "f1a00a2328f608fc5cee5ebf3b82a2d586ef66fd",
-      "browserToolHostCommit": "f1a00a2328f608fc5cee5ebf3b82a2d586ef66fd"
+      "browserCompilerCommit": "af2bee0300942b9849dc2a774f3b0d801032f07f",
+      "browserLinkerCommit": "af2bee0300942b9849dc2a774f3b0d801032f07f",
+      "browserToolHostCommit": "af2bee0300942b9849dc2a774f3b0d801032f07f"
     },
     "libraries": {
       "repository": "https://github.com/zion-sati/NetWasm.Libraries",
@@ -40,9 +40,9 @@
     },
     "tunit": {
       "repository": "https://github.com/zion-sati/TUnit-NetWasm",
-      "commit": "ad06c72e3a4e0d7b652cd564a27f650065f4e7cd",
-      "tag": "netwasm-v0.12.0",
-      "packageVersion": "0.12.0"
+      "commit": "64b7870d6743df24f8da76613b42556777f7a92c",
+      "tag": "netwasm-v0.12.2",
+      "packageVersion": "0.12.2"
     },
     "fluentvalidation": {
       "repository": "https://github.com/zion-sati/FluentValidation",
@@ -63,7 +63,7 @@
         "source": "tunit",
         "package": "netwasm.tunit.core",
         "path": "analyzers/dotnet/roslyn4.14/cs/TUnit.Core.SourceGenerator.dll",
-        "sha256": "d03999cc54fb80bdb4393af3ca74d850d904dae554acd6d7f01c9f7f2b610f8d"
+        "sha256": "40bf4684ef4b52e348d3bb70049cbd0ee4e2f89fb7780bbdaa01ab51e66e428f"
       },
       "di": {
         "source": "libraries",
