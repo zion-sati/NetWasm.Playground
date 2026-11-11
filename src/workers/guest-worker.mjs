@@ -100,7 +100,11 @@ serveWorker(async (data, report) => {
   const sink = stream => Object.freeze({ write(bytes) {
     if (!(bytes instanceof Uint8Array)) throw Error('Invalid guest console bytes');
     consoleBytes += bytes.byteLength;
-    if (consoleBytes > 65536) throw Error('Guest console limit exceeded');
+    if (consoleBytes > 65536) {
+      // The page ends the run as it does at the time limit, keeping the output shown so far.
+      report({ guestLimit: 'Guest console limit exceeded' });
+      throw Error('Guest console limit exceeded');
+    }
     append(stream, decoders[stream].decode(bytes, { stream: true }));
   } });
   try {

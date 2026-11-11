@@ -36,6 +36,7 @@ export class WorkerChannel {
           call.entered = true; clearTimeout(call.timer);
           call.timer = setTimeout(() => this.reset(new Error('Guest execution time limit exceeded')), call.executionTimeout);
         }
+        if (data.guestLimit) { this.reset(new Error(String(data.guestLimit))); return; }
         if (data.stage || data.console || data.assets || data.guestEntered || data.started || data.toolEntered) { this.signal(data); return; }
         clearTimeout(call.timer); this.pending.delete(data.id);
         data.error ? call.reject(new Error(String(data.error))) : call.resolve(data.result);
