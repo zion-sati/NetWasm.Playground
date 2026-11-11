@@ -7,40 +7,9 @@ import { parseGarbageCollector } from './garbage-collector';
 import { createFrontendCache } from './workers/frontend-cache.mjs';
 import { createNativeWasmOptChannel, supportsNativeWasmOpt } from './workers/native-wasm-opt-channel.mjs';
 import { acceptRuntimeLinkPlan } from './runtime-link-plan.mjs';
+import { parseCoreFunctionImports } from './core-function-imports.mjs';
 const basename = (path: string) => path.slice(path.lastIndexOf('/') + 1);
 const compilerTimeoutMilliseconds = 300_000;
-type RawCoreImport = { Module: string; Name: string; Parameters: number[]; Results: number[] };
-const rawCoreValueTypes = new Map([['i32', 0], ['i64', 1], ['f32', 2], ['f64', 3]]);
-
-function parseCoreFunctionImports(bytes: Uint8Array): RawCoreImport[] {
-  const text = new TextDecoder('utf-8', { fatal: true }).decode(bytes);
-  const types = new Map<number, { Parameters: number[]; Results: number[] }>();
-  const imports: RawCoreImport[] = [];
-  const values = (source: string | undefined) => source ? source.trim().split(/\s+/u).map(value => {
-    const mapped = rawCoreValueTypes.get(value);
-    if (mapped === undefined) throw new Error(`Unsupported core Wasm value type: ${value}`);
-    return mapped;
-  }) : [];
-  for (const line of text.split('\n')) {
-    const type = /^\s*\(type \(;([0-9]+);\) \(func(?: \(param ([^)]*)\))?(?: \(result ([^)]*)\))?\)\)\s*$/u.exec(line);
-    if (type) {
-      const index = Number(type[1]);
-      if (types.has(index) || index !== types.size) throw new Error('Invalid core Wasm type inventory');
-      types.set(index, { Parameters: values(type[2]), Results: values(type[3]) });
-      continue;
-    }
-    if (!line.trimStart().startsWith('(import ')) continue;
-    const imported = /^\s*\(import ("(?:\\.|[^"\\])*") ("(?:\\.|[^"\\])*") \(func \(;[0-9]+;\) \(type ([0-9]+)\)\)\)\s*$/u.exec(line);
-    if (!imported) continue;
-    const signature = types.get(Number(imported[3]));
-    if (!signature) throw new Error('Core Wasm import references an unknown type');
-    imports.push({ Module: JSON.parse(imported[1]), Name: JSON.parse(imported[2]),
-      Parameters: [...signature.Parameters], Results: [...signature.Results] });
-  }
-  if (types.size === 0 || imports.length > 512) throw new Error('Invalid core Wasm import inventory');
-  return imports;
-}
-
 function lowerCamelData(value: unknown): unknown {
   if (Array.isArray(value)) return value.map(lowerCamelData);
   if (value === null || typeof value !== 'object') return value;
@@ -514,16 +483,13 @@ export class PlaygroundPipeline {
           },
           assets: { ...this.assets } };
       }
-      if (!['command', 'async-command'].includes(compilation.componentContract))
+      if (compilation.componentContract !== 'command')
         throw new Error('Compiler returned an invalid component contract');
-      const asynchronous = compilation.componentContract === 'async-command';
-      // A synchronous command with structured diagnostics also exports the
-      // diagnostic command, which reports an escaping exception.
-      const diagnosticCommand = !asynchronous && snapshot.structuredDiagnostics === true;
-      const witName = asynchronous || diagnosticCommand ? 'async-command.wit.wasm' : 'command.wit.wasm';
-      const witWorld = snapshot.recipeId === 'http' ? 'netwasm:component/async-http-command@1.0.0'
-        : asynchronous ? 'netwasm:component/async-command@1.0.0'
-        : diagnosticCommand ? 'netwasm:component/diagnostic-command@1.0.0' : 'wasi:cli/command@0.2.11';
+      // A command with structured diagnostics also exports the diagnostic
+      // command, which reports an escaping exception.
+      const diagnosticCommand = snapshot.structuredDiagnostics === true;
+      const witName = diagnosticCommand ? 'diagnostic-command.wit.wasm' : 'command.wit.wasm';
+      const witWorld = diagnosticCommand ? 'netwasm:component/diagnostic-command@1.0.0' : 'command';
       const wit = await this.loadAsset(witName);
       const component = await this.stage('componentization', timings, async () => {
         const embedded = await this.tool('wasm-tools', ['component', 'embed', witName, 'linked.wasm', '--encoding', 'utf8', '--output', 'embedded.wasm', '--world', witWorld], { [witName]: wit, 'linked.wasm': linked }, ['embedded.wasm']);
@@ -566,7 +532,7 @@ export class PlaygroundPipeline {
     try {
       if (!compilation.component) throw new Error('No compiled component');
       const componentContract = compilation.componentContract ?? 'command';
-      if (!['command', 'async-command', 'jsexport-worker'].includes(componentContract))
+      if (!['command', 'jsexport-worker'].includes(componentContract))
         throw new Error('Invalid compiled component contract');
       await this.initialize();
       if (componentContract === 'jsexport-worker') {

@@ -4,4 +4,4 @@
   (core instance $second (instantiate $m))
   (func $run (canon lift (core func $second "run")))
   (instance $command (export "run" (func $run)))
-  (export "wasi:cli/run@0.2.11" (instance $command)))
+  (export "wasi:cli/run@0.3.2" (instance $command)))

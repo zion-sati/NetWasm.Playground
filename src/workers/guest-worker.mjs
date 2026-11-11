@@ -1,9 +1,23 @@
 import { checkGuestMemory } from './guest-memory.mjs';
-import { installGuestHttpBudget } from './guest-http-budget.mjs';
+import { meterGuestHttpBodies } from './guest-http-budget.mjs';
 import { createAssetLoader, serveWorker, digest, errorText } from './asset-loader.mjs';
 
-// The structured logging example produces a measured 4.12 MiB component.
-const maximumComponentBytes = 5 * 1048576;
+// An HttpClient program, with .NET 11's System.Net.Http, is a measured 6.45 MB component at O3.
+const maximumComponentBytes = 8 * 1048576;
+// The command contract NetWasm's hosting generates component adapters for.
+const contractKey = 'wasi-command@0.3.2';
+// Main's arguments follow the program name, as on any WASI host.
+const programName = 'NetWasmApp';
+// jco's transpile options as the NetWasm SDK runs them, for a browser that compiles
+// every core module itself.
+const transpileOptions = Object.freeze({
+  name: 'guest', map: [], instantiation: { tag: 'async' }, validLiftingOptimization: false,
+  tracing: false, noComponentErrorWrapping: false, noNodejsCompat: true, noTypescript: true,
+  tlaCompat: false, base64Cutoff: 0, noNamespacedExports: false, multiMemory: false,
+  bindgenEnableWasmExnref: true, strict: true, emitConditionalSuspendingWasm: true,
+});
+// A worker reads a mounted Blob in place.
+const readBlobSync = (blob, start, end) => new Uint8Array(new FileReaderSync().readAsArrayBuffer(blob.slice(start, end)));
 
 // Reads the compiler's diagnostic artifacts, which name the exception types a
 // structured failure report carries by number.
@@ -13,16 +27,9 @@ function readDiagnosticArtifacts(value) {
       !(value.exceptionTypeMap instanceof Uint8Array) || !(value.manifest instanceof Uint8Array) ||
       typeof value.mapMediaType !== 'string') throw Error('Invalid diagnostic artifacts');
   const decoder = new TextDecoder();
-  const map = JSON.parse(decoder.decode(value.exceptionTypeMap));
-  const names = new Map((Array.isArray(map.entries) ? map.entries : [])
-    .filter(entry => Number.isSafeInteger(entry?.typeId) && typeof entry.displayName === 'string')
-    .map(entry => [entry.typeId, entry.displayName]));
-  return {
-    typeName: typeId => names.get(typeId) ?? `<exception type #${typeId}>`,
-    // The component host verifies these against each other before naming a type.
-    load: () => ({ manifest: JSON.parse(decoder.decode(value.manifest)), mapBytes: value.exceptionTypeMap,
-      wasmBytes: value.wasm, mapMediaType: value.mapMediaType }),
-  };
+  // The component host verifies these against each other before naming a type.
+  return () => ({ manifest: JSON.parse(decoder.decode(value.manifest)), mapBytes: value.exceptionTypeMap,
+    wasmBytes: value.wasm, mapMediaType: value.mapMediaType });
 }
 
 // Desktop .NET's wording for an exception that escapes Main.
@@ -30,10 +37,36 @@ function unhandledExceptionText(typeName, message, stackTrace) {
   return `Unhandled exception. ${typeName}${message ? `: ${message}` : ''}${stackTrace ? `\n${stackTrace}` : ''}\n`;
 }
 
-const utf16Decoder = new TextDecoder('utf-16le');
-function utf16Text(value) {
-  return value == null ? undefined
-    : utf16Decoder.decode(value instanceof Uint16Array ? value : Uint16Array.from(value));
+// The adapter NetWasm generates for a wasi:cli command over jco's output: run's
+// result<_, _> exits 0, and its declared error exits 1.
+function createCommandAdapter(generatedModule, onInstantiated) {
+  const isComponentError = generatedModule._util?.isComponentError;
+  return Object.freeze({ contractKey, async instantiate({ loadCoreModule, imports, instantiateCore }) {
+    const root = await generatedModule.instantiate(loadCoreModule, imports, instantiateCore);
+    onInstantiated();
+    const command = root?.['wasi:cli/run@0.3.2'];
+    if (command === null || typeof command !== 'object' || typeof command.run !== 'function')
+      throw Error('Missing guest command export');
+    // A command built with structured diagnostics reports an escaping exception
+    // through this export instead of trapping.
+    const diagnosticCommand = root['netwasm:diagnostics/command@1.0.0'];
+    if (diagnosticCommand !== undefined && typeof diagnosticCommand?.run !== 'function')
+      throw Error('Invalid guest diagnostic command export');
+    return Object.freeze({
+      ...(diagnosticCommand === undefined ? {} : {
+        diagnosticCommand: Object.freeze({ run: diagnosticCommand.run.bind(diagnosticCommand) }),
+      }),
+      command: Object.freeze({ async run() {
+        try {
+          await command.run();
+          return 0;
+        } catch (error) {
+          if (typeof isComponentError === 'function' && isComponentError(error) && error.payload === undefined) return 1;
+          throw error;
+        }
+      } }),
+    });
+  } });
 }
 
 serveWorker(async (data, report) => {
@@ -49,12 +82,10 @@ serveWorker(async (data, report) => {
   let graph = [];
   let loaded = [];
   let generatedImports = [];
+  let providedArguments;
   let componentSha256;
   let filesystem;
-  let baseFilesystem;
-  let restoreHttpBudget;
   let httpBudgetFailure;
-  let previousFetch;
   let fetchFailure;
   const moduleMemories = new WeakMap();
   let allocatedMemoryPages = 0;
@@ -63,18 +94,18 @@ serveWorker(async (data, report) => {
   function complete() {
     if (started !== undefined) { timings.push({ stage, milliseconds: performance.now() - started }); started = undefined; }
   }
+  function enter() { if (!running) { running = true; report({ guestEntered: true }); } }
   function append(stream, text) { output[stream] += text; if (text) report({ console: stream, text }); }
   function finishOutput() { for (const stream of ['stdout', 'stderr']) append(stream, decoders[stream].decode()); }
-  const capture = stream => ({ write(bytes) {
+  const sink = stream => Object.freeze({ write(bytes) {
     if (!(bytes instanceof Uint8Array)) throw Error('Invalid guest console bytes');
     consoleBytes += bytes.byteLength;
     if (consoleBytes > 65536) throw Error('Guest console limit exceeded');
     append(stream, decoders[stream].decode(bytes, { stream: true }));
-  }, flush() {} });
+  } });
   try {
     if (data.operation !== 'run' || !(data.component instanceof Uint8Array)) throw Error('Invalid guest run request');
-    if (!['command', 'async-command'].includes(data.componentContract)) throw Error('Invalid guest component contract');
-    const managedProcess = data.componentContract === 'async-command';
+    if (data.componentContract !== 'command') throw Error('Invalid guest component contract');
     const diagnosticArtifacts = readDiagnosticArtifacts(data.diagnosticArtifacts);
     const timeZone = data.timeZone ?? 'UTC';
     if (typeof timeZone !== 'string' || !/^[A-Za-z][A-Za-z0-9_+\-/]{0,63}$/.test(timeZone) ||
@@ -84,7 +115,7 @@ serveWorker(async (data, report) => {
     const args = data.args === undefined ? [] : data.args;
     if (!Array.isArray(args) || (args.length !== 0 &&
         (data.recipe !== 'tunit' || args.length !== 1 || args[0] !== '--list'))) throw Error('Unsupported guest arguments');
-    const argumentsSnapshot = args.slice();
+    providedArguments = Object.freeze([programName, ...args]);
     const component = data.component.slice();
     if (component.byteLength > maximumComponentBytes)
       throw Error(`Component input limit exceeded (${component.byteLength} > ${maximumComponentBytes})`);
@@ -108,15 +139,13 @@ serveWorker(async (data, report) => {
     const failed = verified.find(result => result.status === 'rejected');
     if (failed) throw failed.reason;
     loader.installFetchAdapter();
-    const { jco } = await import(loader.url('jco/guest-runtime.mjs'));
-    const { executeComponent } = await import(loader.url('jco/component-host.mjs'));
-    const { cliModule, io, clockModule, filesystemModule, httpModule, randomModule,
-      createPreview2Filesystem, readTimeZoneNames } = await import(loader.url('jco/guest-providers.mjs'));
-    restoreHttpBudget = installGuestHttpBudget(httpModule, message => { httpBudgetFailure = message; });
-    const generated = await jco.generate(component, { name: 'guest', instantiation: { tag: 'async' },
-      noTypescript: true, noNodejsCompat: true, base64Cutoff: 0, bindgenEnableWasmExnref: true });
+    const { generate } = await import(loader.url('jco/guest-runtime.mjs'));
+    const { executeComponent, createWasiPlatform, createWasiFilesystem, createBrowserFileMounts,
+      createWasiHttpFetch, projectProviderModuleIdentity, createGuestByteReader, readTimeZoneNames } =
+      await import(loader.url('jco/guest-host.mjs'));
+    const generated = await generate(component, transpileOptions);
     generatedImports = generated.imports;
-    if (generated.files.reduce((total, [, bytes]) => total + bytes.byteLength, 0) > 8388608)
+    if (generated.files.reduce((total, [, bytes]) => total + bytes.byteLength, 0) > 16 * 1048576)
       throw Error('Generated graph limit exceeded');
     const javascript = generated.files.filter(([name]) => name.endsWith('.js'));
     if (javascript.length !== 1 || javascript[0][0] !== 'guest.js') throw Error('Unsupported generated JavaScript graph');
@@ -132,57 +161,41 @@ serveWorker(async (data, report) => {
       complete();
     }
     begin('instantiate');
-    const environment = { TZ: mountsTimeZone ? timeZone : 'UTC' };
+    const environment = [{ name: 'TZ', value: mountsTimeZone ? timeZone : 'UTC' }];
     if (data.recipe === 'http') {
       const address = new URL(data.sampleHttpUrl);
       if (address.origin !== self.location.origin || !address.pathname.endsWith('/example-http.json') ||
           address.search || address.hash) throw Error('Invalid HTTP example URL');
-      environment.PLAYGROUND_HTTP_SAMPLE_URL = address.href;
+      environment.push({ name: 'PLAYGROUND_HTTP_SAMPLE_URL', value: address.href });
     }
-    const cli = cliModule.createCli({ arguments: argumentsSnapshot, environment, initialCwd: '/',
-      stdout: capture('stdout'), stderr: capture('stderr') });
-    if (data.recipe === 'http') {
-      previousFetch = self.fetch;
-      const noteFetchFailure = error => {
-        fetchFailure = (error?.message || String(error)).replace(/[.!?]+$/, '').slice(0, 256);
-        throw error;
-      };
-      self.fetch = (...arguments_) => {
-        try { return Promise.resolve(previousFetch.apply(self, arguments_)).catch(noteFetchFailure); }
-        catch (error) { return noteFetchFailure(error); }
-      };
-    }
-    baseFilesystem = filesystemModule.createFilesystem({
-      adapter: new filesystemModule.InMemoryFilesystemAdapter(), preopens: {} });
-    filesystem = createPreview2Filesystem({ filesystem: baseFilesystem });
+    // HttpClient sends through the worker's fetch; a failed fetch explains a failed run.
+    const noteFetchFailure = error => {
+      fetchFailure = (error?.message || String(error)).replace(/[.!?]+$/, '').slice(0, 256);
+      throw error;
+    };
+    const guestFetch = (input, init) => {
+      try { return Promise.resolve(fetch(input, init)).catch(noteFetchFailure); }
+      catch (error) { return noteFetchFailure(error); }
+    };
+    const network = meterGuestHttpBodies({
+      modules: createWasiHttpFetch(Object.freeze({ fetch: guestFetch })),
+      readGuestBytes: createGuestByteReader,
+      onDenied: message => { httpBudgetFailure = message; },
+    });
+    // The browser's in-memory file system, as a published NetWasm page has it.
+    const mounts = createBrowserFileMounts(Object.freeze({ readBlobSync }));
+    filesystem = createWasiFilesystem(Object.freeze({ hostFiles: mounts.hostFiles,
+      preopens: Object.freeze([Object.freeze({ access: 'readWrite', guestPath: '/', hostPath: '/' })]) }));
     if (timeZoneData) filesystem.mountReadOnlyFile({ guestPath: '/netwasm-timezones/netwasm-timezones.nwtz', bytes: timeZoneData });
-    // Each WASI getter returns an owned stream. Dropping one write's handle
-    // must not close the stream returned by a later Console.WriteLine.
-    const imports = { 'wasi:cli/environment': cli.environment, 'wasi:cli/exit': cli.exit,
-      'wasi:cli/stdin': cli.stdin,
-      'wasi:cli/stderr': { getStderr: () => io.outputStreamCreate(capture('stderr')) },
-      'wasi:cli/stdout': { getStdout: () => io.outputStreamCreate(capture('stdout')) },
-      'wasi:cli/terminal-stderr': cli.terminalStderr,
-      'wasi:cli/terminal-stdin': cli.terminalStdin,
-      'wasi:cli/terminal-stdout': cli.terminalStdout,
-      'wasi:io/error': io.error, 'wasi:io/streams': io.streams, 'wasi:io/poll': io.poll,
-      'wasi:clocks/monotonic-clock': clockModule.monotonicClock,
-      'wasi:clocks/wall-clock': clockModule.wallClock,
-      'wasi:filesystem/preopens': filesystem.preopens,
-      'wasi:filesystem/types': filesystem.types,
-      'wasi:http/outgoing-handler': httpModule.outgoingHandler,
-      'wasi:http/types': httpModule.types,
-      'wasi:random/insecure-seed': randomModule.insecureSeed,
-      'wasi:random/insecure': randomModule.insecure,
-      'wasi:random/random': randomModule.random };
-    // The component executor supplies these reserved imports. Keep them out of
-    // the caller import map while allowing the generated process adapter to
-    // declare them.
-    const permittedImports = managedProcess ? [...Object.keys(imports),
-      'netwasm:runtime/reactor-host', 'netwasm:runtime/reactor-host@1.0.0',
-      'netwasm:diagnostics/terminal', 'netwasm:diagnostics/terminal@1.0.0']
-      : Object.keys(imports);
-    const unsupported = generatedImports.filter(name => !permittedImports.includes(name));
+    const platform = createWasiPlatform(Object.freeze({ initialDirectory: null, network: Object.freeze({ modules: network }) }))(
+      Object.freeze({ arguments: providedArguments, environment, filesystem, grants: Object.freeze({ network: 'allowAll' }),
+        signal: null, stdout: sink('stdout'), stderr: sink('stderr'), stdin: null }));
+    // jco looks a WASI interface up without its version.
+    const imports = Object.fromEntries(Object.entries(platform.imports).map(([module, value]) =>
+      [projectProviderModuleIdentity({ module }).componentModule, value]));
+    // The component executor supplies NetWasm's reserved diagnostics module itself.
+    const unsupported = generatedImports.filter(name => !Object.hasOwn(imports, name) &&
+      name !== 'netwasm:diagnostics/terminal' && name !== 'netwasm:diagnostics/terminal@1.0.0');
     if (unsupported.length) throw Error(`Unsupported guest import: ${unsupported.join(', ')}`);
     url = URL.createObjectURL(new Blob([files['guest.js']], { type: 'text/javascript' }));
     const main = await import(url);
@@ -204,85 +217,40 @@ serveWorker(async (data, report) => {
       allocatedMemoryPages += pages; coreInstances++;
       // Core start functions can execute during instantiation. Start the outer
       // execution deadline before allowing any guest core code to run.
-      if (!running) { running = true; report({ guestEntered: true }); }
+      enter();
       return WebAssembly.instantiate(module, imports);
     };
-    const checkCoreGraph = () => {
+    const adapter = createCommandAdapter(main, () => {
       if (loaded.length !== generated.files.filter(([name]) => name.endsWith('.wasm')).length)
         throw Error('Generated core graph was not fully resolved');
-    };
-    if (managedProcess) {
-      // The public executor owns reactor watch/cancel, wake delivery, process
-      // observation and cleanup. Guest imports cannot inject its reactor host.
-      const contractKey = 'netwasm:runtime/process@1.0.0';
-      const adapter = Object.freeze({ contractKey, async instantiate(request) {
-        const root = await main.instantiate(request.loadCoreModule, request.imports, request.instantiateCore);
-        checkCoreGraph();
-        complete(); begin('execute'); running = true; report({ guestEntered: true });
-        return Object.freeze({ process: root.process, reactorGuest: root.reactorGuest });
-      } });
-      const outcome = await executeComponent({ contractKey, adapter, loadCoreModule, instantiateCore,
-        imports: { ...imports, 'wasi:io/poll': io.poll,
-          'wasi:clocks/monotonic-clock': clockModule.monotonicClock },
-        ...(diagnosticArtifacts ? {
-          diagnosticArtifacts: diagnosticArtifacts.load,
-          managedExceptionReporting: { reportEnriched: event => append('stderr',
-            unhandledExceptionText(event.typeName, event.message, event.stackTrace)) },
-        } : {}) });
-      complete(); finishOutput();
-      const failureContext = httpBudgetFailure ?? (fetchFailure && outcome.completionKind === 'managedFailure'
-        ? `A browser Fetch request also failed: ${fetchFailure}. Check the URL, network access and CORS policy.`
-        : undefined);
-      const failure = outcome.primaryFailure?.message;
-      return { success: outcome.completionKind === 'normal', exitCode: outcome.exitCode,
-        error: failureContext ? `${failure ?? 'The managed process failed.'} ${failureContext}` : failure,
-        stage: outcome.primaryFailure?.phase,
-        executionResult: outcome, ...output, consoleBytes,
-        providedArguments: cli.environment.getArguments(), componentSha256,
-        graph, loaded, memoryMaximumBytes: allocatedMemoryPages * 65536, coreInstances, imports: generatedImports, timings };
-    }
-    const guest = await main.instantiate(loadCoreModule, imports, instantiateCore);
-    checkCoreGraph();
-    const command = guest['wasi:cli/run@0.2.11'];
-    if (!command || typeof command.run !== 'function') throw Error('Missing guest command export');
-    // A command built with structured diagnostics reports an escaping exception
-    // through this export instead of trapping.
-    const diagnosticCommand = guest['netwasm:diagnostics/command@1.0.0'];
-    if (diagnosticCommand !== undefined && typeof diagnosticCommand?.run !== 'function')
-      throw Error('Invalid guest diagnostic command export');
-    complete();
-    begin('execute');
-    running = true;
-    report({ guestEntered: true });
-    let exitCode = 0;
-    try {
-      if (diagnosticCommand) {
-        const completion = await diagnosticCommand.run();
-        if (completion?.tag === 'failed') {
-          const event = completion.val;
-          append('stderr', unhandledExceptionText(
-            diagnosticArtifacts?.typeName(event.typeId) ?? `<exception type #${event.typeId}>`,
-            utf16Text(event.message), utf16Text(event.stackTrace)));
-          exitCode = 1;
-        } else if (completion?.tag === 'exited') exitCode = completion.val;
-        else throw Error('Invalid guest diagnostic completion');
-      } else await command.run();
-    }
-    catch (error) {
-      if (error?.exitError) exitCode = error.code;
-      else if (Object.hasOwn(error ?? {}, 'payload') && error.payload === undefined) exitCode = 1;
-      else throw error;
-    }
-    complete();
-    finishOutput();
-    return { success: true, exitCode, ...output, consoleBytes, providedArguments: cli.environment.getArguments(),
-      componentSha256, graph, loaded, memoryMaximumBytes: allocatedMemoryPages * 65536, coreInstances, imports: generatedImports, timings };
+      complete(); begin('execute'); enter();
+    });
+    const outcome = await executeComponent({ contractKey, adapter, imports, loadCoreModule, instantiateCore,
+      releaseActions: [Object.freeze({ phase: 'output', code: 'host.platform-output',
+        message: 'The execution host could not deliver application output.', release: () => platform.release() })],
+      ...(diagnosticArtifacts ? {
+        diagnosticArtifacts,
+        managedExceptionReporting: { reportEnriched: event => append('stderr',
+          unhandledExceptionText(event.typeName, event.message, event.stackTrace)) },
+      } : {}) });
+    complete(); finishOutput();
+    const failureContext = httpBudgetFailure ?? (fetchFailure && outcome.completionKind === 'managedFailure'
+      ? `A browser Fetch request also failed: ${fetchFailure}. Check the URL, network access and CORS policy.`
+      : undefined);
+    // The executor reports what failed and, separately, why: a trap, a missing import or
+    // the worker's own memory limit.
+    const failure = outcome.primaryFailure && (outcome.primaryFailure.detail
+      ? `${outcome.primaryFailure.message} ${outcome.primaryFailure.detail}` : outcome.primaryFailure.message);
+    return { success: outcome.completionKind === 'normal', exitCode: outcome.exitCode,
+      error: failureContext ? `${failure ?? 'The managed process failed.'} ${failureContext}` : failure,
+      stage: outcome.primaryFailure?.phase,
+      executionResult: outcome, ...output, consoleBytes, providedArguments, componentSha256,
+      graph, loaded, memoryMaximumBytes: allocatedMemoryPages * 65536, coreInstances, imports: generatedImports, timings };
   } catch (error) {
     complete();
     finishOutput();
     return { success: false, ...output, error: errorText(error), stage,
       code: running ? 'guest-trap' : 'guest-failure', consoleBytes, componentSha256,
       graph, loaded, memoryMaximumBytes: allocatedMemoryPages * 65536, coreInstances, imports: generatedImports, timings, recoverable: true };
-  } finally { restoreHttpBudget?.(); if (previousFetch) self.fetch = previousFetch;
-    filesystem?.dispose(); baseFilesystem?.dispose(); if (url) URL.revokeObjectURL(url); }
+  } finally { await filesystem?.dispose(); if (url) URL.revokeObjectURL(url); }
 });

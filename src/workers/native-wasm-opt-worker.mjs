@@ -27,7 +27,8 @@ function serveWorker(handler) {
 }
 
 const maximumAssetBytes = 16 * 1048576;
-const limits = { maximumInputBytes: 5 * 1048576, maximumOutputBytes: 5 * 1048576 };
+// .NET 11's System.Net.Http makes an HttpClient program's core module 8.1 MB at O3.
+const limits = { maximumInputBytes: 16 * 1048576, maximumOutputBytes: 16 * 1048576 };
 let initialized, runtime, configuredRoot, configuredWorkers, workerCount;
 let linearMemory;
 let javascriptUrl;

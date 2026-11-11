@@ -48,6 +48,8 @@ node eng/browser-smoke/library-catalog.mjs
 node eng/browser-smoke/revamp-ui.mjs
 node eng/browser-smoke/native-library.mjs
 node eng/browser-smoke/web-worker.mjs
+# Unoptimized, the raw worker keeps its runtime's named imports for the binding planner to read.
+PLAYGROUND_OPTIMIZATION=none node eng/browser-smoke/web-worker.mjs
 PLAYGROUND_BROWSERS=chromium node eng/browser-smoke/timezone.mjs
 PLAYGROUND_EVIDENCE="$evidence/tunit-failure" node eng/browser-smoke/tunit-failure.mjs
 PLAYGROUND_EVIDENCE="$evidence/progress" node eng/browser-smoke/progress.mjs

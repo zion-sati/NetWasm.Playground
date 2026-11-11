@@ -1,10 +1,10 @@
 (component
   (type $clock-type (instance
     (export "now" (func (result u64)))
-    (export "resolution" (func (result u64)))))
-  (import "wasi:clocks/monotonic-clock@0.2.11" (instance $clock (type $clock-type)))
+    (export "get-resolution" (func (result u64)))))
+  (import "wasi:clocks/monotonic-clock@0.3.2" (instance $clock (type $clock-type)))
   (alias export $clock "now" (func $now))
-  (alias export $clock "resolution" (func $resolution))
+  (alias export $clock "get-resolution" (func $resolution))
   (core func $lower-now (canon lower (func $now)))
   (core func $lower-resolution (canon lower (func $resolution)))
   (core module $m
@@ -23,4 +23,4 @@
   (core instance $guest (instantiate $m (with "clock" (instance $clock-core))))
   (func $run (result (result)) (canon lift (core func $guest "run")))
   (instance $command (export "run" (func $run)))
-  (export "wasi:cli/run@0.2.11" (instance $command)))
+  (export "wasi:cli/run@0.3.2" (instance $command)))

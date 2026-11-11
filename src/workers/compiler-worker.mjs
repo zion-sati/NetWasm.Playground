@@ -16,6 +16,8 @@ const recipes = new Set([
   'native-lz4',
   'web-worker',
 ]);
+// .NET 11's System.Net.Http makes an HttpClient program's core module 8.1 MB at O3.
+const maximumModuleBytes = 16 * 1048576;
 const encoder = new TextEncoder();
 const validStringArray = (value, maximumLength = 256) => Array.isArray(value) &&
   value.length <= maximumLength && value.every(item => typeof item === 'string' && item.length <= 512);
@@ -67,15 +69,15 @@ serveWorker(async (data, emit) => {
        (data.updatedMemorySafetyRules && data.language !== 'preview')))
     throw Error('Invalid compiler source, recipe, language, or optimization settings');
   if (data.operation === 'prune' &&
-      (!(data.module instanceof Uint8Array) || data.module.length > 5 * 1048576 ||
+      (!(data.module instanceof Uint8Array) || data.module.length > maximumModuleBytes ||
        typeof data.prefix !== 'string' || data.prefix.length > 255))
     throw Error('Invalid export pruning request');
   if (data.operation === 'inline' &&
-      (!(data.module instanceof Uint8Array) || data.module.length > 5 * 1048576 ||
+      (!(data.module instanceof Uint8Array) || data.module.length > maximumModuleBytes ||
        !['Preserve', 'SizeAware', 'Remove'].includes(data.selection)))
     throw Error('Invalid inline annotation request');
   if (data.operation === 'pruneRaw' &&
-      (!(data.module instanceof Uint8Array) || data.module.length > 5 * 1048576 ||
+      (!(data.module instanceof Uint8Array) || data.module.length > maximumModuleBytes ||
        !Array.isArray(data.exports) || data.exports.length < 1 || data.exports.length > 512 ||
        data.exports.some(value => !value || typeof value.Name !== 'string' || value.Name.length > 512 ||
          !Number.isInteger(value.Kind) || value.Kind < 0 || value.Kind > 4)))

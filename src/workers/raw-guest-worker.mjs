@@ -1,13 +1,12 @@
 import { serveWorker } from './asset-loader.mjs';
 import {
   bindWorkerImports,
+  createBrowserFileMounts,
   createBrowserRawExportSession,
-  createFilesystem,
-  createPreview2FilesystemScope,
-  InMemoryFilesystemAdapter,
+  createWasiFilesystem,
+  createWasiPlatform,
   platformProviderCatalog,
   validateDeploymentManifest,
-  WASIShim,
 } from '../jco/raw-worker-runtime.mjs';
 
 const encoder = new TextEncoder();
@@ -20,7 +19,7 @@ async function sha256(bytes) {
 }
 
 function validate(data) {
-  if (!(data.module instanceof Uint8Array) || data.module.byteLength > 8 * 1048576 ||
+  if (!(data.module instanceof Uint8Array) || data.module.byteLength > 16 * 1048576 ||
       !(data.adapter instanceof Uint8Array) || data.adapter.byteLength > 1048576 ||
       !(data.runtimeLayout instanceof Uint8Array) || data.runtimeLayout.byteLength > 1048576 ||
       !(data.interopManifest instanceof Uint8Array) || data.interopManifest.byteLength > 1048576 ||
@@ -117,21 +116,24 @@ serveWorker(async (data, emit) => {
           network: 'denyAll',
           preopens: Object.freeze([]),
           randomness: true,
+          temporaryDirectory: false,
+          workingDirectory: false,
         }),
       }),
       consumerModules,
       manifestUrl,
       platform: Object.freeze({
         compileCoreModule: WebAssembly.compile.bind(WebAssembly),
-        createFilesystemScope: preopens => createPreview2FilesystemScope({
-          createFilesystem({ preopens }) {
-            if (Object.keys(preopens).length !== 0) throw new TypeError('Playground worker preopens are unavailable');
-            return createFilesystem({ adapter: new InMemoryFilesystemAdapter(), preopens: Object.freeze({}) });
-          },
-          preopens,
-        }),
+        // The browser's in-memory file system, as a published NetWasm worker has it.
+        createFilesystemScope: preopens => {
+          if (preopens.length !== 0) throw new TypeError('Playground worker preopens are unavailable');
+          return createWasiFilesystem(Object.freeze({
+            hostFiles: createBrowserFileMounts(Object.freeze({ readBlobSync: null })).hostFiles,
+            preopens: Object.freeze([Object.freeze({ access: 'readWrite', guestPath: '/', hostPath: '/' })]),
+          }));
+        },
+        createImports: createWasiPlatform(Object.freeze({ initialDirectory: null, network: null })),
         createModuleUrl: bytes => URL.createObjectURL(new Blob([bytes], { type: 'text/javascript' })),
-        createShim: configuration => new WASIShim(configuration),
         digest: crypto.subtle.digest.bind(crypto.subtle),
         fetch: fetchArtifact,
         importModule: url => import(url),

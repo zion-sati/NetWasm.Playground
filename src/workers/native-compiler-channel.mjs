@@ -127,7 +127,6 @@ export function createNativeAotCompilerChannel(options = {}) {
         loader.load('compiler/compiler-wit.json').then(bytes => decoder.decode(bytes)),
         loader.load('compiler/compiler.wit.wasm').then(toBase64),
         loader.load('compiler/compiler-wit-platform.wat').then(bytes => decoder.decode(bytes)),
-        loader.load('compiler/compiler-wit-async-platform.wat').then(bytes => decoder.decode(bytes)),
         runtimeManifestPromise,
         (async () => {
           const runtimeManifest = JSON.parse(await runtimeManifestPromise);
@@ -151,8 +150,8 @@ export function createNativeAotCompilerChannel(options = {}) {
       if (failed) throw failed.reason;
       const values = loaded.map(result => result.value);
       return {
-        inputs: values.slice(0, 9),
-        rawBindings: { runtimeWitJson: values[9], runtimeWitInventory: values[10] },
+        inputs: values.slice(0, 8),
+        rawBindings: { runtimeWitJson: values[8], runtimeWitInventory: values[9] },
       };
     })().catch(error => { initialized = undefined; throw error; });
   }
@@ -267,8 +266,7 @@ export function createNativeAotCompilerChannel(options = {}) {
       const generated = generatedRecipes.has(data.recipe);
       const trustedRecipe = data.recipe === 'tunit' ? 'tunit'
         : data.recipe === 'di' ? 'di' : data.recipe === 'logging' ? 'logging' : 'json';
-      const operation = projectCompilation ? 'compileProject' : generated ? 'compileGeneratedRecipe'
-        : data.recipe === 'http' ? 'compileHttpRecipe' : 'compileRecipe';
+      const operation = projectCompilation ? 'compileProject' : generated ? 'compileGeneratedRecipe' : 'compileRecipe';
       const arguments_ = projectCompilation
         ? [data.sourceSet, projectKind, ...compilerInputs, ...images,
           nativeLibrariesJson, ...settings]

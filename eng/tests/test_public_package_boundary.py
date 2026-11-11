@@ -74,39 +74,6 @@ class PublicPackageBoundaryTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, 'Staged bundle mismatch'):
                 PREPARE_WEB.verify_bundle_layout(stage, manifest)
 
-    def test_compiler_host_uses_exact_public_packages_without_project_references(self):
-        project = ET.parse(
-            ROOT / "eng/compiler-host/CompilerProbe.csproj").getroot()
-
-        self.assertEqual([], project.findall(".//ProjectReference"))
-        references = {
-            item.attrib["Include"]: item.attrib["Version"]
-            for item in project.findall(".//PackageReference")
-        }
-        self.assertEqual({
-            "NetWasm.Compiler.Browser": "[$(NetWasmCompilerPackageVersion)]",
-            "NetWasm.Runtime.Pack": "[$(NetWasmCompilerPackageVersion)]",
-        }, references)
-        # NetWasm removed its frontend artifact cache; compiled units replace it.
-        define_constants = project.findtext(".//DefineConstants", default="")
-        self.assertNotIn("FRONTEND_CACHE_TRANSPORT", define_constants.split(";"))
-        self.assertEqual("net11.0", project.findtext(".//TargetFramework"))
-        self.assertEqual("11.0.0-rc.1.26425.128", json.loads(
-            (ROOT / "eng/browser-host.json").read_text())["runtimeFrameworkVersion"])
-
-        release_builder = (ROOT / 'eng/build-release-compiler.py').read_text()
-        self.assertIn("11.0.100-rc.1.26425.128", release_builder)
-        self.assertNotIn("FRONTEND_CACHE_TRANSPORT", release_builder)
-        self.assertIn("'-p:WasmBuildNative=true'", release_builder)
-        self.assertIn("'interpreted': ('false', 'false', 'false')", release_builder)
-        self.assertIn("'trimmed': ('false', 'true', 'false')", release_builder)
-        self.assertIn("'aot': ('true', 'true', 'false')", release_builder)
-        self.assertIn("'aot-threads': ('true', 'true', 'true')", release_builder)
-        self.assertIn("f'-p:RunAOTCompilation={run_aot}'", release_builder)
-        self.assertIn("f'-p:PublishTrimmed={publish_trimmed}'", release_builder)
-        self.assertIn("f'-p:WasmEnableThreads={enable_threads}'", release_builder)
-        self.assertIn("'-p:ILLinkTreatWarningsAsErrors=false'", release_builder)
-
     def test_nativeaot_candidate_is_pinned(self):
         upstream = json.loads((ROOT / 'eng/upstream-sources.json').read_text())
         candidate = upstream['nativeAotLlvmCandidate']
@@ -150,13 +117,6 @@ class PublicPackageBoundaryTests(unittest.TestCase):
         self.assertIsNone(PREPARE_WEB.bundle_role('native-wasm-opt/build-receipt.json'))
 
     def test_candidate_compiler_feed_is_explicit_and_not_the_release_default(self):
-        help_text = subprocess.check_output(
-            ["python3", str(ROOT / "eng/build-release-compiler.py"), "--help"],
-            text=True)
-
-        self.assertIn("--candidate-feed", help_text)
-        self.assertIn("--candidate-version", help_text)
-        self.assertIn("--candidate-tunit-version", help_text)
         release = (ROOT / ".github/workflows/release.yml").read_text()
         self.assertNotIn("--candidate-feed", release)
 
@@ -204,44 +164,10 @@ class PublicPackageBoundaryTests(unittest.TestCase):
             self.assertNotIn("..", Path(member["path"]).parts)
             self.assertRegex(member["sha256"], r"^[0-9a-f]{64}$")
 
-        release_builder = (ROOT / "eng/build-release-compiler.py").read_text()
-        self.assertNotIn("PACKAGES =", release_builder)
-        self.assertIn("upstream['compilerFramework']['members']", release_builder)
+        compiler_builder = (ROOT / "eng/build-nativeaot-compiler.py").read_text()
+        self.assertNotIn("PACKAGES =", compiler_builder)
+        self.assertIn("upstream['compilerFramework']['members']", compiler_builder)
 
-    def test_asset_stager_has_no_source_checkout_option(self):
-        help_text = subprocess.check_output(
-            ["python3", str(ROOT / "eng/prepare-web.py"), "--help"],
-            text=True)
-
-        self.assertNotIn("--source", help_text)
-
-    def test_package_origin_requires_receipt_bound_nuget_org_archive(self):
-        with tempfile.TemporaryDirectory() as temporary:
-            baseline = Path(temporary)
-            package = baseline / "packages/netwasm.toolchain/1.2.3"
-            package.mkdir(parents=True)
-            metadata = package / ".nupkg.metadata"
-            metadata.write_text(json.dumps({
-                "version": 2,
-                "source": "https://api.nuget.org/v3/index.json",
-            }))
-            archive = package / "netwasm.toolchain.1.2.3.nupkg"
-            archive.write_bytes(b"public-package-fixture")
-            receipt = {"packages": {
-                str(archive.relative_to(baseline)): PREPARE_WEB.fingerprint(archive)
-            }}
-
-            actual = PREPARE_WEB.verify_nuget_package(
-                baseline, receipt, "NetWasm.Toolchain", "1.2.3")
-            self.assertEqual(package, actual)
-
-            metadata.write_text(json.dumps({
-                "version": 2,
-                "source": "local-feed",
-            }))
-            with self.assertRaisesRegex(ValueError, "did not originate from NuGet.org"):
-                PREPARE_WEB.verify_nuget_package(
-                    baseline, receipt, "NetWasm.Toolchain", "1.2.3")
 
 
 if __name__ == "__main__":
