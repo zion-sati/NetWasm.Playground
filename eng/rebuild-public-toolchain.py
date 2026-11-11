@@ -22,7 +22,7 @@ CANDIDATE_FEED = None
 CANDIDATE_VERSION = None
 # The jco build NetWasm's hosting adapters are generated for: upstream jco with a patched
 # bindgen core (the toolchain package's tools/jco/patch-provenance.json).
-JCO_VERSION = '1.41.0+netwasm.3'
+JCO_VERSION = '1.41.0+netwasm.4'
 JCO_MODULES = ('jco', 'jco-transpile', 'preview2-shim')
 SPEC = importlib.util.spec_from_file_location('prepare_web', ROOT / 'eng/prepare-web.py')
 PREPARE = importlib.util.module_from_spec(SPEC)
