@@ -3,8 +3,8 @@
   "helloWorld42": {
     "exampleId": "hello",
     "optimization": "Oz",
-    "source": "using System;\n\nstatic class Program\n{\n    static int Main()\n    {\n        Console.WriteLine(42);\n        return 0;\n    }\n}\n",
+    "source": "using System;\n\nConsole.WriteLine(42);\n",
     "stdout": "42\n",
-    "componentBytes": 29267
+    "componentBytes": 33298
   }
 }
