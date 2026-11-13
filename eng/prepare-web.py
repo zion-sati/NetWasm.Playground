@@ -21,6 +21,7 @@ BUNDLE_ROLES = {'compiler', 'linker', 'tools', 'guest'}
 HOSTING_MODULES = (
     'browser-file-mounts.mjs',
     'component-executor.mjs',
+    'optional-symbol-sidecars.mjs',
     'output-sink-stream.mjs',
     'provider-module-identity.mjs',
     'timezone-sidecar-zones.mjs',
@@ -42,11 +43,14 @@ def bundle_role(relative):
     # Fetched by the guest only for a local-time program in a zone other than UTC.
     if relative.startswith('timezones/'):
         return None
+    # Fetched by the compiler only for the implementation assemblies a program references.
+    if relative.startswith('implementations/'):
+        return None
     if relative in {'wasm-merge.js', 'wasm-opt.js', 'path-browserify.js'}:
         return 'tools'
     if relative.startswith('notices/') or path.suffix in {'.js', '.mjs'}:
         return None
-    if relative.startswith(('compiler/', 'references/', 'implementations/', 'recipes/')):
+    if relative.startswith(('compiler/', 'references/', 'recipes/')):
         return 'compiler'
     if relative.startswith(('lld/', 'runtime/')):
         return 'linker'

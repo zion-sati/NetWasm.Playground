@@ -20,9 +20,10 @@ ROOT = Path(__file__).resolve().parents[1]
 ARCHIVES = {}
 CANDIDATE_FEED = None
 CANDIDATE_VERSION = None
+CANDIDATE_VERSIONS = set()
 # The jco build NetWasm's hosting adapters are generated for: upstream jco with a patched
 # bindgen core (the toolchain package's tools/jco/patch-provenance.json).
-JCO_VERSION = '1.41.0+netwasm.2'
+JCO_VERSION = '1.41.0+netwasm.4'
 JCO_MODULES = ('jco', 'jco-transpile', 'preview2-shim')
 SPEC = importlib.util.spec_from_file_location('prepare_web', ROOT / 'eng/prepare-web.py')
 PREPARE = importlib.util.module_from_spec(SPEC)
@@ -33,6 +34,9 @@ NOTICE_SPEC.loader.exec_module(NOTICES)
 RELEASE_SPEC = importlib.util.spec_from_file_location('toolchain_release', ROOT / 'eng/toolchain-release.py')
 RELEASE = importlib.util.module_from_spec(RELEASE_SPEC)
 RELEASE_SPEC.loader.exec_module(RELEASE)
+REFERENCES_SPEC = importlib.util.spec_from_file_location('assembly_references', ROOT / 'eng/assembly_references.py')
+ASSEMBLY_REFERENCES = importlib.util.module_from_spec(REFERENCES_SPEC)
+REFERENCES_SPEC.loader.exec_module(ASSEMBLY_REFERENCES)
 
 
 def encoded(value):
@@ -147,7 +151,9 @@ def verified_archive(package, version):
 
 
 def package_archive(package, version):
-    if CANDIDATE_FEED is not None and version == CANDIDATE_VERSION:
+    # The candidate NetWasm, Libraries and FluentValidation versions come from the local feed; every other version
+    # is public.
+    if CANDIDATE_FEED is not None and version in CANDIDATE_VERSIONS:
         expected = f'{package}.{version}.nupkg'.lower()
         matches = [path for path in CANDIDATE_FEED.glob('*.nupkg')
                    if path.name.lower() == expected]
@@ -188,12 +194,15 @@ def rebind_notice_origins(stage, pins):
             origins['files'][target] = json.loads(json.dumps(catalog_entry))
     versions = {
         'netwasm.toolchain': pins['netwasm']['packageVersion'],
-        'netwasm.tunit': pins['tunit']['packageVersion'],
-        'netwasm.tunit.assertions': pins['tunit']['packageVersion'],
-        'netwasm.tunit.core': pins['tunit']['packageVersion'],
     }
     packages = {}
     for package, version in versions.items():
+        if CANDIDATE_FEED is not None and version in CANDIDATE_VERSIONS:
+            # A candidate is not on NuGet.org; its receipt names the local feed and its own hash.
+            archive = package_archive(package, version)
+            restore_hash = base64.b64encode(hashlib.sha512(archive).digest()).decode()
+            packages[package] = (version, f'candidate-feed:{package}.{version}.nupkg', archive, restore_hash)
+            continue
         url, archive, restore_hash = verified_archive(package, version)
         packages[package] = (version, url, archive, restore_hash)
     for target, entry in origins['files'].items():
@@ -280,22 +289,6 @@ def add_guest_host(stage):
                     '--hosting-only'], check=True)
 
 
-def add_http_example(stage, library_version):
-    member = 'lib/NetWasm,Version=v0.1/System.Net.Http.dll'
-    assembly = package_members('netwasm.system.net.http', library_version, {
-        member: '745247929c9e308a9811360fe928cd6478bec09cddc1e203a4ec94b8d0c18524',
-    })[member]
-    for role in ('references', 'implementations'):
-        destination = stage / role / 'System.Net.Http.dll'
-        destination.parent.mkdir(exist_ok=True)
-        destination.write_bytes(assembly)
-    recipe = {'schemaVersion': 1, 'id': 'http',
-              'references': {'System.Net.Http.dll': 'references/System.Net.Http.dll'},
-              'implementations': {'System.Net.Http.dll': 'implementations/System.Net.Http.dll'},
-              'packages': ['NetWasm.System.Net.Http'], 'version': library_version}
-    (stage / 'recipes/http.json').write_bytes(encoded(recipe))
-
-
 def add_timezone_data(stage, netwasm_version):
     """Publishes a local-time program with the released SDK and NetWasmTimeZoneMode=Full,
     then stages its IANA sidecar. The guest worker fetches it only for programs that reach
@@ -334,30 +327,36 @@ def add_timezone_data(stage, netwasm_version):
     destination.write_bytes(payload)
     (stage / 'timezones/netwasm-timezones.json').write_bytes(encoded({
         'schemaVersion': 1, 'asset': name, 'bytes': len(payload), 'sha256': digest,
-        'guestPath': '/netwasm-timezones/netwasm-timezones.nwtz', 'netwasmVersion': netwasm_version}))
+        # The guest worker mounts it as the program's own sidecar, /netwasm-sidecars/<program>.wasm.tz-info.
+        'sidecarSuffix': '.tz-info', 'netwasmVersion': netwasm_version}))
 
 
-ASSEMBLY_PACKAGES = {
+# Assemblies from packages, whose one image is both the reference and the implementation.
+PACKAGE_ASSEMBLIES = {
     'Microsoft.Extensions.DependencyInjection.Abstractions.dll': 'netwasm.microsoft.extensions.dependencyinjection.abstractions',
     'Microsoft.Extensions.DependencyInjection.dll': 'netwasm.microsoft.extensions.dependencyinjection',
     'Microsoft.Extensions.Logging.Abstractions.dll': 'netwasm.microsoft.extensions.logging.abstractions',
     'Microsoft.Extensions.Logging.dll': 'netwasm.microsoft.extensions.logging',
     'Microsoft.Extensions.Options.dll': 'netwasm.microsoft.extensions.options',
     'Microsoft.Extensions.Primitives.dll': 'netwasm.microsoft.extensions.primitives',
-    'NetWasm.TUnit.Runner.dll': 'netwasm.tunit',
     'System.IO.Hashing.dll': 'netwasm.system.io.hashing',
-    'System.IO.Pipelines.dll': 'netwasm.system.io.pipelines',
-    'System.Linq.AsyncEnumerable.dll': 'netwasm.system.linq.asyncenumerable',
-    'System.Linq.dll': 'netwasm.system.linq',
-    'System.Memory.dll': 'netwasm.system.memory',
-    'System.Text.Encodings.Web.dll': 'netwasm.system.text.encodings.web',
-    'System.Text.Json.dll': 'netwasm.system.text.json',
-    'System.Text.RegularExpressions.dll': 'netwasm.system.text.regularexpressions',
-    'System.Xml.ReaderWriter.dll': 'netwasm.system.xml',
-    'TUnit.Assertions.dll': 'netwasm.tunit.assertions',
-    'TUnit.Core.dll': 'netwasm.tunit.core',
     'FluentValidation.dll': 'netwasm.fluentvalidation',
 }
+# NetWasm.App's in-box assemblies: code compiles against the reference pack's image and the compiler
+# links the runtime pack's.
+FRAMEWORK_REFERENCES = ('netwasm.app.ref', 'ref/NetWasm,Version=v0.1/')
+FRAMEWORK_IMPLEMENTATIONS = ('netwasm.app.runtime', 'framework/')
+# Each example's package libraries; the packages they reference join them. In-box examples need none.
+RECIPES = {
+    'hello': [], 'allocation': [], 'linq': [], 'async-linq': [], 'pipelines': [], 'web-encoding': [], 'xml': [],
+    'json-dom': [], 'json-generated': [], 'regex': [], 'http': [],
+    'fluentvalidation': ['FluentValidation.dll'],
+    'di': ['Microsoft.Extensions.DependencyInjection.dll'],
+    'logging': ['Microsoft.Extensions.Logging.dll'],
+    'hashing': ['System.IO.Hashing.dll'],
+}
+# The browser compiler accepts at most this many assemblies in a recipe.
+RECIPE_ASSEMBLY_LIMIT = 64
 
 HOSTING_MODULES = PREPARE.HOSTING_MODULES
 
@@ -463,12 +462,9 @@ def refresh_public_assets(stage, pins, runtime_plan=None, candidate_toolchain=No
     """Replace every versioned compiler input in the pinned reusable browser base."""
     core = pins['netwasm']['packageVersion']
     libraries = pins['libraries']['packageVersion']
-    tunit = pins['tunit']['packageVersion']
     fluentvalidation = pins['fluentvalidation']['packageVersion']
 
     def assembly_version(package):
-        if package.startswith('netwasm.tunit'):
-            return tunit
         if package == 'netwasm.fluentvalidation':
             return fluentvalidation
         return libraries
@@ -570,45 +566,94 @@ def refresh_public_assets(stage, pins, runtime_plan=None, candidate_toolchain=No
             raise ValueError(f'Public runtime system library changed: {name}')
         (system_directory / name).write_bytes(payload)
 
-    for name, package in ASSEMBLY_PACKAGES.items():
-        version = assembly_version(package)
-        member = f'lib/NetWasm,Version=v0.1/{name}'
-        assembly = public_member(package, version, member)
-        for role in ('references', 'implementations'):
-            destination = stage / role / name
-            destination.parent.mkdir(exist_ok=True)
-            destination.write_bytes(assembly)
-    actual = {path.name for path in (stage / 'references').glob('*.dll')}
-    if actual != set(ASSEMBLY_PACKAGES):
-        raise ValueError(f'Unexpected reusable browser reference set: {sorted(actual ^ set(ASSEMBLY_PACKAGES))}')
+    with zipfile.ZipFile(io.BytesIO(package_archive(FRAMEWORK_IMPLEMENTATIONS[0], core))) as package:
+        implemented = {name.removeprefix(FRAMEWORK_IMPLEMENTATIONS[1]) for name in package.namelist()
+                       if name.startswith(FRAMEWORK_IMPLEMENTATIONS[1]) and name.endswith('.dll')}
+    with zipfile.ZipFile(io.BytesIO(package_archive(FRAMEWORK_REFERENCES[0], core))) as package:
+        referenced = {name.removeprefix(FRAMEWORK_REFERENCES[1]) for name in package.namelist()
+                      if name.startswith(FRAMEWORK_REFERENCES[1]) and name.endswith('.dll')}
 
-    library_recipes = {
-        'async-linq': ['System.Linq.AsyncEnumerable.dll', 'System.Linq.dll'],
-        'pipelines': ['System.IO.Pipelines.dll', 'System.Memory.dll'],
-        'web-encoding': ['System.Text.Encodings.Web.dll'],
-        'xml': ['System.Xml.ReaderWriter.dll'],
-        'fluentvalidation': ['FluentValidation.dll', 'System.Linq.dll',
-                             'System.Text.RegularExpressions.dll'],
-        'logging': ['Microsoft.Extensions.Logging.Abstractions.dll', 'Microsoft.Extensions.Logging.dll',
-                    'Microsoft.Extensions.Options.dll', 'Microsoft.Extensions.Primitives.dll',
-                    'Microsoft.Extensions.DependencyInjection.Abstractions.dll',
-                    'Microsoft.Extensions.DependencyInjection.dll'],
-    }
-    for recipe_id, assemblies in library_recipes.items():
-        paths = {name: f'references/{name}' for name in assemblies}
-        implementations = {name: f'implementations/{name}' for name in assemblies}
-        packages = sorted({ASSEMBLY_PACKAGES[name] for name in assemblies})
-        (stage / 'recipes' / f'{recipe_id}.json').write_bytes(encoded({
-            'schemaVersion': 1, 'id': recipe_id, 'references': paths,
-            'implementations': implementations, 'packages': packages, 'version': libraries}))
+    def facade(name):
+        """A NetWasm.App reference assembly without an implementation, which only forwards types."""
+        return name not in PACKAGE_ASSEMBLIES and name not in implemented
 
-    for recipe_path in sorted((stage / 'recipes').glob('*.json')):
-        if recipe_path.name == 'tunit-support.json':
+    images = {}
+
+    def image(role, name):
+        if (role, name) not in images:
+            if name in PACKAGE_ASSEMBLIES:
+                package = PACKAGE_ASSEMBLIES[name]
+                payload = public_member(package, assembly_version(package), f'lib/NetWasm,Version=v0.1/{name}')
+            else:
+                package, prefix = (FRAMEWORK_REFERENCES if role == 'references' or facade(name)
+                                   else FRAMEWORK_IMPLEMENTATIONS)
+                payload = public_member(package, core, f'{prefix}{name}')
+            images[role, name] = payload
+        return images[role, name]
+
+    def closure(role, root):
+        """The root and every assembly it references, transitively, except NetWasm.CoreLib. A facade brings
+        only the assemblies that define the types its referrer uses through it."""
+        found = set()
+        pending = [root]
+        while pending:
+            name = pending.pop()
+            if name in found:
+                continue
+            found.add(name)
+            if facade(name):
+                continue
+            payload = image(role, name)
+            used = ASSEMBLY_REFERENCES.referenced_types(payload)
+            for reference in ASSEMBLY_REFERENCES.assembly_references(payload):
+                if reference == 'NetWasm.CoreLib':
+                    continue
+                pending.append(f'{reference}.dll')
+                if facade(f'{reference}.dll'):
+                    forwards = ASSEMBLY_REFERENCES.forwarded_types(image(role, f'{reference}.dll'))
+                    for namespace, type_name, assembly in used:
+                        if assembly == reference:
+                            target = forwards.get((namespace, type_name))
+                            if target is None:
+                                raise ValueError(f'{reference} does not forward {namespace}.{type_name} for {name}')
+                            if target != 'NetWasm.CoreLib':
+                                pending.append(f'{target}.dll')
+        return found
+
+    for role in ('references', 'implementations'):
+        (stage / role).mkdir(exist_ok=True)
+        for existing in (stage / role).iterdir():
+            existing.unlink()
+    # Every compile references NetWasm.App's reference assemblies, as the SDK's do; a recipe adds its packages'.
+    for name in sorted(referenced | set(PACKAGE_ASSEMBLIES)):
+        (stage / 'references' / name).write_bytes(image('references', name))
+    # Implementations are fetched on demand: each by its content, with the closure a program referencing it needs.
+    framework = {'schemaVersion': 1, 'references': sorted(referenced), 'implementations': {}}
+    pending = sorted(implemented | set(PACKAGE_ASSEMBLIES))
+    while pending:
+        name = pending.pop()
+        if name in framework['implementations']:
             continue
-        recipe = json.loads(recipe_path.read_text())
-        recipe['version'] = (tunit if recipe['id'] == 'tunit' else
-                             fluentvalidation if recipe['id'] == 'fluentvalidation' else libraries)
-        recipe_path.write_bytes(encoded(recipe))
+        needed = closure('implementations', name)
+        payload = image('implementations', name)
+        asset = f'implementations/{name.removesuffix(".dll")}.{sha256(payload)}.bin'
+        (stage / asset).write_bytes(payload)
+        framework['implementations'][name] = {'asset': asset, 'closure': sorted(needed), 'metadataOnly': facade(name)}
+        pending.extend(sorted(needed - set(framework['implementations'])))
+    (stage / 'compiler/framework.json').write_bytes(encoded(framework))
+
+    for existing in (stage / 'recipes').glob('*.json'):
+        existing.unlink()
+    for recipe_id, roots in RECIPES.items():
+        packages = sorted(set().union(*(closure('references', root) for root in roots)) & set(PACKAGE_ASSEMBLIES))
+        if len(packages) > RECIPE_ASSEMBLY_LIMIT:
+            raise ValueError(f'The {recipe_id} recipe needs {len(packages)} references')
+        # An example of in-box assemblies alone follows NetWasm's version.
+        version = (fluentvalidation if recipe_id == 'fluentvalidation' else libraries if packages else core)
+        (stage / 'recipes' / f'{recipe_id}.json').write_bytes(encoded({
+            'schemaVersion': 1, 'id': recipe_id,
+            'references': {name: f'references/{name}' for name in packages},
+            'packages': sorted({PACKAGE_ASSEMBLIES[name] for name in packages}), 'version': version}))
 
     inputs_path = stage / 'compiler/inputs.json'
     inputs = json.loads(inputs_path.read_text())
@@ -656,7 +701,7 @@ def refresh_public_assets(stage, pins, runtime_plan=None, candidate_toolchain=No
 
 
 def main():
-    global CANDIDATE_FEED, CANDIDATE_VERSION
+    global CANDIDATE_FEED, CANDIDATE_VERSION, CANDIDATE_VERSIONS
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--compiler-framework', type=Path, required=True)
     parser.add_argument('--workers', type=Path, default=ROOT / 'src/workers')
@@ -664,8 +709,10 @@ def main():
     parser.add_argument('--candidate-feed', type=Path)
     parser.add_argument('--candidate-version')
     parser.add_argument('--candidate-commit')
-    parser.add_argument('--candidate-tunit-version')
-    parser.add_argument('--candidate-tunit-commit')
+    parser.add_argument('--candidate-libraries-version')
+    parser.add_argument('--candidate-libraries-commit')
+    parser.add_argument('--candidate-fluentvalidation-version')
+    parser.add_argument('--candidate-fluentvalidation-commit')
     parser.add_argument('--runtime-plan', type=Path,
                         help='Actual candidate compiler runtime plan captured from a preliminary toolchain')
     parser.add_argument('--candidate-toolchain-manifest', type=Path,
@@ -678,13 +725,20 @@ def main():
         parser.error('--candidate-commit must be a full Git SHA')
     if args.candidate_version and not re.fullmatch(r'[0-9]+\.[0-9]+\.[0-9]+-[0-9A-Za-z.-]+', args.candidate_version):
         parser.error('--candidate-version must be an exact prerelease version')
-    tunit_values = (args.candidate_tunit_version, args.candidate_tunit_commit)
-    if any(tunit_values) != all(tunit_values) or any(tunit_values) and not args.candidate_feed:
-        parser.error('--candidate-tunit-version and --candidate-tunit-commit require each other and a candidate feed')
-    if args.candidate_tunit_version and not re.fullmatch(r'[0-9]+\.[0-9]+\.[0-9]+-[0-9A-Za-z.-]+', args.candidate_tunit_version):
-        parser.error('--candidate-tunit-version must be an exact prerelease version')
-    if args.candidate_tunit_commit and not re.fullmatch(r'[a-f0-9]{40}', args.candidate_tunit_commit):
-        parser.error('--candidate-tunit-commit must be a full Git SHA')
+    libraries_values = (args.candidate_libraries_version, args.candidate_libraries_commit)
+    if any(libraries_values) != all(libraries_values) or any(libraries_values) and not args.candidate_feed:
+        parser.error('--candidate-libraries-version and --candidate-libraries-commit require each other and a candidate feed')
+    if args.candidate_libraries_version and not re.fullmatch(r'[0-9]+\.[0-9]+\.[0-9]+-[0-9A-Za-z.-]+', args.candidate_libraries_version):
+        parser.error('--candidate-libraries-version must be an exact prerelease version')
+    if args.candidate_libraries_commit and not re.fullmatch(r'[a-f0-9]{40}', args.candidate_libraries_commit):
+        parser.error('--candidate-libraries-commit must be a full Git SHA')
+    fluentvalidation_values = (args.candidate_fluentvalidation_version, args.candidate_fluentvalidation_commit)
+    if any(fluentvalidation_values) != all(fluentvalidation_values) or any(fluentvalidation_values) and not args.candidate_feed:
+        parser.error('--candidate-fluentvalidation-version and --candidate-fluentvalidation-commit require each other and a candidate feed')
+    if args.candidate_fluentvalidation_version and not re.fullmatch(r'[0-9]+\.[0-9]+\.[0-9]+-[0-9A-Za-z.-]+', args.candidate_fluentvalidation_version):
+        parser.error('--candidate-fluentvalidation-version must be an exact prerelease version')
+    if args.candidate_fluentvalidation_commit and not re.fullmatch(r'[a-f0-9]{40}', args.candidate_fluentvalidation_commit):
+        parser.error('--candidate-fluentvalidation-commit must be a full Git SHA')
     if args.candidate_feed and not args.candidate_feed.is_dir():
         parser.error('--candidate-feed must be an existing directory')
     if args.runtime_plan and not args.candidate_feed:
@@ -693,6 +747,8 @@ def main():
         parser.error('--candidate-toolchain-manifest is only valid with a candidate feed')
     CANDIDATE_FEED = args.candidate_feed.resolve() if args.candidate_feed else None
     CANDIDATE_VERSION = args.candidate_version
+    CANDIDATE_VERSIONS = {version for version in (args.candidate_version, args.candidate_libraries_version,
+                                                  args.candidate_fluentvalidation_version) if version}
     runtime_plan = json.loads(args.runtime_plan.read_text()) if args.runtime_plan else None
     candidate_toolchain = (json.loads(args.candidate_toolchain_manifest.read_text())
                            if args.candidate_toolchain_manifest else None)
@@ -749,9 +805,12 @@ def main():
         if CANDIDATE_FEED is not None:
             pins['netwasm']['packageVersion'] = CANDIDATE_VERSION
             pins['netwasm']['commit'] = args.candidate_commit
-        if args.candidate_tunit_version:
-            pins['tunit']['packageVersion'] = args.candidate_tunit_version
-            pins['tunit']['commit'] = args.candidate_tunit_commit
+        if args.candidate_libraries_version:
+            pins['libraries']['packageVersion'] = args.candidate_libraries_version
+            pins['libraries']['commit'] = args.candidate_libraries_commit
+        if args.candidate_fluentvalidation_version:
+            pins['fluentvalidation']['packageVersion'] = args.candidate_fluentvalidation_version
+            pins['fluentvalidation']['commit'] = args.candidate_fluentvalidation_commit
         verify_nativeaot_compiler(args.compiler_framework, upstream['nativeAotLlvmCandidate'],
                                   pins['netwasm']['packageVersion'])
         pins['nativeAotLlvmCompilerHost'] = upstream['nativeAotLlvmCandidate']
@@ -761,7 +820,6 @@ def main():
         rebind_notice_origins(stage, release_pins)
         add_guest_runtime(stage, package_archive('netwasm.toolchain', pins['netwasm']['packageVersion']))
         add_guest_host(stage)
-        add_http_example(stage, pins['libraries']['packageVersion'])
         add_timezone_data(stage, pins['netwasm']['packageVersion'])
         framework = stage / 'compiler/_framework'
         shutil.copytree(args.compiler_framework, framework)

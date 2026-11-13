@@ -40,8 +40,6 @@ if [[ "$browser" == chromium ]]; then
   run_step native-library node eng/browser-smoke/native-library.mjs
   run_step web-worker node eng/browser-smoke/web-worker.mjs
 fi
-run_step tunit-failure env PLAYGROUND_EVIDENCE="$evidence/tunit-failure" \
-  node eng/browser-smoke/tunit-failure.mjs
 run_step lifecycle env PLAYGROUND_EVIDENCE="$evidence/lifecycle" \
   node eng/browser-smoke/compiler-lifecycle.mjs
 run_step compiled-units node eng/browser-smoke/compiled-units-persistence.mjs

@@ -11,7 +11,7 @@ const compiler = createNativeAotCompilerChannel({
 });
 const recipes = new Set([
   'hello', 'multi-file', 'span-memory-unsafe', 'datetime', 'async', 'csharp15-tour', 'http', 'allocation', 'linq', 'async-linq',
-  'pipelines', 'web-encoding', 'xml', 'json-dom', 'json-generated', 'tunit', 'regex',
+  'pipelines', 'web-encoding', 'xml', 'json-dom', 'json-generated', 'regex',
   'di', 'logging', 'hashing', 'fluentvalidation',
   'native-lz4',
   'web-worker',
@@ -55,7 +55,7 @@ serveWorker(async (data, emit) => {
   if (data.operation === 'compile' && data.sourceSet === undefined && typeof data.source === 'string' &&
       encoder.encode(data.source).byteLength <= 65536) {
     data = { ...data, sourceSet: JSON.stringify({ schemaVersion: 1,
-      files: [{ path: data.recipe === 'tunit' ? 'Tests.cs' : 'Program.cs', text: data.source }] }) };
+      files: [{ path: 'Program.cs', text: data.source }] }) };
   }
   if (data.operation === 'compile' &&
       (!recipes.has(data.recipe) || !validSourceSet(data.sourceSet) ||

@@ -19,17 +19,25 @@ const transpileOptions = Object.freeze({
 // A worker reads a mounted Blob in place.
 const readBlobSync = (blob, start, end) => new Uint8Array(new FileReaderSync().readAsArrayBuffer(blob.slice(start, end)));
 
-// Reads the compiler's diagnostic artifacts, which name the exception types a
-// structured failure report carries by number.
-function readDiagnosticArtifacts(value) {
+// A program opens its sidecars by file name from this read-only directory, as NetWasm's hosts mount them.
+const sidecarDirectory = '/netwasm-sidecars';
+
+// The program's deployed file name, which its sidecars' names extend (NetWasmApp.wasm.tz-info); a component
+// run without one gets no sidecars.
+function readProgramFileName(value) {
   if (value === undefined) return undefined;
-  if (value === null || typeof value !== 'object' || !(value.wasm instanceof Uint8Array) ||
-      !(value.exceptionTypeMap instanceof Uint8Array) || !(value.manifest instanceof Uint8Array) ||
-      typeof value.mapMediaType !== 'string') throw Error('Invalid diagnostic artifacts');
-  const decoder = new TextDecoder();
-  // The component host verifies these against each other before naming a type.
-  return () => ({ manifest: JSON.parse(decoder.decode(value.manifest)), mapBytes: value.exceptionTypeMap,
-    wasmBytes: value.wasm, mapMediaType: value.mapMediaType });
+  if (typeof value !== 'string' || !/^[A-Za-z0-9_.-]{1,128}\.wasm$/.test(value)) throw Error('Invalid program file name');
+  return value;
+}
+
+// The compiler's symbols sidecars: type-symbols names the types a structured failure report carries
+// by number, and method-symbols, when stack traces are on, names the frames.
+function readSymbolSidecars(value) {
+  if (value === undefined) return undefined;
+  if (value === null || typeof value !== 'object' || !(value.typeSymbols instanceof Uint8Array) ||
+      (value.methodSymbols !== undefined && !(value.methodSymbols instanceof Uint8Array)))
+    throw Error('Invalid symbols sidecars');
+  return value;
 }
 
 // Desktop .NET's wording for an exception that escapes Main.
@@ -86,6 +94,7 @@ serveWorker(async (data, report) => {
   let componentSha256;
   let filesystem;
   let httpBudgetFailure;
+  let consoleLimitFailure;
   let fetchFailure;
   const moduleMemories = new WeakMap();
   let allocatedMemoryPages = 0;
@@ -100,21 +109,22 @@ serveWorker(async (data, report) => {
   const sink = stream => Object.freeze({ write(bytes) {
     if (!(bytes instanceof Uint8Array)) throw Error('Invalid guest console bytes');
     consoleBytes += bytes.byteLength;
-    if (consoleBytes > 65536) throw Error('Guest console limit exceeded');
+    // A failed write reaches the program as a stream error it may ignore, so the run fails here too.
+    if (consoleBytes > 65536) throw Error(consoleLimitFailure = 'Guest console limit exceeded');
     append(stream, decoders[stream].decode(bytes, { stream: true }));
   } });
   try {
     if (data.operation !== 'run' || !(data.component instanceof Uint8Array)) throw Error('Invalid guest run request');
     if (data.componentContract !== 'command') throw Error('Invalid guest component contract');
-    const diagnosticArtifacts = readDiagnosticArtifacts(data.diagnosticArtifacts);
+    const programFileName = readProgramFileName(data.programFileName);
+    const symbolSidecars = readSymbolSidecars(data.symbolSidecars);
     const timeZone = data.timeZone ?? 'UTC';
     if (typeof timeZone !== 'string' || !/^[A-Za-z][A-Za-z0-9_+\-/]{0,63}$/.test(timeZone) ||
         typeof (data.localTime ?? false) !== 'boolean') throw Error('Invalid guest time zone');
     // Time zone data is fetched only for a program that reaches local time in another zone.
     const mountsTimeZone = data.localTime === true && timeZone !== 'UTC' && timeZone !== 'Etc/UTC';
     const args = data.args === undefined ? [] : data.args;
-    if (!Array.isArray(args) || (args.length !== 0 &&
-        (data.recipe !== 'tunit' || args.length !== 1 || args[0] !== '--list'))) throw Error('Unsupported guest arguments');
+    if (!Array.isArray(args) || args.length !== 0) throw Error('Unsupported guest arguments');
     providedArguments = Object.freeze([programName, ...args]);
     const component = data.component.slice();
     if (component.byteLength > maximumComponentBytes)
@@ -141,7 +151,8 @@ serveWorker(async (data, report) => {
     loader.installFetchAdapter();
     const { generate } = await import(loader.url('jco/guest-runtime.mjs'));
     const { executeComponent, createWasiPlatform, createWasiFilesystem, createBrowserFileMounts,
-      createWasiHttpFetch, projectProviderModuleIdentity, createGuestByteReader, readTimeZoneNames } =
+      createWasiHttpFetch, projectProviderModuleIdentity, createGuestByteReader, readTimeZoneNames,
+      readOptionalStackTraceSymbols } =
       await import(loader.url('jco/guest-host.mjs'));
     const generated = await generate(component, transpileOptions);
     generatedImports = generated.imports;
@@ -186,7 +197,14 @@ serveWorker(async (data, report) => {
     const mounts = createBrowserFileMounts(Object.freeze({ readBlobSync }));
     filesystem = createWasiFilesystem(Object.freeze({ hostFiles: mounts.hostFiles,
       preopens: Object.freeze([Object.freeze({ access: 'readWrite', guestPath: '/', hostPath: '/' })]) }));
-    if (timeZoneData) filesystem.mountReadOnlyFile({ guestPath: '/netwasm-timezones/netwasm-timezones.nwtz', bytes: timeZoneData });
+    // The program loads its time zone data, type names and stack frames from these files itself.
+    const sidecars = [['tz-info', timeZoneData], ['type-symbols', symbolSidecars?.typeSymbols],
+      ['method-symbols', symbolSidecars?.methodSymbols]];
+    for (const [suffix, bytes] of sidecars) {
+      if (!bytes) continue;
+      if (!programFileName) throw Error('A program with sidecars needs its file name');
+      filesystem.mountReadOnlyFile({ guestPath: `${sidecarDirectory}/${programFileName}.${suffix}`, bytes });
+    }
     const platform = createWasiPlatform(Object.freeze({ initialDirectory: null, network: Object.freeze({ modules: network }) }))(
       Object.freeze({ arguments: providedArguments, environment, filesystem, grants: Object.freeze({ network: 'allowAll' }),
         signal: null, stdout: sink('stdout'), stderr: sink('stderr'), stdin: null }));
@@ -228,8 +246,9 @@ serveWorker(async (data, report) => {
     const outcome = await executeComponent({ contractKey, adapter, imports, loadCoreModule, instantiateCore,
       releaseActions: [Object.freeze({ phase: 'output', code: 'host.platform-output',
         message: 'The execution host could not deliver application output.', release: () => platform.release() })],
-      ...(diagnosticArtifacts ? {
-        diagnosticArtifacts,
+      ...(symbolSidecars ? {
+        diagnosticArtifacts: Object.freeze({ typeSymbols: symbolSidecars.typeSymbols }),
+        stackTraceSymbols: readOptionalStackTraceSymbols(symbolSidecars.methodSymbols),
         managedExceptionReporting: { reportEnriched: event => append('stderr',
           unhandledExceptionText(event.typeName, event.message, event.stackTrace)) },
       } : {}) });
@@ -241,8 +260,9 @@ serveWorker(async (data, report) => {
     // the worker's own memory limit.
     const failure = outcome.primaryFailure && (outcome.primaryFailure.detail
       ? `${outcome.primaryFailure.message} ${outcome.primaryFailure.detail}` : outcome.primaryFailure.message);
-    return { success: outcome.completionKind === 'normal', exitCode: outcome.exitCode,
-      error: failureContext ? `${failure ?? 'The managed process failed.'} ${failureContext}` : failure,
+    return { success: outcome.completionKind === 'normal' && !consoleLimitFailure, exitCode: outcome.exitCode,
+      error: consoleLimitFailure ??
+        (failureContext ? `${failure ?? 'The managed process failed.'} ${failureContext}` : failure),
       stage: outcome.primaryFailure?.phase,
       executionResult: outcome, ...output, consoleBytes, providedArguments, componentSha256,
       graph, loaded, memoryMaximumBytes: allocatedMemoryPages * 65536, coreInstances, imports: generatedImports, timings };

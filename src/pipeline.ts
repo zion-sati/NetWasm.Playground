@@ -346,7 +346,7 @@ export class PlaygroundPipeline {
     try {
       if (!['hello', 'multi-file', 'span-memory-unsafe', 'csharp15-tour', 'datetime', 'async', 'http',
         'allocation', 'linq', 'async-linq', 'pipelines', 'web-encoding', 'xml', 'json-dom',
-        'json-generated', 'tunit', 'regex', 'di', 'logging', 'hashing',
+        'json-generated', 'regex', 'di', 'logging', 'hashing',
         'fluentvalidation', 'native-lz4', 'web-worker'].includes(snapshot.recipeId)) throw new Error('Unknown compilation recipe');
       if (!optimizationModes.includes(optimization)) throw new Error('Unknown optimization mode');
       if (!['15', 'preview'].includes(snapshot.language) ||
@@ -354,7 +354,7 @@ export class PlaygroundPipeline {
         throw new Error('Unknown C# language settings');
       const projectFiles = snapshot.files?.length
         ? snapshot.files
-        : createProject('Legacy project', [{ path: snapshot.recipeId === 'tunit' ? 'Tests.cs' : 'Program.cs', text: snapshot.source ?? '' }]).files;
+        : createProject('Legacy project', [{ path: 'Program.cs', text: snapshot.source ?? '' }]).files;
       validateProjectFiles(projectFiles);
       const sourceSet = serializeSourceSet(projectFiles);
       const nativeLibraries = await this.nativeLibraries(snapshot);
@@ -500,7 +500,8 @@ export class PlaygroundPipeline {
       });
       if (epoch !== this.epoch) throw new Error('Stopped');
       return { ...result, success: true, component, componentContract: compilation.componentContract,
-        runtimeFeatures: compilation.runtimeFeatures, diagnosticArtifacts: compilation.diagnosticArtifacts,
+        runtimeFeatures: compilation.runtimeFeatures, programFileName: compilation.programFileName,
+        symbolSidecars: compilation.symbolSidecars,
         compiledUnits: compilation.compiledUnitsCache
           ? { summary: compilation.compiledUnits ?? undefined, ...compilation.compiledUnitsCache } : undefined,
         compilerHostLinearMemoryBytes: compilation.hostLinearMemoryBytes,
@@ -575,7 +576,7 @@ export class PlaygroundPipeline {
         return this.channel('guest').request({ operation: 'run', component, recipe: snapshot.recipeId,
           componentContract, timeZone: snapshot.timeZone ?? 'UTC',
           localTime: compilation.runtimeFeatures?.includes('local-time') === true,
-          diagnosticArtifacts: compilation.diagnosticArtifacts,
+          programFileName: compilation.programFileName, symbolSidecars: compilation.symbolSidecars,
           sampleHttpUrl }, [component.buffer], 60_000, 5_000);
       });
       for (const timing of result.timings ?? []) this.emit({ type: 'stage', stage: timing.stage, state: 'complete', milliseconds: timing.milliseconds });

@@ -8,7 +8,7 @@ const toBase64 = bytes => {
 };
 const fromBase64 = text => Uint8Array.from(atob(text), character => character.charCodeAt(0));
 const coreRecipes = new Set(['hello', 'multi-file', 'span-memory-unsafe', 'datetime', 'async', 'csharp15-tour', 'native-lz4', 'web-worker']);
-const generatedRecipes = new Set(['json-generated', 'tunit', 'di', 'logging']);
+const generatedRecipes = new Set(['json-generated', 'di', 'logging']);
 const validStringArray = (value, maximumLength = 256) => Array.isArray(value) &&
   value.length <= maximumLength && value.every(item => typeof item === 'string' && item.length <= 4096);
 
@@ -41,37 +41,28 @@ export function createNativeAotCompilerChannel(options = {}) {
   let initialized, module, loader = externalLoader, compilerToolchainId, unitStore;
   const importedUnits = new Set();
   const recipes = new Map();
+  const implementations = new Map();
+  let framework;
 
   async function recipeInputs(id) {
     if (!recipes.has(id)) recipes.set(id, (async () => {
+      // A recipe names the package libraries an example references; NetWasm.App's in-box assemblies are
+      // always referenced, and every implementation is chosen after C# compiles.
       if (coreRecipes.has(id) && !(await loader.manifest())[`recipes/${id}.json`])
         return { images: ['{}', '{}'] };
       if (!(await loader.manifest())[`recipes/${id}.json`])
         throw Error('Recipe assets unavailable. Prepare the verified example bundle.');
       const recipe = JSON.parse(decoder.decode(await loader.load(`recipes/${id}.json`)));
       if (recipe.schemaVersion !== 1 || recipe.id !== id) throw Error('Invalid compilation recipe');
-      const results = await Promise.allSettled(['references', 'implementations'].map(async role => {
-        const images = {};
-        if (!recipe[role] || Object.keys(recipe[role]).length > 64)
-          throw Error('Invalid recipe assembly list');
-        for (const [name, asset] of Object.entries(recipe[role])) {
-          if (!/^[A-Za-z0-9_.]+\.dll$/.test(name) || name === 'NetWasm.CoreLib.dll' || asset !== `${role}/${name}`)
-            throw Error('Invalid recipe assembly role');
-          images[name] = toBase64(await loader.load(asset));
-        }
-        return JSON.stringify(images);
-      }));
-      const failure = results.find(result => result.status === 'rejected');
-      if (failure) throw failure.reason;
-      let supportJson;
-      if (recipe.support !== undefined) {
-        if (id !== 'tunit' || recipe.support !== 'recipes/tunit-support.json')
-          throw Error('Invalid trusted recipe support');
-        const bytes = await loader.load(recipe.support);
-        if (bytes.byteLength > 65536) throw Error('Recipe support limit exceeded');
-        supportJson = decoder.decode(bytes);
+      if (!recipe.references || Object.keys(recipe.references).length > 64)
+        throw Error('Invalid recipe assembly list');
+      const references = {};
+      for (const [name, asset] of Object.entries(recipe.references)) {
+        if (!/^[A-Za-z0-9_.]+\.dll$/.test(name) || name === 'NetWasm.CoreLib.dll' || asset !== `references/${name}`)
+          throw Error('Invalid recipe assembly role');
+        references[name] = toBase64(await loader.load(asset));
       }
-      return { images: results.map(result => result.value), supportJson };
+      return { images: [JSON.stringify(references), '{}'] };
     })().catch(error => { recipes.delete(id); throw error; }));
     return recipes.get(id);
   }
@@ -149,11 +140,45 @@ export function createNativeAotCompilerChannel(options = {}) {
       const failed = loaded.find(result => result.status === 'rejected');
       if (failed) throw failed.reason;
       const values = loaded.map(result => result.value);
+      await loadFramework();
       return {
         inputs: values.slice(0, 8),
         rawBindings: { runtimeWitJson: values[8], runtimeWitInventory: values[9] },
       };
     })().catch(error => { initialized = undefined; throw error; });
+  }
+
+  // NetWasm.App, as the SDK references it: every reference assembly goes to the host once, and its manifest
+  // names each implementation's asset and closure.
+  async function loadFramework() {
+    const text = decoder.decode(await loader.load('compiler/framework.json'));
+    const manifest = JSON.parse(text);
+    if (manifest.schemaVersion !== 1 || !Array.isArray(manifest.references) || manifest.references.length > 512 ||
+        !manifest.implementations || typeof manifest.implementations !== 'object')
+      throw Error('Invalid framework manifest');
+    const references = {};
+    await Promise.all(manifest.references.map(async name => {
+      if (typeof name !== 'string' || !/^[A-Za-z0-9_.]+\.dll$/.test(name) || name === 'NetWasm.CoreLib.dll')
+        throw Error('Invalid framework reference');
+      references[name] = toBase64(await loader.load(`references/${name}`));
+    }));
+    invoke('loadFramework', [JSON.stringify(references), text]);
+    framework = manifest;
+  }
+
+  // The implementation assemblies a compiled program requires, fetched on first use and kept for later compiles.
+  async function implementationImages(names) {
+    if (!Array.isArray(names) || names.length > 256) throw Error('Invalid required implementations');
+    const images = {};
+    await Promise.all(names.map(async name => {
+      const entry = typeof name === 'string' ? framework?.implementations[name] : undefined;
+      if (!entry || typeof entry.asset !== 'string' || !/^implementations\/[A-Za-z0-9_.]+\.[a-f0-9]{64}\.bin$/.test(entry.asset))
+        throw Error(`The framework has no implementation for ${name}`);
+      if (!implementations.has(name)) implementations.set(name, loader.load(entry.asset).then(toBase64)
+        .catch(error => { implementations.delete(name); throw error; }));
+      images[name] = await implementations.get(name);
+    }));
+    return JSON.stringify(images);
   }
 
   // Compiled units serve every level, as the compiler cache before them did: one set for each
@@ -171,7 +196,7 @@ export function createNativeAotCompilerChannel(options = {}) {
 
   // Finishes a compilation whose C# compiled. With compiled units, the worker restores them
   // from IndexedDB once before the first such compilation and stores them again after each.
-  async function compileWebAssembly(name) {
+  async function compileWebAssembly(name, implementationsJson) {
     const timings = [];
     const timed = async (stage, action) => {
       report({ stage, state: 'running' });
@@ -200,7 +225,7 @@ export function createNativeAotCompilerChannel(options = {}) {
     invoke('useCompiledUnits', [name]);
     report({ stage: 'netwasm', state: 'running' });
     const started = performance.now();
-    const result = JSON.parse(invoke('compileWebAssembly', []));
+    const result = JSON.parse(invoke('compileWebAssembly', [implementationsJson]));
     report({ stage: 'netwasm', state: 'complete', milliseconds: performance.now() - started });
     if (name) {
       if (result.success) {
@@ -255,17 +280,15 @@ export function createNativeAotCompilerChannel(options = {}) {
         };
       }
       if (data.operation !== 'compile') throw Error('Unsupported native compiler operation');
-      const { images, supportJson } = await recipeInputs(data.recipe);
+      const { images } = await recipeInputs(data.recipe);
       const compilerInputs = inputs.slice();
-      if (supportJson !== undefined) compilerInputs[1] = supportJson;
       const settings = [data.language, data.updatedMemorySafetyRules, data.optimization, data.garbageCollector ?? 'Compact',
         data.structuredDiagnostics === true, JSON.stringify(data.optimizationOverrides ?? null)];
       const projectKind = data.projectKind ?? 'command';
       const nativeLibrariesJson = data.nativeLibrariesJson ?? '[]';
       const projectCompilation = projectKind !== 'command' || nativeLibrariesJson !== '[]';
       const generated = generatedRecipes.has(data.recipe);
-      const trustedRecipe = data.recipe === 'tunit' ? 'tunit'
-        : data.recipe === 'di' ? 'di' : data.recipe === 'logging' ? 'logging' : 'json';
+      const trustedRecipe = data.recipe === 'di' ? 'di' : data.recipe === 'logging' ? 'logging' : 'json';
       const operation = projectCompilation ? 'compileProject' : generated ? 'compileGeneratedRecipe' : 'compileRecipe';
       const arguments_ = projectCompilation
         ? [data.sourceSet, projectKind, ...compilerInputs, ...images,
@@ -274,14 +297,14 @@ export function createNativeAotCompilerChannel(options = {}) {
         ? [data.sourceSet, ...compilerInputs, ...images, trustedRecipe, false, ...settings]
         : [data.sourceSet, ...compilerInputs, ...images, ...settings];
       let result = JSON.parse(invoke(operation, arguments_));
-      if (result.prepared) result = await compileWebAssembly(unitStore ? unitsName(data) : '');
+      if (result.prepared) result = await compileWebAssembly(unitStore ? unitsName(data) : '',
+        await implementationImages(result.requiredImplementations));
       if (typeof result.application === 'string') result.application = fromBase64(result.application);
       if (typeof result.pe === 'string') result.pe = fromBase64(result.pe);
-      if (result.diagnosticArtifacts) result.diagnosticArtifacts = {
-        wasm: fromBase64(result.diagnosticArtifacts.wasm),
-        exceptionTypeMap: fromBase64(result.diagnosticArtifacts.exceptionTypeMap),
-        mapMediaType: result.diagnosticArtifacts.mapMediaType,
-        manifest: fromBase64(result.diagnosticArtifacts.manifest),
+      if (result.symbolSidecars) result.symbolSidecars = {
+        typeSymbols: fromBase64(result.symbolSidecars.typeSymbols),
+        ...(typeof result.symbolSidecars.methodSymbols === 'string'
+          ? { methodSymbols: fromBase64(result.symbolSidecars.methodSymbols) } : {}),
       };
       if (result.success) {
         validateRuntimeLinkPlan(result.runtimeLinkPlan, data.optimization);
@@ -295,6 +318,8 @@ export function createNativeAotCompilerChannel(options = {}) {
       unitStore?.close();
       unitStore = undefined;
       importedUnits.clear();
+      implementations.clear();
+      framework = undefined;
       initialized = undefined;
       module = undefined;
       loader = externalLoader;

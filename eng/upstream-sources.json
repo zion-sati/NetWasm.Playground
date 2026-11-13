@@ -38,12 +38,6 @@
       "tag": "v0.12.1",
       "packageVersion": "0.12.1"
     },
-    "tunit": {
-      "repository": "https://github.com/zion-sati/TUnit-NetWasm",
-      "commit": "64b7870d6743df24f8da76613b42556777f7a92c",
-      "tag": "netwasm-v0.12.2",
-      "packageVersion": "0.12.2"
-    },
     "fluentvalidation": {
       "repository": "https://github.com/zion-sati/FluentValidation",
       "commit": "0dec7019b3d1caf55bca4490318d7345e2ec861c",
@@ -54,34 +48,22 @@
   "compilerFramework": {
     "members": {
       "json": {
-        "source": "libraries",
-        "package": "netwasm.system.text.json",
+        "source": "netwasm",
+        "package": "netwasm.app.ref",
         "path": "analyzers/dotnet/cs/System.Text.Json.SourceGeneration.dll",
-        "sha256": "b43a11e2c5c5a8f09d53430387089c84a37442431ebbec5a63e381ce05ee7c27"
-      },
-      "tunit-generator": {
-        "source": "tunit",
-        "package": "netwasm.tunit.core",
-        "path": "analyzers/dotnet/roslyn4.14/cs/TUnit.Core.SourceGenerator.dll",
-        "sha256": "40bf4684ef4b52e348d3bb70049cbd0ee4e2f89fb7780bbdaa01ab51e66e428f"
+        "sha256": "39f9ef1932ab0014af65ce996c8d920e1853dbcd72a4b530797994ad5653177d"
       },
       "di": {
         "source": "libraries",
         "package": "netwasm.microsoft.extensions.dependencyinjection",
         "path": "analyzers/dotnet/cs/NetWasm.Microsoft.Extensions.DependencyInjection.Generator.dll",
-        "sha256": "120ad77c964951f2f7c916b4b77923c5224b10794b572b924ddc3df7d65a5d89"
+        "sha256": "16fe73c1123be73010949cb94e2f59f419663bfb7aab12767fe99e153bd22b25"
       },
       "logging": {
         "source": "libraries",
         "package": "netwasm.microsoft.extensions.logging.abstractions",
         "path": "analyzers/dotnet/cs/NetWasm.Microsoft.Extensions.Logging.Generators.dll",
-        "sha256": "1388cd40b16297e82330a12feb567b414403c4b19c9627482a70f40106933e74"
-      },
-      "tunit-program": {
-        "source": "tunit",
-        "package": "netwasm.tunit",
-        "path": "build/NetWasm,Version=v0.1/NetWasm.TUnit.Program.cs",
-        "sha256": "c649b3d2f5989b90b4d226095d11628c276134086cf0841727befa2a36ef6636"
+        "sha256": "2e18016edcacc408999b329da382bb252ec28af4bd913b0e258de117855fddf8"
       }
     }
   }

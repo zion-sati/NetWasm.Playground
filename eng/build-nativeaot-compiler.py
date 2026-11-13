@@ -27,11 +27,17 @@ def sha256(payload):
     return hashlib.sha256(payload).hexdigest()
 
 
-def package_member(package, version, member):
-    url = f'https://api.nuget.org/v3-flatcontainer/{package}/{version}/{package}.{version}.nupkg'
-    request = urllib.request.Request(url, headers={'User-Agent': 'NetWasm.Playground-nativeaot-builder'})
-    with urllib.request.urlopen(request) as response:
-        archive = response.read()
+def package_member(package, version, member, candidate_feed=None):
+    # A package the candidate feed holds at this exact version comes from it; the rest are public.
+    matches = [path for path in candidate_feed.glob('*.nupkg')
+               if path.name.lower() == f'{package}.{version}.nupkg'.lower()] if candidate_feed else []
+    if matches:
+        archive = matches[0].read_bytes()
+    else:
+        url = f'https://api.nuget.org/v3-flatcontainer/{package}/{version}/{package}.{version}.nupkg'
+        request = urllib.request.Request(url, headers={'User-Agent': 'NetWasm.Playground-nativeaot-builder'})
+        with urllib.request.urlopen(request) as response:
+            archive = response.read()
     with zipfile.ZipFile(__import__('io').BytesIO(archive)) as package_zip:
         return package_zip.read(member)
 
@@ -65,6 +71,10 @@ def main():
                         help='Local feed containing an exact NetWasm compiler candidate')
     parser.add_argument('--candidate-version',
                         help='Exact NetWasm compiler candidate version')
+    parser.add_argument('--work-root', type=Path, default=Path('/tmp'),
+                        help='Folder for the build work tree; Docker must be able to mount it')
+    parser.add_argument('--candidate-libraries-version',
+                        help='Exact NetWasm.Libraries candidate version in the candidate feed')
     args = parser.parse_args()
     if not args.emsdk or not (args.emsdk / 'emsdk_env.sh').is_file():
         parser.error('--emsdk must identify an installed Emscripten SDK')
@@ -74,10 +84,16 @@ def main():
         parser.error('--candidate-feed and --candidate-version must be supplied together')
     if args.candidate_feed and not args.candidate_feed.is_dir():
         parser.error('--candidate-feed must identify an existing directory')
+    if args.candidate_libraries_version and not args.candidate_feed:
+        parser.error('--candidate-libraries-version requires a candidate feed')
 
     upstream = json.loads((ROOT / 'eng/upstream-sources.json').read_text())
     candidate = upstream['nativeAotLlvmCandidate']
     pins = upstream['sources']
+    # Candidate versions replace the public pins for the generators taken from their packages.
+    for source, version in (('netwasm', args.candidate_version), ('libraries', args.candidate_libraries_version)):
+        if version:
+            pins[source]['packageVersion'] = version
     members = upstream['compilerFramework']['members']
     netwasm_version = args.candidate_version or pins['netwasm']['packageVersion']
     browser_sdk_version = candidate['roslynSdkVersion']
@@ -89,7 +105,7 @@ def main():
     roslyn_root = sdk_root / 'Roslyn/bincore'
     args.package_cache.mkdir(parents=True, exist_ok=True)
 
-    with tempfile.TemporaryDirectory(prefix='netwasm-nativeaot-compiler-', dir='/tmp') as temporary:
+    with tempfile.TemporaryDirectory(prefix='netwasm-nativeaot-compiler-', dir=args.work_root) as temporary:
         work = Path(temporary)
         compiler_host = work / 'compiler-host'
         native_host = work / 'nativeaot-compiler-host'
@@ -106,7 +122,7 @@ def main():
             package = item['package']
             member = item['path']
             package_version = pins[item['source']]['packageVersion']
-            payload = package_member(package, package_version, member)
+            payload = package_member(package, package_version, member, args.candidate_feed)
             if sha256(payload) != item['sha256']:
                 raise RuntimeError(f'Public package member changed: {package}/{member}')
             destination = generators / Path(member).name
@@ -120,11 +136,9 @@ def main():
             destination.write_bytes(payload)
             extracted[key] = destination
 
-        program = extracted['tunit-program'].read_text()
         (compiler_host / 'TrustedGeneratorAssets.cs').write_text(
             'namespace NetWasm.Playground.CompilerProbe;\n'
-            'internal static class TrustedGeneratorAssets { internal const string TUnitProgram = ' +
-            json.dumps(program) + ';\ninternal const bool DependencyInjectionAvailable = true;\n'
+            'internal static class TrustedGeneratorAssets {\ninternal const bool DependencyInjectionAvailable = true;\n'
             'internal static global::Microsoft.CodeAnalysis.IIncrementalGenerator CreateDependencyInjectionGenerator() => '
             'new global::NetWasm.Microsoft.Extensions.DependencyInjection.Generator.NetWasmDependencyInjectionGenerator();\n'
             'internal static global::Microsoft.CodeAnalysis.IIncrementalGenerator CreateLoggingGenerator() => '
@@ -136,7 +150,6 @@ def main():
         project = ET.parse(project_path)
         group = ET.SubElement(project.getroot(), 'ItemGroup')
         for name, key in [('System.Text.Json.SourceGeneration', 'json'),
-                          ('TUnit.Core.SourceGenerator', 'tunit-generator'),
                           ('NetWasm.Microsoft.Extensions.DependencyInjection.Generator', 'di'),
                           ('NetWasm.Microsoft.Extensions.Logging.Generators', 'logging'),
                           ('Microsoft.Interop.LibraryImportGenerator', 'library-import'),

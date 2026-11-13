@@ -27,10 +27,7 @@ class BrowserNoticeVersionTests(unittest.TestCase):
         versions = MODULE.current_package_versions()
         pins = json.loads((ROOT / "eng/upstream-sources.json").read_text())["sources"]
 
-        self.assertEqual(pins["netwasm"]["packageVersion"], versions["netwasm.toolchain"])
-        self.assertEqual(pins["tunit"]["packageVersion"], versions["netwasm.tunit"])
-        self.assertEqual(pins["tunit"]["packageVersion"], versions["netwasm.tunit.assertions"])
-        self.assertEqual(pins["tunit"]["packageVersion"], versions["netwasm.tunit.core"])
+        self.assertEqual({"netwasm.toolchain": pins["netwasm"]["packageVersion"]}, versions)
 
     def test_normalization_rejects_stale_release_coordinates(self):
         files = {"notice": {"source": {

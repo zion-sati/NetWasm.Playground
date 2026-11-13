@@ -56,6 +56,26 @@ public static class Program
       await page.locator('#output').textContent() !== '42\n')
     throw new Error('Async contract inference depends on the selected example');
   console.log('PASS async C# pasted into Hello World');
+
+  // Hello World references every NetWasm.App assembly, as an SDK project does: these types live outside CoreLib.
+  await page.locator('#editor .view-lines').click();
+  await page.keyboard.press('ControlOrMeta+A');
+  await page.keyboard.insertText(`using System;
+using System.Collections.Generic;
+using System.Collections.Immutable;
+using System.Linq;
+using System.Text.RegularExpressions;
+var scores = new SortedDictionary<string, int> { ["Grace"] = 99, ["Ada"] = 42 };
+var queue = new Stack<int>(scores.Values);
+var names = ImmutableArray.CreateRange(scores.Keys);
+Console.WriteLine($"{string.Join(",", names)} {queue.Pop()} {scores.Values.Sum()} {Regex.IsMatch("NetWasm", "^Net")}");`);
+  await page.locator('#run').click();
+  await page.waitForFunction(() => document.querySelector('#stop').disabled, undefined, { timeout: 240_000 });
+  const inBox = { status: await page.locator('#status').textContent(), output: await page.locator('#output').textContent(),
+    diagnostics: await page.locator('#diagnostics').textContent() };
+  if (inBox.status !== 'Run complete' || inBox.output !== 'Ada,Grace 99 141 True\n')
+    throw new Error(`In-box assemblies in Hello World: ${JSON.stringify(inBox)}`);
+  console.log('PASS in-box framework assemblies in Hello World');
   if (errors.length) throw new Error(`Page errors: ${errors.join('; ')}`);
   console.log('PASS: complete ported-library catalog is represented in the Playground');
 } finally {

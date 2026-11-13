@@ -7,8 +7,8 @@ test('native transport forwards the entire override record on every compilation 
     export const requests = [];
     const heap = new Uint8Array(1048576);
     const encoder = new TextEncoder(), decoder = new TextDecoder();
-    // A compile call stops once C# has compiled; compileWebAssembly finishes it.
-    const prepared = encoder.encode(JSON.stringify({success:true,prepared:true}));
+    // A compile call stops once C# has compiled, naming the implementations it needs; compileWebAssembly finishes it.
+    const prepared = encoder.encode(JSON.stringify({success:true,prepared:true,requiredImplementations:['System.Linq.dll']}));
     const finished = encoder.encode(JSON.stringify({success:false}));
     let result = finished;
     let cursor = 16;
@@ -28,6 +28,10 @@ test('native transport forwards the entire override record on every compilation 
   const moduleUrl = `data:text/javascript;base64,${Buffer.from(source).toString('base64')}`;
   const native = await import(moduleUrl);
   const encoder = new TextEncoder();
+  const linqAsset = `implementations/System.Linq.${'a'.repeat(64)}.bin`;
+  const framework = JSON.stringify({ schemaVersion: 1, references: ['System.Linq.dll'], implementations: {
+    'System.Linq.dll': { asset: linqAsset, closure: ['System.Linq.dll'], metadataOnly: false } } });
+  const implementationsJson = JSON.stringify({ 'System.Linq.dll': Buffer.from('linq').toString('base64') });
   const previousLocation = Object.getOwnPropertyDescriptor(globalThis, 'location');
   Object.defineProperty(globalThis, 'location', { configurable: true, value: { origin: 'https://example.test' } });
   const loader = {
@@ -40,7 +44,10 @@ test('native transport forwards the entire override record on every compilation 
       if (path === 'compiler/runtime-pack.json')
         return encoder.encode(JSON.stringify({ targets: [{ target: 'wasm32', systemLibraries: { names: [] } }] }));
       if (path === 'recipes/json-generated.json')
-        return encoder.encode(JSON.stringify({ schemaVersion: 1, id: 'json-generated', references: {}, implementations: {} }));
+        return encoder.encode(JSON.stringify({ schemaVersion: 1, id: 'json-generated', references: {} }));
+      if (path === 'compiler/framework.json') return encoder.encode(framework);
+      if (path === 'references/System.Linq.dll') return encoder.encode('linq-reference');
+      if (path === linqAsset) return encoder.encode('linq');
       return encoder.encode('{}');
     },
   };
@@ -64,10 +71,14 @@ test('native transport forwards the entire override record on every compilation 
       const channel = createNativeAotCompilerChannel({ assetLoader: loader,
         createFrontendCache: () => ({ close() {} }) });
       await channel.request({ operation: 'initialize', toolchainId: 'test' });
+      // The worker hands the host NetWasm.App's references and manifest once.
+      assert.deepEqual(native.requests.at(-1), { operation: 'loadFramework', arguments: [
+        JSON.stringify({ 'System.Linq.dll': Buffer.from('linq-reference').toString('base64') }), framework] });
       await channel.request({ ...request, recipe, projectKind, compiledUnits: false });
-      // A compilation that asks for none keeps no compiled units.
+      // A compilation that asks for none keeps no compiled units; it receives the implementations it required.
       assert.deepEqual(native.requests.slice(-2),
-        [{ operation: 'useCompiledUnits', arguments: [''] }, { operation: 'compileWebAssembly', arguments: [] }]);
+        [{ operation: 'useCompiledUnits', arguments: [''] },
+          { operation: 'compileWebAssembly', arguments: [implementationsJson] }]);
       const actual = native.requests.at(-3);
       assert.equal(actual.operation, operation);
       assert.equal(actual.arguments.at(-3), 'NetWasm');

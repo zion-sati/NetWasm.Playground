@@ -8,7 +8,6 @@ import EditorWorker from 'monaco-editor/editor/editor.worker?worker';
 import { PlaygroundPipeline } from './pipeline';
 import type { CompilationResult, Diagnostic, LanguageMode, PipelineEvent, SourceSnapshot, StageTiming, ToolchainPreloadProgress } from './contracts';
 import { examples } from './examples';
-import { formatTestReport } from './tunit-report';
 import './style.css';
 import { browserSupportMessage } from './browser-support';
 import { optimizationLabels, optimizationModes, type OptimizationMode } from './optimization';
@@ -335,7 +334,7 @@ async function loadExample(recipeId: string) {
   if (!example) return;
   el('status').textContent = `Opening ${example.name}…`;
   const files: ProjectFileSource[] = [...(example.files ?? [
-    { path: example.id === 'tunit' ? 'Tests.cs' : 'Program.cs', text: example.source },
+    { path: 'Program.cs', text: example.source },
   ])];
   try {
     for (const asset of example.assets ?? []) {
@@ -438,7 +437,7 @@ async function execute(job: { snapshot: SourceSnapshot; run: boolean }) {
     if (job.run && result?.success && !stopped && revision === job.snapshot.revision) {
       selectDock('console');
       const run = await pipeline.run(result, job.snapshot);
-      if (!stopped && revision === job.snapshot.revision) { el('output').textContent = run.stdout + run.stderr; el('exit').textContent = run.exitCode === undefined ? '' : `Exit ${run.exitCode}`; showTimings([...result.timings, ...run.timings]); el('status').textContent = run.cancelled ? 'Stopped' : run.success ? 'Run complete' : run.error ? errorSummary(run.error) : 'Run failed'; if (job.snapshot.recipeId === 'tunit' && !run.cancelled && !run.error && run.exitCode !== undefined) { const report = formatTestReport(run.stdout); el('output').textContent = report.text + run.stderr; el('status').textContent = `Tests complete · ${report.passed} passed · ${report.failed} failed`; } }
+      if (!stopped && revision === job.snapshot.revision) { el('output').textContent = run.stdout + run.stderr; el('exit').textContent = run.exitCode === undefined ? '' : `Exit ${run.exitCode}`; showTimings([...result.timings, ...run.timings]); el('status').textContent = run.cancelled ? 'Stopped' : run.success ? 'Run complete' : run.error ? errorSummary(run.error) : 'Run failed'; }
     } else if (!stopped && result?.success && revision === job.snapshot.revision) el('status').textContent = 'Compilation complete';
   } catch (error) { if (!stopped && revision === job.snapshot.revision) el('status').textContent = errorSummary(error); }
   finally { if (stageTimer) clearInterval(stageTimer); stageTimer = undefined; active = undefined; stopButton.disabled = true; compileButton.disabled = !!unsupported; runButton.disabled = !!unsupported; garbageCollectorSelect.disabled = false; runOptimizationSelect.disabled = false; runDiagnostics.disabled = false; publishDiagnostics.disabled = false; timeZoneSelect.disabled = false; optimizationSelect.disabled = false; languageSelect.disabled = false; updatedMemorySafety.disabled = false; clearCacheButton.disabled = false; document.querySelector('.workbench')!.setAttribute('aria-busy', 'false'); const next = queued; queued = undefined; if (next) void execute(next); }
