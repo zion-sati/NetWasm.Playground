@@ -24,12 +24,13 @@ export interface SourceSnapshot {
   structuredDiagnostics?: boolean;
 }
 
-/** The compiler's artifacts that name the exception types a failure report carries. */
-export interface DiagnosticArtifacts {
-  wasm: Uint8Array;
-  exceptionTypeMap: Uint8Array;
-  mapMediaType: string;
-  manifest: Uint8Array;
+/**
+ * The program's symbols files, mounted beside it: type names by runtime type ID (its exception types', and every
+ * type's with structured diagnostics) and, with structured diagnostics, its method names for stack traces.
+ */
+export interface ProgramSymbols {
+  typeSymbols: Uint8Array;
+  methodSymbols?: Uint8Array;
 }
 
 export interface Diagnostic {
@@ -80,7 +81,7 @@ export interface CompilationResult {
   language?: LanguageMode;
   updatedMemorySafetyRules?: boolean;
   structuredDiagnostics?: boolean;
-  diagnosticArtifacts?: DiagnosticArtifacts;
+  symbols?: ProgramSymbols;
   cancelled?: boolean;
   component?: Uint8Array;
   componentContract?: 'command' | 'jsexport-worker';

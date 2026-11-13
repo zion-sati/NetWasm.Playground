@@ -277,11 +277,10 @@ export function createNativeAotCompilerChannel(options = {}) {
       if (result.prepared) result = await compileWebAssembly(unitStore ? unitsName(data) : '');
       if (typeof result.application === 'string') result.application = fromBase64(result.application);
       if (typeof result.pe === 'string') result.pe = fromBase64(result.pe);
-      if (result.diagnosticArtifacts) result.diagnosticArtifacts = {
-        wasm: fromBase64(result.diagnosticArtifacts.wasm),
-        exceptionTypeMap: fromBase64(result.diagnosticArtifacts.exceptionTypeMap),
-        mapMediaType: result.diagnosticArtifacts.mapMediaType,
-        manifest: fromBase64(result.diagnosticArtifacts.manifest),
+      if (result.symbols) result.symbols = {
+        typeSymbols: fromBase64(result.symbols.typeSymbols),
+        ...(typeof result.symbols.methodSymbols === 'string'
+          ? { methodSymbols: fromBase64(result.symbols.methodSymbols) } : {}),
       };
       if (result.success) {
         validateRuntimeLinkPlan(result.runtimeLinkPlan, data.optimization);

@@ -58,6 +58,7 @@ const specifications = [
       export { projectProviderModuleIdentity } from ${hosting('provider-module-identity.mjs')};
       export { createGuestByteReader } from ${hosting('output-sink-stream.mjs')};
       export { readTimeZoneNames } from ${hosting('timezone-sidecar-zones.mjs')};
+      export { readOptionalStackTraceSymbols } from ${hosting('optional-symbol-sidecars.mjs')};
     `,
   },
   {
