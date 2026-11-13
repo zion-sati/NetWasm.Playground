@@ -231,7 +231,7 @@ PUBLIC_CATALOG = {'files': {
                                                        'implementations/FluentValidation.dll',
                                                        'references/FluentValidation.dll'],
                                             'sha256': '6d1d968fb225eca367cb7f0b8831ab012a35d92b547e945e17ef8e7b05c3e5cc',
-                                            'source': {'commit': '0dec7019b3d1caf55bca4490318d7345e2ec861c',
+                                            'source': {'commit': '9f3f33eb303dce1a14ebccaee0df2189102e8556',
                                                        'kind': 'git',
                                                        'path': 'License.txt',
                                                        'repository': 'https://github.com/zion-sati/FluentValidation'}},
