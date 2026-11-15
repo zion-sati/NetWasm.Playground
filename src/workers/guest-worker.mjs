@@ -86,6 +86,7 @@ serveWorker(async (data, report) => {
   let componentSha256;
   let filesystem;
   let httpBudgetFailure;
+  let consoleLimitFailure;
   let fetchFailure;
   const moduleMemories = new WeakMap();
   let allocatedMemoryPages = 0;
@@ -103,7 +104,8 @@ serveWorker(async (data, report) => {
     if (consoleBytes > 65536) {
       // The page ends the run as it does at the time limit, keeping the output shown so far.
       report({ guestLimit: 'Guest console limit exceeded' });
-      throw Error('Guest console limit exceeded');
+      // A failed write reaches the program as a stream error it may ignore, so the run fails here too.
+      throw Error(consoleLimitFailure = 'Guest console limit exceeded');
     }
     append(stream, decoders[stream].decode(bytes, { stream: true }));
   } });
@@ -117,8 +119,7 @@ serveWorker(async (data, report) => {
     // Time zone data is fetched only for a program that reaches local time in another zone.
     const mountsTimeZone = data.localTime === true && timeZone !== 'UTC' && timeZone !== 'Etc/UTC';
     const args = data.args === undefined ? [] : data.args;
-    if (!Array.isArray(args) || (args.length !== 0 &&
-        (data.recipe !== 'tunit' || args.length !== 1 || args[0] !== '--list'))) throw Error('Unsupported guest arguments');
+    if (!Array.isArray(args) || args.length !== 0) throw Error('Unsupported guest arguments');
     providedArguments = Object.freeze([programName, ...args]);
     const component = data.component.slice();
     if (component.byteLength > maximumComponentBytes)
@@ -250,8 +251,9 @@ serveWorker(async (data, report) => {
     // the worker's own memory limit.
     const failure = outcome.primaryFailure && (outcome.primaryFailure.detail
       ? `${outcome.primaryFailure.message} ${outcome.primaryFailure.detail}` : outcome.primaryFailure.message);
-    return { success: outcome.completionKind === 'normal', exitCode: outcome.exitCode,
-      error: failureContext ? `${failure ?? 'The managed process failed.'} ${failureContext}` : failure,
+    return { success: outcome.completionKind === 'normal' && !consoleLimitFailure, exitCode: outcome.exitCode,
+      error: consoleLimitFailure ??
+        (failureContext ? `${failure ?? 'The managed process failed.'} ${failureContext}` : failure),
       stage: outcome.primaryFailure?.phase,
       executionResult: outcome, ...output, consoleBytes, providedArguments, componentSha256,
       graph, loaded, memoryMaximumBytes: allocatedMemoryPages * 65536, coreInstances, imports: generatedImports, timings };

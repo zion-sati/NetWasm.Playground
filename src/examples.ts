@@ -38,7 +38,6 @@ const descriptions: Readonly<Record<string, { description: string; category: Non
   logging: { description: 'Use source-generated Microsoft.Extensions.Logging messages.', category: 'Libraries' },
   'native-lz4': { description: 'Call the upstream LZ4 C library through LibraryImport and a WebAssembly .a archive.', category: 'Interop and workers' },
   'web-worker': { description: 'Call a JSExport from a dedicated Web Worker and report progress through a JavaScript import.', category: 'Interop and workers' },
-  tunit: { description: 'Compile and run an asynchronous TUnit test project.', category: 'Testing' },
 };
 
 const recipes: readonly ExampleRecipe[] = [
@@ -654,29 +653,6 @@ internal static unsafe partial class Native
       { path: 'native/liblz4.a', publicPath: 'examples/lz4/liblz4.a', kind: 'native-archive', libraryName: 'lz4', target: 'wasm32' },
       { path: 'native/LZ4-LICENSE.txt', publicPath: 'examples/lz4/LZ4-LICENSE.txt', kind: 'text' },
     ],
-  },
-  {
-    id: 'tunit',
-    name: 'TUnit tests',
-    source: `using System.Threading.Tasks;
-
-using TUnit.Assertions;
-using TUnit.Core;
-
-namespace NetWasmTUnitTests;
-
-public sealed class Tests
-{
-    [Test]
-    [Category("smoke")]
-    public async Task AnswerIsFortyTwo()
-    {
-        var answer = 6 * 7;
-
-        await Assert.That(answer).IsEqualTo(42);
-    }
-}
-`,
   },
 ];
 

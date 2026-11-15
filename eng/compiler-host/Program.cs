@@ -33,7 +33,6 @@ using Microsoft.CodeAnalysis.Diagnostics;
 using System.Collections.Immutable;
 using System.Security.Cryptography;
 using System.Threading;
-using TUnit.Core.SourceGenerator.Generators;
 using Microsoft.Extensions.Logging.Generators;
 using JsonSourceGenerator = jsonsourcegen::System.Text.Json.SourceGeneration.JsonSourceGenerator;
 
@@ -102,15 +101,23 @@ public static partial class Program
         string? rawCoreLinkPlan = null,
         string? rawBindingHandle = null,
         string? trustedRecipe = null,
-        int? catalogCaseCount = null,
         string? componentContract = null,
         string? pe = null,
         SymbolsInfo? symbols = null,
         // What the compilation reused of the compiled units it kept, when it kept units.
         string? compiledUnits = null,
         // The C# compiled; CompileWebAssembly finishes the compilation.
-        bool? prepared = null
+        bool? prepared = null,
+        // The implementation assemblies CompileWebAssembly needs: the closure of what the program references.
+        string[]? requiredImplementations = null
         );
+
+    // The toolchain's NetWasm.App manifest: the reference assemblies every compile references, as the SDK's do,
+    // and for each implementation assembly the closure a program referencing it needs. A metadata-only facade
+    // only forwards types; the compiler reads it for metadata and never executes it.
+    private sealed record FrameworkManifest(int schemaVersion, string[] references,
+        Dictionary<string, FrameworkImplementation> implementations);
+    private sealed record FrameworkImplementation(string asset, string[] closure, bool metadataOnly);
 
     [JsonSourceGenerationOptions(DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull)]
     [JsonSerializable(typeof(SupportSource[]))]
@@ -119,6 +126,7 @@ public static partial class Program
     [JsonSerializable(typeof(RuntimeNativeLibrary[]))]
     [JsonSerializable(typeof(Dictionary<string, string>))]
     [JsonSerializable(typeof(CompilerHostResponse))]
+    [JsonSerializable(typeof(FrameworkManifest))]
     [JsonSerializable(typeof(RawCoreImportInfo[]))]
     [JsonSerializable(typeof(RuntimeLinkExportInfo[]))]
     [JsonSerializable(typeof(RawBindingResponse))]
@@ -274,7 +282,7 @@ public static partial class Program
         double generatorMilliseconds = 0;
         try
         {
-            if (trustedRecipe is not (null or "json" or "tunit" or "di" or "logging") ||
+            if (trustedRecipe is not (null or "json" or "di" or "logging") ||
                 (trustedRecipe == "di" && !TrustedGeneratorAssets.DependencyInjectionAvailable))
                 return Serialize(new(1, false, "request", "unsupported-generator-recipe", true, []));
             if (languageVersion is not ("15" or "preview") ||
@@ -285,30 +293,28 @@ public static partial class Program
             var javaScriptExportWorker = projectKind == "jsexport-worker";
             var runtimeOptimization = ParseOptimization(optimization);
             var optimizationOverrides = new BrowserOptimizationOverridesDeserializer().Deserialize(optimizationOverridesJson);
-            var tunit = trustedRecipe == "tunit";
             Stage("roslyn");
             var started = Stopwatch.GetTimestamp();
             var parse = new CSharpParseOptions(languageVersion == "15" ? LanguageVersion.CSharp15 : LanguageVersion.Preview,
                 preprocessorSymbols: ["TRACE", "NETWASM", "NETWASM0_1", "RELEASE"]);
             if (updatedMemorySafetyRules)
                 parse = parse.WithFeatures([new("updated-memory-safety-rules", "true")]);
-            var userSources = ParseUserSources(source, tunit ? "Tests.cs" : "Program.cs");
+            var userSources = ParseUserSources(source, "Program.cs");
             var trees = userSources
                 .Select(file => CSharpSyntaxTree.ParseText(SourceText.From(file.text, Encoding.UTF8), parse, file.path))
                 .Concat(JsonSerializer.Deserialize(supportJson, CompilerHostJsonContext.Default.SupportSourceArray)!
                     .Select(file => CSharpSyntaxTree.ParseText(SourceText.From(file.text, Encoding.UTF8), parse, file.path)));
-            if (tunit) trees = trees.Append(CSharpSyntaxTree.ParseText(SourceText.From(TrustedGeneratorAssets.TUnitProgram, Encoding.UTF8), parse, "NetWasm.TUnit.Program.cs"));
-            var compilation = CSharpCompilation.Create(tunit ? "NetWasmTUnitTests" : "NetWasmApp", trees,
+            var compilation = CSharpCompilation.Create("NetWasmApp", trees,
                 new[] { reference }.Concat(JsonSerializer.Deserialize(additionalReferencesJson, CompilerHostJsonContext.Default.DictionaryStringString)!.Values)
-                    .Select(bytes => MetadataReference.CreateFromImage(Convert.FromBase64String(bytes))),
+                    .Select(bytes => MetadataReference.CreateFromImage(Convert.FromBase64String(bytes)))
+                    .Concat(frameworkReferences),
                 new CSharpCompilationOptions(javaScriptExportWorker
                         ? OutputKind.DynamicallyLinkedLibrary
                         : OutputKind.ConsoleApplication,
                     optimizationLevel: OptimizationLevel.Release,
                     nullableContextOptions: NullableContextOptions.Enable,
                     allowUnsafe: true,
-                    concurrentBuild: false, deterministic: true,
-                    mainTypeName: tunit ? "NetWasm.TUnit.Generated.NetWasmTestProgram" : null));
+                    concurrentBuild: false, deterministic: true));
             Compilation generatedCompilation = compilation;
             {
                 Stage("generator");
@@ -316,14 +322,13 @@ public static partial class Program
                 var generators = new List<IIncrementalGenerator> { TrustedGeneratorAssets.CreateLibraryImportGenerator() };
                 generators.AddRange(trustedRecipe switch
                 {
-                    "tunit" => [new TestMetadataGenerator(), new HookMetadataGenerator(), new AotConverterGenerator(), new PropertyInjectionSourceGenerator()],
                     "di" => [TrustedGeneratorAssets.CreateDependencyInjectionGenerator()],
                     "logging" => [TrustedGeneratorAssets.CreateLoggingGenerator()],
                     null => [],
                     _ => [new JsonSourceGenerator()],
                 });
                 GeneratorDriver driver = CSharpGeneratorDriver.Create(generators.Select(generator => generator.AsSourceGenerator()),
-                    parseOptions: parse, optionsProvider: new TrustedOptionsProvider(tunit));
+                    parseOptions: parse);
                 driver = driver.RunGeneratorsAndUpdateCompilation(compilation, out generatedCompilation, out generatorDiagnostics);
                 var run = driver.GetRunResult();
                 var count = run.Results.Sum(result => result.GeneratedSources.Length);
@@ -354,7 +359,8 @@ public static partial class Program
                 emitted.Diagnostics.Take(128).Select(Describe).ToArray(), timings.ToArray(), generatedSources,
                 generatorDiagnostics.Take(128).Select(Describe).ToArray()));
             var image = pe.ToArray();
-            string CompileWebAssembly()
+            var requiredImplementations = RequiredImplementations(image);
+            string CompileWebAssembly(string implementationsJson)
             {
                 try
                 {
@@ -364,10 +370,14 @@ public static partial class Program
                     var componentContract = javaScriptExportWorker ? "jsexport-worker" : "command";
                     var images = new Dictionary<string,byte[]> { ["NetWasmApp.dll"] = image, ["NetWasm.CoreLib.dll"] = Convert.FromBase64String(implementation) };
                     var additionalImplementations = JsonSerializer.Deserialize(additionalImplementationsJson, CompilerHostJsonContext.Default.DictionaryStringString)!;
+                    foreach (var supplied in JsonSerializer.Deserialize(implementationsJson, CompilerHostJsonContext.Default.DictionaryStringString)!)
+                        additionalImplementations.TryAdd(supplied.Key, supplied.Value);
+                    if (CompileInSteps && requiredImplementations.FirstOrDefault(name => !additionalImplementations.ContainsKey(name)) is { } missing)
+                        throw new InvalidOperationException($"The required implementation {missing} was not supplied.");
                     foreach (var image in additionalImplementations) images.Add(image.Key, Convert.FromBase64String(image.Value));
                     images["compiler.wit.wasm"] = Convert.FromBase64String(witBytes);
                     var options = new CompilerOptions(
-                        "NetWasmApp.dll", ["NetWasm.CoreLib.dll", .. additionalImplementations.Keys],
+                        "NetWasmApp.dll", ["NetWasm.CoreLib.dll", .. additionalImplementations.Keys.Where(name => !metadataOnlyAssemblies.Contains(name))],
                         javaScriptExportWorker ? string.Empty : "Program",
                         javaScriptExportWorker ? string.Empty : "<Main>$", [],
                         WitPath: "compiler.wit.wasm", WitWorld: "netwasm:platform@1.0.0/platform",
@@ -382,7 +392,8 @@ public static partial class Program
                         EmitStackTrace: structuredDiagnostics && !javaScriptExportWorker,
                         Optimization: Enum.Parse<FinalWasmOptimization>(runtimeOptimization.ToString()),
                         OptimizationOverrides: optimizationOverrides,
-                        IntermediateOutputPath: compiledUnitsName)
+                        IntermediateOutputPath: compiledUnitsName,
+                        MetadataReferencePaths: [.. additionalImplementations.Keys.Where(metadataOnlyAssemblies.Contains)])
                     {
                         CompiledUnits = compiledUnitsName is not null,
                     };
@@ -460,7 +471,7 @@ public static partial class Program
                         runtimeLinkPlan: Describe(runtimeLinkPlan), coreLinkPlan: coreLinkPlan,
                         rawCoreLinkPlan: rawCoreLinkPlan, rawBindingHandle: rawBindingHandle,
                         trustedRecipe: trustedRecipe,
-                        catalogCaseCount: tunit ? CountCatalogCases(generatedCompilation) : 0, componentContract: componentContract,
+                        componentContract: componentContract,
                         pe: emitted.Success ? Convert.ToBase64String(image) : null,
                         symbols: structuredDiagnostics && !javaScriptExportWorker
                             ? Describe(compiled.TypeSymbols, compiled.MethodSymbols) : null,
@@ -471,9 +482,11 @@ public static partial class Program
                     return Failure(error, timings, generatedSources, generatorDiagnostics);
                 }
             }
-            if (!CompileInSteps) return CompileWebAssembly();
+            // Compiled in one call, the caller supplies its implementations with the recipe's.
+            if (!CompileInSteps) return CompileWebAssembly("{}");
             preparedCompilation = CompileWebAssembly;
-            return Serialize(new(1, true, timings: timings.ToArray(), prepared: true));
+            return Serialize(new(1, true, timings: timings.ToArray(), prepared: true,
+                requiredImplementations: requiredImplementations));
         }
         catch (Exception error)
         {
@@ -496,15 +509,54 @@ public static partial class Program
 #else
     private static readonly bool CompileInSteps = false;
 #endif
-    private static Func<string>? preparedCompilation;
+    private static Func<string, string>? preparedCompilation;
 
+    // Finishes the compilation whose C# compiled, with the implementation assemblies it required (name to Base64).
     [JSExport]
-    public static string CompileWebAssembly()
+    public static string CompileWebAssembly(string implementationsJson)
     {
         var compilation = preparedCompilation ??
             throw new InvalidOperationException("No compilation has compiled its C#.");
         preparedCompilation = null;
-        return compilation();
+        return compilation(implementationsJson);
+    }
+
+    private static MetadataReference[] frameworkReferences = [];
+    private static Dictionary<string, string[]> implementationClosures = new(StringComparer.Ordinal);
+    private static HashSet<string> metadataOnlyAssemblies = new(StringComparer.Ordinal);
+
+    // Loads NetWasm.App once: its reference assemblies (name to Base64) and the toolchain's framework manifest.
+    [JSExport]
+    public static string LoadFramework(string referencesJson, string frameworkJson)
+    {
+        var manifest = JsonSerializer.Deserialize(frameworkJson, CompilerHostJsonContext.Default.FrameworkManifest) ??
+            throw new InvalidDataException("The framework manifest is empty.");
+        var references = JsonSerializer.Deserialize(referencesJson, CompilerHostJsonContext.Default.DictionaryStringString)!;
+        if (manifest.schemaVersion != 1 || !references.Keys.Order(StringComparer.Ordinal)
+                .SequenceEqual(manifest.references.Order(StringComparer.Ordinal), StringComparer.Ordinal))
+            throw new InvalidDataException("The framework references do not match their manifest.");
+        frameworkReferences = [.. references.Values.Select(bytes => MetadataReference.CreateFromImage(Convert.FromBase64String(bytes)))];
+        implementationClosures = manifest.implementations.ToDictionary(pair => pair.Key, pair => pair.Value.closure, StringComparer.Ordinal);
+        metadataOnlyAssemblies = manifest.implementations.Where(pair => pair.Value.metadataOnly)
+            .Select(pair => pair.Key).ToHashSet(StringComparer.Ordinal);
+        return "{}";
+    }
+
+    // The implementation assemblies a compiled program needs: the closure of each assembly it references.
+    private static string[] RequiredImplementations(byte[] image)
+    {
+        using var reader = new System.Reflection.PortableExecutable.PEReader(ImmutableArray.Create(image));
+        var metadata = System.Reflection.Metadata.PEReaderExtensions.GetMetadataReader(reader);
+        var required = new SortedSet<string>(StringComparer.Ordinal);
+        foreach (var handle in metadata.AssemblyReferences)
+        {
+            var name = metadata.GetString(metadata.GetAssemblyReference(handle).Name) + ".dll";
+            if (name == "NetWasm.CoreLib.dll") continue;
+            if (!implementationClosures.TryGetValue(name, out var closure))
+                throw new InvalidOperationException($"The program references {name}, which the Playground does not provide.");
+            required.UnionWith(closure);
+        }
+        return [.. required];
     }
 
     private static RuntimeLinkPlanNativeValueType MapNativeType(WasmValueType value) => value switch
@@ -635,37 +687,11 @@ public static partial class Program
         path.Split('/').All(segment => segment.Length > 0 && segment is not "." and not "..");
 
 
-    private static int CountCatalogCases(Compilation compilation) => compilation.SyntaxTrees.Sum(tree =>
-        tree.FilePath.EndsWith("__TestSource.g.cs", StringComparison.Ordinal)
-            ? tree.ToString().Split("cases.Add(new global::TUnit.Core.GeneratedTestCase<", StringSplitOptions.None).Length - 1 : 0);
-
     private static DiagnosticInfo Describe(Diagnostic diagnostic)
     {
         var location = diagnostic.Location.GetLineSpan();
         return new(diagnostic.Id, Bound(diagnostic.GetMessage()), diagnostic.Severity.ToString(),
             location.Path, location.StartLinePosition.Line, location.StartLinePosition.Character);
-    }
-
-    private sealed class TrustedOptionsProvider(bool tunit) : AnalyzerConfigOptionsProvider
-    {
-        private readonly AnalyzerConfigOptions options = new TrustedOptions(tunit);
-        public override AnalyzerConfigOptions GlobalOptions => options;
-        public override AnalyzerConfigOptions GetOptions(SyntaxTree tree) => options;
-        public override AnalyzerConfigOptions GetOptions(AdditionalText textFile) => options;
-    }
-
-    private sealed class TrustedOptions(bool tunit) : AnalyzerConfigOptions
-    {
-        public override bool TryGetValue(string key, out string value)
-        {
-            value = key switch
-            {
-                "build_property.EnableTUnitSourceGeneration" when tunit => "true",
-                "build_property.TUnitSourceGenerationMode" when tunit => "ClosedWorldCatalog",
-                _ => string.Empty,
-            };
-            return value.Length != 0;
-        }
     }
 
     [JSExport]

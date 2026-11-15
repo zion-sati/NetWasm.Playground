@@ -136,8 +136,8 @@ class PublicPackageBoundaryTests(unittest.TestCase):
         self.assertIn("--candidate-feed", rebuilder_help)
         self.assertIn("--candidate-version", rebuilder_help)
         self.assertIn("--candidate-commit", rebuilder_help)
-        self.assertIn("--candidate-tunit-version", rebuilder_help)
-        self.assertIn("--candidate-tunit-commit", rebuilder_help)
+        self.assertIn("--candidate-libraries-version", rebuilder_help)
+        self.assertIn("--candidate-fluentvalidation-version", rebuilder_help)
         self.assertIn("--runtime-plan", rebuilder_help)
 
         incomplete = subprocess.run([
@@ -155,7 +155,7 @@ class PublicPackageBoundaryTests(unittest.TestCase):
         members = upstream["compilerFramework"]["members"]
 
         self.assertEqual(
-            {"json", "tunit-generator", "di", "logging", "tunit-program"},
+            {"json", "di", "logging"},
             set(members),
         )
         for member in members.values():

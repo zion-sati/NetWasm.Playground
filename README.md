@@ -9,7 +9,11 @@ separate guest worker.
 
 Editable examples cover Hello World, allocation and guest GC, LINQ, read-only
 JSON parsing, source-generated JSON serialization, regular expressions,
-constructor-based dependency injection, CRC32 hashing, and TUnit tests.
+constructor-based dependency injection, and CRC32 hashing.
+
+Every program compiles against all of NetWasm.App's in-box assemblies, as an SDK
+project does. The browser downloads an implementation assembly only when the
+compiled program references it.
 
 The Settings dialog contains independent Run and Publish profiles. Run defaults
 to no final optimization for the quickest edit/test loop; Publish defaults to
@@ -46,7 +50,7 @@ npm run dev
 `eng/build-nativeaot-compiler.py` builds the browser compiler from the pinned
 public packages (see the [NativeAOT-LLVM host](eng/nativeaot-compiler-host/README.md)).
 `eng/rebuild-public-toolchain.py` stages it with the receipt-verified public base,
-the pinned NetWasm, TUnit and library packages from NuGet.org and the workers in
+the pinned NetWasm and library packages from NuGet.org and the workers in
 `src/workers`, under an ignored, content-addressed `public/toolchain/` directory.
 It does not read NetWasm source checkouts or rebuild LLVM. Release builds run on a clean GitHub Actions runner:
 they compile the browser compiler host from pinned public NuGet packages,
@@ -160,23 +164,20 @@ The smoke expects a running development server with the same base path and
 Playwright's Chromium installed. It exercises the actual compiler and guest.
 
 `eng/desktop-examples.py` creates the example inputs using a fresh NuGet.org-only
-workspace; `--recipe` selects a particular example. The Regex, DI and hashing
-recipes use their public NetWasm library packages. The compiler host includes
-the package-owned DI generator, which closes constructor activation at compile time.
-`eng/tunit-example.py` downloads the exact released public TUnit template
-package from NuGet.org and checks it using ordinary `dotnet test`.
+workspace; `--recipe` selects a particular example. The DI, logging, hashing and
+FluentValidation recipes use their public library packages; the other examples
+need only NetWasm.App. The compiler host includes the package-owned DI generator,
+which closes constructor activation at compile time.
 `eng/browser-smoke/examples.mjs` checks the ordinary examples and compares
 their outputs with those desktop builds; set `PLAYGROUND_DESKTOP_EXAMPLES` to
 the verified workspace alongside the smoke environment variables above.
 
-The JSON generator smoke is `eng/browser-smoke/json-generated.mjs`. The TUnit
-smoke is `eng/browser-smoke/tunit.mjs`, with `PLAYGROUND_TUNIT_EXAMPLE` pointing
-to its verified native template workspace. Set `PLAYGROUND_COMPARE_DESKTOP_BYTES=1`
+The JSON generator smoke is `eng/browser-smoke/json-generated.mjs`. Set `PLAYGROUND_COMPARE_DESKTOP_BYTES=1`
 for exact ordinary/JSON download comparison when the desktop build uses the same
 memory policy; Playground uses NetWasm's 2 GiB wasm32 guest-memory policy.
 
 The compiler host restores only its exact pinned public NuGet.org packages.
-Only the pinned JSON, TUnit, DI and logging generators run; user code cannot
+Only the pinned JSON, DI and logging generators run; user code cannot
 supply packages or analyzers.
 
 ## Limits and browser checks
@@ -195,8 +196,8 @@ supply packages or analyzers.
 Programs run as WASI 0.3 components on NetWasm's own browser host. They get
 clocks, random numbers, an in-memory file system and HTTP through the browser's
 `fetch`; sockets and arbitrary JavaScript imports are excluded. The environment
-holds `TZ`, plus the sample URL for the HTTP example, and only TUnit's `--list`
-passes arguments.
+holds `TZ`, plus the sample URL for the HTTP example, and programs get no
+arguments.
 Workers inherit the page CSP and are terminated on Stop or timeout.
 
 Trusted compiler/tool binaries have finite linear-memory maxima: .NET 2 GiB,
@@ -242,6 +243,6 @@ Keep historical bundles outside
 
 Built on [NetWasm](https://github.com/zion-sati/NetWasm), with examples using
 [NetWasm libraries](https://github.com/zion-sati/NetWasm.Libraries) and
-[TUnit-NetWasm](https://github.com/zion-sati/TUnit-NetWasm).
+[FluentValidation for NetWasm](https://github.com/zion-sati/FluentValidation).
 
 [Sponsor development](https://github.com/sponsors/zion-sati)
