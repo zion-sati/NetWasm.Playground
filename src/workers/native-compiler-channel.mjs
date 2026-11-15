@@ -301,10 +301,10 @@ export function createNativeAotCompilerChannel(options = {}) {
         await implementationImages(result.requiredImplementations));
       if (typeof result.application === 'string') result.application = fromBase64(result.application);
       if (typeof result.pe === 'string') result.pe = fromBase64(result.pe);
-      if (result.symbolSidecars) result.symbolSidecars = {
-        typeSymbols: fromBase64(result.symbolSidecars.typeSymbols),
-        ...(typeof result.symbolSidecars.methodSymbols === 'string'
-          ? { methodSymbols: fromBase64(result.symbolSidecars.methodSymbols) } : {}),
+      if (result.symbols) result.symbols = {
+        typeSymbols: fromBase64(result.symbols.typeSymbols),
+        ...(typeof result.symbols.methodSymbols === 'string'
+          ? { methodSymbols: fromBase64(result.symbols.methodSymbols) } : {}),
       };
       if (result.success) {
         validateRuntimeLinkPlan(result.runtimeLinkPlan, data.optimization);

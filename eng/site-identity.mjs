@@ -92,6 +92,33 @@ export function validateObservedSiteIdentity(observed, expected) {
   return observed;
 }
 
+// A 5xx is the host failing to serve a file it has (GitHub Pages answers 503 for a moment
+// after a deploy), not a different file, so the observation is taken again. A missing or
+// changed file fails at once.
+const unavailableStatus = text => Number(/resource unavailable: \S+ \((\d{3})\)/.exec(String(text))?.[1]);
+const serverError = status => status >= 500 && status <= 599;
+
+export async function observeUntilServed(observe, {
+  attempts = 4, delayMs = 2000, sleep = ms => new Promise(resolve => setTimeout(resolve, ms)),
+} = {}) {
+  for (let attempt = 1; ; attempt++) {
+    let observed;
+    let failure;
+    try {
+      observed = await observe();
+    } catch (error) {
+      failure = error;
+    }
+    const statuses = failure ? [unavailableStatus(failure.message ?? failure)]
+      : (observed?.fileFailures ?? []).map(fileFailure => unavailableStatus(fileFailure.error));
+    if (attempt >= attempts || !statuses.length || !statuses.every(serverError)) {
+      if (failure) throw failure;
+      return observed;
+    }
+    await sleep(delayMs * attempt);
+  }
+}
+
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
   const [root, sourceCommit] = process.argv.slice(2);
   if (!root || !sourceCommit) throw Error('Usage: node eng/site-identity.mjs <site-root> <source-commit>');

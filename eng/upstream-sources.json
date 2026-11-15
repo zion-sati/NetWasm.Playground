@@ -24,25 +24,25 @@
   "sources": {
     "netwasm": {
       "repository": "https://github.com/zion-sati/NetWasm",
-      "commit": "af2bee0300942b9849dc2a774f3b0d801032f07f",
-      "tag": "v0.12.2",
-      "packageVersion": "0.12.2",
+      "commit": "9fef00e15ff399249943d02616d441a6c52db936",
+      "tag": "v0.13.0",
+      "packageVersion": "0.13.0",
       "toolchainManifest": "eng/toolchain.json",
-      "browserCompilerCommit": "af2bee0300942b9849dc2a774f3b0d801032f07f",
-      "browserLinkerCommit": "af2bee0300942b9849dc2a774f3b0d801032f07f",
-      "browserToolHostCommit": "af2bee0300942b9849dc2a774f3b0d801032f07f"
+      "browserCompilerCommit": "9fef00e15ff399249943d02616d441a6c52db936",
+      "browserLinkerCommit": "9fef00e15ff399249943d02616d441a6c52db936",
+      "browserToolHostCommit": "9fef00e15ff399249943d02616d441a6c52db936"
     },
     "libraries": {
       "repository": "https://github.com/zion-sati/NetWasm.Libraries",
-      "commit": "0be55319de166fdf5459fa58e385a29e0103c97d",
-      "tag": "v0.12.1",
-      "packageVersion": "0.12.1"
+      "commit": "8f38072d91ac68908a08fbba6d86af90137e8037",
+      "tag": "v0.13.0",
+      "packageVersion": "0.13.0"
     },
     "fluentvalidation": {
       "repository": "https://github.com/zion-sati/FluentValidation",
-      "commit": "0dec7019b3d1caf55bca4490318d7345e2ec861c",
-      "tag": "netwasm-v0.10.0",
-      "packageVersion": "0.10.0"
+      "commit": "9f3f33eb303dce1a14ebccaee0df2189102e8556",
+      "tag": "netwasm-v0.13.0",
+      "packageVersion": "0.13.0"
     }
   },
   "compilerFramework": {

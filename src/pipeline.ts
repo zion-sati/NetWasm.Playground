@@ -500,8 +500,7 @@ export class PlaygroundPipeline {
       });
       if (epoch !== this.epoch) throw new Error('Stopped');
       return { ...result, success: true, component, componentContract: compilation.componentContract,
-        runtimeFeatures: compilation.runtimeFeatures, programFileName: compilation.programFileName,
-        symbolSidecars: compilation.symbolSidecars,
+        runtimeFeatures: compilation.runtimeFeatures, symbols: compilation.symbols,
         compiledUnits: compilation.compiledUnitsCache
           ? { summary: compilation.compiledUnits ?? undefined, ...compilation.compiledUnitsCache } : undefined,
         compilerHostLinearMemoryBytes: compilation.hostLinearMemoryBytes,
@@ -576,7 +575,7 @@ export class PlaygroundPipeline {
         return this.channel('guest').request({ operation: 'run', component, recipe: snapshot.recipeId,
           componentContract, timeZone: snapshot.timeZone ?? 'UTC',
           localTime: compilation.runtimeFeatures?.includes('local-time') === true,
-          programFileName: compilation.programFileName, symbolSidecars: compilation.symbolSidecars,
+          symbols: compilation.symbols,
           sampleHttpUrl }, [component.buffer], 60_000, 5_000);
       });
       for (const timing of result.timings ?? []) this.emit({ type: 'stage', stage: timing.stage, state: 'complete', milliseconds: timing.milliseconds });

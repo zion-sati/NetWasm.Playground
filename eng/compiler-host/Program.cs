@@ -69,9 +69,10 @@ public static partial class Program
         string ToolchainFingerprint, long RuntimeGlobalBase, long HeapBase, long InitialMemorySizeBytes,
         long MaximumMemorySizeBytes, RuntimeCacheInfo Cache, RuntimeLinkExportInfo[] InternalRuntimeExports, string GarbageCollector);
     private sealed record RuntimeLinkExportInfo(string Name, byte Kind);
-    // The program's symbols sidecars as Base64: type-symbols names the types a structured failure report
-    // carries (every type with type names on); method-symbols names stack frames.
-    private sealed record SymbolSidecarsInfo(string typeSymbols, string? methodSymbols);
+    // Base64 bytes that name the exception types a structured failure report carries.
+    // The program's symbols files: its exception types' names, every type's names with names on, and its method
+    // names with stack traces on.
+    private sealed record SymbolsInfo(string typeSymbols, string? methodSymbols);
     private sealed record RawCoreImportInfo(string Module, string Name, int[] Parameters, int[] Results);
     private sealed record RequiredImportInfo(string Interface, string Name, string[] Parameters, string[] Results);
     private sealed record RawBindingResponse(int schemaVersion, bool success, string? error = null,
@@ -102,9 +103,7 @@ public static partial class Program
         string? trustedRecipe = null,
         string? componentContract = null,
         string? pe = null,
-        // The program's deployed file name, which its sidecars' names extend (NetWasmApp.wasm.tz-info).
-        string? programFileName = null,
-        SymbolSidecarsInfo? symbolSidecars = null,
+        SymbolsInfo? symbols = null,
         // What the compilation reused of the compiled units it kept, when it kept units.
         string? compiledUnits = null,
         // The C# compiled; CompileWebAssembly finishes the compilation.
@@ -194,11 +193,9 @@ public static partial class Program
     private static FunctionImportInfo Describe(WasmFunctionImport import) => new(import.Module, import.Name,
         new(import.Type.Parameters.Select(value => (int)value).ToArray(), (int)import.Type.Result));
 
-    private static SymbolSidecarsInfo? Describe(BrowserCompilationResult compiled) =>
-        compiled.TypeSymbols is { } typeSymbols
-            ? new(Convert.ToBase64String(typeSymbols.Bytes),
-                compiled.MethodSymbols is { } methodSymbols ? Convert.ToBase64String(methodSymbols.Bytes) : null)
-            : null;
+    private static SymbolsInfo? Describe(SymbolSidecarArtifact? types, SymbolSidecarArtifact? methods) => types is null
+        ? null
+        : new(Convert.ToBase64String(types.Bytes), methods is null ? null : Convert.ToBase64String(methods.Bytes));
 
     private static EntryPointInfo Describe(BrowserCompilationEntryPoint entryPoint) => new(entryPoint.AssemblyPath,
         entryPoint.TypeName, entryPoint.MethodName, entryPoint.Token, (int)entryPoint.Kind,
@@ -388,12 +385,11 @@ public static partial class Program
                             ? CompilerEntryPointKind.Library
                             : CompilerEntryPointKind.ManagedExecutable,
                         UseJavaScriptExportBoundary: javaScriptExportWorker,
-                        // A command reports an unhandled exception's type and message when the profile asks for it.
+                        // A command reports an unhandled exception's type and message when the profile asks for it,
+                        // and then reads type names and stack frames as a Debug build does.
                         StructuredDiagnostics: structuredDiagnostics && !javaScriptExportWorker,
-                        // Like the SDK's Debug build, an unoptimized command loads its type names and stack
-                        // frames from its symbols sidecars.
-                        EmitTypeNames: optimization == "none" && !javaScriptExportWorker,
-                        EmitStackTrace: optimization == "none" && !javaScriptExportWorker,
+                        EmitTypeNames: structuredDiagnostics && !javaScriptExportWorker,
+                        EmitStackTrace: structuredDiagnostics && !javaScriptExportWorker,
                         Optimization: Enum.Parse<FinalWasmOptimization>(runtimeOptimization.ToString()),
                         OptimizationOverrides: optimizationOverrides,
                         IntermediateOutputPath: compiledUnitsName,
@@ -477,8 +473,8 @@ public static partial class Program
                         trustedRecipe: trustedRecipe,
                         componentContract: componentContract,
                         pe: emitted.Success ? Convert.ToBase64String(image) : null,
-                        programFileName: javaScriptExportWorker ? null : options.ProgramFileName,
-                        symbolSidecars: javaScriptExportWorker ? null : Describe(compiled),
+                        symbols: structuredDiagnostics && !javaScriptExportWorker
+                            ? Describe(compiled.TypeSymbols, compiled.MethodSymbols) : null,
                         compiledUnits: compiledUnitsName is null ? null : compilerSession.CompiledUnitSummary(compiledUnitsName)));
                 }
                 catch (Exception error)

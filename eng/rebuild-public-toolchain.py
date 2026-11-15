@@ -327,8 +327,7 @@ def add_timezone_data(stage, netwasm_version):
     destination.write_bytes(payload)
     (stage / 'timezones/netwasm-timezones.json').write_bytes(encoded({
         'schemaVersion': 1, 'asset': name, 'bytes': len(payload), 'sha256': digest,
-        # The guest worker mounts it as the program's own sidecar, /netwasm-sidecars/<program>.wasm.tz-info.
-        'sidecarSuffix': '.tz-info', 'netwasmVersion': netwasm_version}))
+        'guestPath': '/netwasm-sidecars/NetWasmApp.wasm.tz-info', 'netwasmVersion': netwasm_version}))
 
 
 # Assemblies from packages, whose one image is both the reference and the implementation.

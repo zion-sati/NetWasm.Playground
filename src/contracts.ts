@@ -25,10 +25,10 @@ export interface SourceSnapshot {
 }
 
 /**
- * The program's symbols sidecars. Type-symbols names the types a failure report carries, or every
- * type when type names are on; method-symbols, present when stack traces are on, names stack frames.
+ * The program's symbols files, mounted beside it: type names by runtime type ID (its exception types', and every
+ * type's with structured diagnostics) and, with structured diagnostics, its method names for stack traces.
  */
-export interface SymbolSidecars {
+export interface ProgramSymbols {
   typeSymbols: Uint8Array;
   methodSymbols?: Uint8Array;
 }
@@ -81,9 +81,7 @@ export interface CompilationResult {
   language?: LanguageMode;
   updatedMemorySafetyRules?: boolean;
   structuredDiagnostics?: boolean;
-  /** The program's deployed file name, which its sidecars' names extend. */
-  programFileName?: string;
-  symbolSidecars?: SymbolSidecars;
+  symbols?: ProgramSymbols;
   cancelled?: boolean;
   component?: Uint8Array;
   componentContract?: 'command' | 'jsexport-worker';
