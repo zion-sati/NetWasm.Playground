@@ -298,7 +298,7 @@ def add_timezone_data(stage, netwasm_version):
         (project / 'Program.cs').write_text('System.Console.WriteLine(System.DateTime.Now.Kind);\n')
         (project / 'TimeZoneData.csproj').write_text(
             '<Project Sdk="NetWasm.Sdk"><PropertyGroup><OutputType>Exe</OutputType>'
-            '<TargetFramework>netwasm0.1</TargetFramework>'
+            '<TargetFramework>net10.0-netwasm</TargetFramework>'
             '<NetWasmTimeZoneMode>Full</NetWasmTimeZoneMode></PropertyGroup></Project>\n')
         (project / 'global.json').write_bytes(encoded({
             'sdk': {'version': '10.0.303', 'rollForward': 'latestMajor', 'allowPrerelease': True},
@@ -338,12 +338,15 @@ PACKAGE_ASSEMBLIES = {
     'Microsoft.Extensions.Logging.dll': 'netwasm.microsoft.extensions.logging',
     'Microsoft.Extensions.Options.dll': 'netwasm.microsoft.extensions.options',
     'Microsoft.Extensions.Primitives.dll': 'netwasm.microsoft.extensions.primitives',
-    'System.IO.Hashing.dll': 'netwasm.system.io.hashing',
     'FluentValidation.dll': 'netwasm.fluentvalidation',
+}
+# Assemblies from Microsoft's own packages, which run on net10.0-netwasm as published: package, version and member.
+MICROSOFT_PACKAGE_ASSEMBLIES = {
+    'System.IO.Hashing.dll': ('system.io.hashing', '11.0.0', 'lib/net10.0/System.IO.Hashing.dll'),
 }
 # NetWasm.App's in-box assemblies: code compiles against the reference pack's image and the compiler
 # links the runtime pack's.
-FRAMEWORK_REFERENCES = ('netwasm.app.ref', 'ref/NetWasm,Version=v0.1/')
+FRAMEWORK_REFERENCES = ('netwasm.app.ref', 'ref/net10.0-netwasm/')
 FRAMEWORK_IMPLEMENTATIONS = ('netwasm.app.runtime', 'framework/')
 # Each example's package libraries; the packages they reference join them. In-box examples need none.
 RECIPES = {
@@ -475,7 +478,7 @@ def refresh_public_assets(stage, pins, runtime_plan=None, candidate_toolchain=No
         destination.write_bytes(public_member(package, version, member))
 
     replace('compiler/target-reference.dll', 'netwasm.ref', core,
-            'ref/NetWasm,Version=v0.1/NetWasm.CoreLib.dll')
+            'ref/net10.0-netwasm/NetWasm.CoreLib.dll')
     replace('compiler/target-implementation.dll', 'netwasm.runtime.wasm32', core,
             'runtime/NetWasm.CoreLib.dll')
     replace('compiler/compiler.wit.wasm', 'netwasm.toolchain', core,
@@ -580,9 +583,11 @@ def refresh_public_assets(stage, pins, runtime_plan=None, candidate_toolchain=No
 
     def image(role, name):
         if (role, name) not in images:
-            if name in PACKAGE_ASSEMBLIES:
+            if name in MICROSOFT_PACKAGE_ASSEMBLIES:
+                payload = public_member(*MICROSOFT_PACKAGE_ASSEMBLIES[name])
+            elif name in PACKAGE_ASSEMBLIES:
                 package = PACKAGE_ASSEMBLIES[name]
-                payload = public_member(package, assembly_version(package), f'lib/NetWasm,Version=v0.1/{name}')
+                payload = public_member(package, assembly_version(package), f'lib/net10.0-netwasm/{name}')
             else:
                 package, prefix = (FRAMEWORK_REFERENCES if role == 'references' or facade(name)
                                    else FRAMEWORK_IMPLEMENTATIONS)
