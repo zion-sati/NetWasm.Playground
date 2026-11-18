@@ -460,6 +460,10 @@ def runtime_variant_assets(targets):
     return assets
 
 
+# A runtime system library's file name, as Emscripten names them: libc++-noexcept.a has a plus sign.
+SYSTEM_LIBRARY_NAME = re.compile(r'[A-Za-z0-9_.+-]+\.a')
+
+
 def refresh_public_assets(stage, pins, runtime_plan=None, candidate_toolchain=None):
     """Replace every versioned compiler input in the pinned reusable browser base."""
     core = pins['netwasm']['packageVersion']
@@ -548,7 +552,7 @@ def refresh_public_assets(stage, pins, runtime_plan=None, candidate_toolchain=No
         raise ValueError('Public runtime pack has an incomplete wasm32 system-library closure')
     for name, asset in zip(system_names, system_assets):
         expected_path = f'wasm32/system-libraries/{name}'
-        if (not isinstance(name, str) or not re.fullmatch(r'[A-Za-z0-9_.-]+\.a', name) or
+        if (not isinstance(name, str) or not SYSTEM_LIBRARY_NAME.fullmatch(name) or
                 not isinstance(asset, dict) or set(asset) != {'path', 'sha256'} or
                 asset.get('path') != expected_path or
                 not isinstance(asset.get('sha256'), str) or
@@ -558,7 +562,7 @@ def refresh_public_assets(stage, pins, runtime_plan=None, candidate_toolchain=No
     if not system_directory.is_dir():
         raise ValueError('Public base lacks the wasm32 system-library directory')
     for existing in system_directory.iterdir():
-        if not existing.is_file() or not re.fullmatch(r'[A-Za-z0-9_.-]+\.a', existing.name):
+        if not existing.is_file() or not SYSTEM_LIBRARY_NAME.fullmatch(existing.name):
             raise ValueError(f'Unexpected public base system-library entry: {existing.name}')
         if existing.name not in system_names:
             existing.unlink()

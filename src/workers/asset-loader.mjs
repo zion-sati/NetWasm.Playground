@@ -18,7 +18,7 @@ export function errorText(error) {
   return `${details || 'Unknown worker error'}${causeDetails}`.slice(0, 4096);
 }
 function pathName(name) {
-  if (typeof name !== 'string' || !/^[A-Za-z0-9_.@/-]+$/.test(name) || name.startsWith('/') ||
+  if (typeof name !== 'string' || !/^[A-Za-z0-9_.@+/-]+$/.test(name) || name.startsWith('/') ||
       name.split('/').some(part => !part || part === '.' || part === '..')) throw Error('Invalid tool asset path');
   return name;
 }

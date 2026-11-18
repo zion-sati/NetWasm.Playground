@@ -70,3 +70,13 @@ class RuntimeVariantTests(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class SystemLibraryNameTests(unittest.TestCase):
+    def test_runtime_pack_file_names_are_accepted_and_paths_are_not(self):
+        # 0.15's runtime pack names libc++'s archives with plus signs.
+        for name in ['libc.a', 'libc_optz.a', 'libstandalonewasm-nocatch-memgrow.a', 'libc++-noexcept.a',
+                     'libc++abi-noexcept.a']:
+            self.assertIsNotNone(MODULE.SYSTEM_LIBRARY_NAME.fullmatch(name), name)
+        for name in ['../libc.a', 'system/libc.a', 'lib c.a', 'libc.so', 'libc.a\n']:
+            self.assertIsNone(MODULE.SYSTEM_LIBRARY_NAME.fullmatch(name), name)

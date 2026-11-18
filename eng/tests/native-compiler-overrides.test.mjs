@@ -37,12 +37,15 @@ test('native transport forwards the entire override record on every compilation 
   const loader = {
     installFetchAdapter() {},
     url() { return moduleUrl; },
-    async manifest() { return { 'recipes/json-generated.json': {} }; },
+    // 0.15's runtime pack names libc++'s archives with plus signs.
+    async manifest() { return { 'recipes/json-generated.json': {},
+      'runtime/wasm32/system/libc++-noexcept.a': { sha256: 'b'.repeat(64) } }; },
     async load(path) {
       if (path.endsWith('nativeaot-compiler-receipt.json'))
         return encoder.encode(JSON.stringify({ files: { 'compiler.mjs': {} } }));
       if (path === 'compiler/runtime-pack.json')
-        return encoder.encode(JSON.stringify({ targets: [{ target: 'wasm32', systemLibraries: { names: [] } }] }));
+        return encoder.encode(JSON.stringify({ targets: [{ target: 'wasm32',
+          systemLibraries: { names: ['libc++-noexcept.a'] } }] }));
       if (path === 'recipes/json-generated.json')
         return encoder.encode(JSON.stringify({ schemaVersion: 1, id: 'json-generated', references: {} }));
       if (path === 'compiler/framework.json') return encoder.encode(framework);
@@ -84,6 +87,9 @@ test('native transport forwards the entire override record on every compilation 
       assert.equal(actual.arguments.at(-3), 'NetWasm');
       assert.equal(actual.arguments.at(-2), 'true');
       assert.deepEqual(JSON.parse(actual.arguments.at(-1)), overrides);
+      // The runtime's system libraries, libc++'s among them, reach every compilation.
+      assert.ok(actual.arguments.some(argument => typeof argument === 'string'
+        && argument.includes('/netwasm-link/runtime/wasm32/system/libc++-noexcept.a')));
       channel.reset();
     }
     // A compilation restores its stored units once per worker, under a name for its settings.
