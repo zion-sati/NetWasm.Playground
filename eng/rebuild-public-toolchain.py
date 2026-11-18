@@ -460,6 +460,10 @@ def runtime_variant_assets(targets):
             if not isinstance(target['speed'], dict):
                 raise ValueError('Invalid runtime speed profile')
             profiles.append((target['speed'], ('runtimeArchive', 'collectorArchive')))
+        # Every browser link takes the Emscripten support archive and its stand-ins (NetWasm 0.15 and later).
+        emscripten = target.get('emscriptenArchives')
+        if emscripten is not None and (not isinstance(emscripten, dict) or set(emscripten) != {'support', 'standIns'}):
+            raise ValueError('Invalid runtime Emscripten archives')
         for profile, fields in profiles:
             # Each profile links one platform archive: the WASI one, or the one for a plain
             # core module without WASI.
@@ -468,6 +472,8 @@ def runtime_variant_assets(targets):
                 raise ValueError('Invalid runtime platform archives')
             named = [(field, profile.get(field)) for field in fields]
             named += [(f'platformArchives.{name}', asset) for name, asset in sorted(platform.items())]
+            if profile is target and emscripten is not None:
+                named += [(f'emscriptenArchives.{name}', asset) for name, asset in sorted(emscripten.items())]
             for field, asset in named:
                 if (not isinstance(asset, dict) or set(asset) != {'path', 'sha256'} or
                         not isinstance(asset['path'], str) or not isinstance(asset['sha256'], str) or
