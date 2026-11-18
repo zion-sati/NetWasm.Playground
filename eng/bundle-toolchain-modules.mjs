@@ -67,6 +67,7 @@ const specifications = [
     source: () => `
       export { bindWorkerImports } from ${hosting('worker-import-bindings.mjs')};
       export { createBrowserRawExportSession } from ${hosting('browser-raw-export-session.mjs')};
+      export { createBrowserSidecarMaterializer } from ${hosting('browser-sidecar-materializer.mjs')};
       export { validateDeploymentManifest } from ${hosting('deployment-manifest-validator.mjs')};
       export { platformProviderCatalog } from ${hosting('platform-provider-catalog.generated.mjs')};
       export { createWasiPlatform } from ${hosting('wasi-platform.mjs')};
