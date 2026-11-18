@@ -183,6 +183,30 @@ def drop_uncatalogued_notices(stage, origins):
         (stage / 'notices' / target).unlink()
 
 
+def bind_public_package_notices(stage, origins, rebuilt_packages, fetch=None):
+    # A notice from a public NuGet package that the catalog pins at its own version, such as Microsoft's
+    # System.IO.Hashing, comes from that package when the base lacks it or carries other bytes or another origin.
+    fetch = fetch or verified_archive
+    for target, catalog_entry in NOTICES.PUBLIC_CATALOG['files'].items():
+        source = catalog_entry['source']
+        if source.get('kind') != 'nuget' or source['package'] in rebuilt_packages:
+            continue
+        notice_path = stage / 'notices' / target
+        if origins['files'].get(target) == catalog_entry and notice_path.is_file() and \
+                sha256(notice_path.read_bytes()) == catalog_entry['sha256']:
+            continue
+        url, archive, _ = fetch(source['package'], source['version'])
+        if url != source['url'] or sha256(archive) != source['archiveSha256']:
+            raise ValueError(f'Public package differs from the notice catalog: {source["package"]}/{source["version"]}')
+        with zipfile.ZipFile(io.BytesIO(archive)) as package_zip:
+            notice = package_zip.read(source['path'])
+        if len(notice) != catalog_entry['bytes'] or sha256(notice) != catalog_entry['sha256']:
+            raise ValueError(f'Notice changed in public package: {source["package"]}/{source["path"]}')
+        notice_path.parent.mkdir(parents=True, exist_ok=True)
+        notice_path.write_bytes(notice)
+        origins['files'][target] = json.loads(json.dumps(catalog_entry))
+
+
 def rebind_notice_origins(stage, pins):
     origins_path = stage / 'notices/origins.json'
     origins = json.loads(origins_path.read_text())
@@ -205,6 +229,7 @@ def rebind_notice_origins(stage, pins):
             continue
         url, archive, restore_hash = verified_archive(package, version)
         packages[package] = (version, url, archive, restore_hash)
+    bind_public_package_notices(stage, origins, packages)
     for target, entry in origins['files'].items():
         catalog_entry = NOTICES.PUBLIC_CATALOG['files'][target]
         entry['covers'] = catalog_entry['covers']
