@@ -182,6 +182,14 @@ def drop_uncatalogued_notices(stage, origins):
         (stage / 'notices' / target).unlink()
 
 
+def add_missing_git_notices(origins):
+    # A catalogued notice from a Git repository that the base lacks joins it: a pinned source's at its pin, another
+    # project's, such as FluentValidation's license, at the commit the catalog names; rebinding fetches its bytes.
+    for target, catalog_entry in NOTICES.PUBLIC_CATALOG['files'].items():
+        if target not in origins['files'] and catalog_entry['source'].get('kind') == 'git':
+            origins['files'][target] = json.loads(json.dumps(catalog_entry))
+
+
 def bind_public_package_notices(stage, origins, rebuilt_packages, fetch=None):
     # A notice from a public NuGet package that the catalog pins at its own version, such as Microsoft's
     # System.IO.Hashing, comes from that package when the base lacks it or carries other bytes or another origin.
@@ -211,10 +219,7 @@ def rebind_notice_origins(stage, pins):
     origins = json.loads(origins_path.read_text())
     drop_uncatalogued_notices(stage, origins)
     source_families = {source['repository']: family for family, source in pins.items()}
-    for target, catalog_entry in NOTICES.PUBLIC_CATALOG['files'].items():
-        source = catalog_entry['source']
-        if target not in origins['files'] and source.get('repository') in source_families:
-            origins['files'][target] = json.loads(json.dumps(catalog_entry))
+    add_missing_git_notices(origins)
     versions = {
         'netwasm.toolchain': pins['netwasm']['packageVersion'],
     }

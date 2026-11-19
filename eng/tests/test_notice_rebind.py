@@ -31,6 +31,22 @@ class NoticeRebindTests(unittest.TestCase):
             self.assertFalse((stage / 'notices/bdwgc/AUTHORS').exists())
 
 
+class MissingGitNoticeTests(unittest.TestCase):
+    def test_a_catalogued_git_notice_the_base_lacks_joins_it_and_a_package_notice_waits_for_its_package(self):
+        git = {'bytes': 1, 'covers': ['implementations/Example.*'], 'sha256': '0' * 64,
+               'source': {'kind': 'git', 'repository': 'https://github.com/example/example', 'commit': 'a' * 40,
+                          'path': 'License.txt'}}
+        package = {'bytes': 1, 'covers': [], 'sha256': '0' * 64,
+                   'source': {'kind': 'nuget', 'package': 'example', 'version': '1.0.0'}}
+        kept = {'bytes': 2, 'covers': [], 'sha256': '1' * 64, 'source': {'kind': 'git', 'repository': 'r'}}
+        catalog = {'files': {'example/License.txt': git, 'dotnet/example/NOTICE': package, 'kept/LICENSE': kept}}
+        origins = {'files': {'kept/LICENSE': {'bytes': 3}}}
+        with mock.patch.object(MODULE.NOTICES, 'PUBLIC_CATALOG', catalog):
+            MODULE.add_missing_git_notices(origins)
+        self.assertEqual({'kept/LICENSE': {'bytes': 3}, 'example/License.txt': git}, origins['files'])
+        self.assertIsNot(git, origins['files']['example/License.txt'])
+
+
 def package_with(path, notice):
     buffer = io.BytesIO()
     with zipfile.ZipFile(buffer, 'w') as archive:
