@@ -615,7 +615,8 @@ def refresh_public_assets(stage, pins, runtime_plan=None, candidate_toolchain=No
             if name in PUBLISHED_PACKAGE_ASSEMBLIES:
                 payload = public_member(*PUBLISHED_PACKAGE_ASSEMBLIES[name])
             elif name in PACKAGE_ASSEMBLIES:
-                payload = public_member(PACKAGE_ASSEMBLIES[name], libraries, f'lib/net10.0-netwasm/{name}')
+                # NuGet packs a net10.0-netwasm library into its platform-versioned folder.
+                payload = public_member(PACKAGE_ASSEMBLIES[name], libraries, f'lib/net10.0-netwasm1.0/{name}')
             else:
                 package, prefix = (FRAMEWORK_REFERENCES if role == 'references' or facade(name)
                                    else FRAMEWORK_IMPLEMENTATIONS)
