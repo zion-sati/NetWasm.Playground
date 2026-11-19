@@ -37,12 +37,6 @@
       "commit": "5ba485cb038e0bd74bc8ae6f82a589d3c0133f69",
       "tag": "v0.14.2",
       "packageVersion": "0.14.2"
-    },
-    "fluentvalidation": {
-      "repository": "https://github.com/zion-sati/FluentValidation",
-      "commit": "f6f3d049872bc9f8b5259251841f15092bb12c70",
-      "tag": "netwasm-v0.14.2",
-      "packageVersion": "0.14.2"
     }
   },
   "compilerFramework": {

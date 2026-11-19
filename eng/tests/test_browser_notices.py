@@ -45,7 +45,7 @@ class BrowserNoticeVersionTests(unittest.TestCase):
         pins = json.loads((ROOT / "eng/upstream-sources.json").read_text())["sources"]
         commits_by_repository = {
             pins[family]["repository"]: pins[family]["commit"]
-            for family in ("netwasm", "libraries", "fluentvalidation")
+            for family in ("netwasm", "libraries")
         }
 
         for path, entry in MODULE.PUBLIC_CATALOG["files"].items():

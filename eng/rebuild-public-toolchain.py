@@ -151,8 +151,7 @@ def verified_archive(package, version):
 
 
 def package_archive(package, version):
-    # The candidate NetWasm, Libraries and FluentValidation versions come from the local feed; every other version
-    # is public.
+    # The candidate NetWasm and Libraries versions come from the local feed; every other version is public.
     if CANDIDATE_FEED is not None and version in CANDIDATE_VERSIONS:
         expected = f'{package}.{version}.nupkg'.lower()
         matches = [path for path in CANDIDATE_FEED.glob('*.nupkg')
@@ -363,11 +362,12 @@ PACKAGE_ASSEMBLIES = {
     'Microsoft.Extensions.Logging.dll': 'netwasm.microsoft.extensions.logging',
     'Microsoft.Extensions.Options.dll': 'netwasm.microsoft.extensions.options',
     'Microsoft.Extensions.Primitives.dll': 'netwasm.microsoft.extensions.primitives',
-    'FluentValidation.dll': 'netwasm.fluentvalidation',
+    'FluentValidation.dll': 'fluentvalidation',
 }
-# Assemblies from Microsoft's own packages, which run on net10.0-netwasm as published: package, version and member.
-MICROSOFT_PACKAGE_ASSEMBLIES = {
+# Assemblies from packages that run on net10.0-netwasm as published: package, version and member.
+PUBLISHED_PACKAGE_ASSEMBLIES = {
     'System.IO.Hashing.dll': ('system.io.hashing', '11.0.0', 'lib/net10.0/System.IO.Hashing.dll'),
+    'FluentValidation.dll': ('fluentvalidation', '12.2.0', 'lib/net8.0/FluentValidation.dll'),
 }
 # NetWasm.App's in-box assemblies: code compiles against the reference pack's image and the compiler
 # links the runtime pack's.
@@ -499,12 +499,6 @@ def refresh_public_assets(stage, pins, runtime_plan=None, candidate_toolchain=No
     """Replace every versioned compiler input in the pinned reusable browser base."""
     core = pins['netwasm']['packageVersion']
     libraries = pins['libraries']['packageVersion']
-    fluentvalidation = pins['fluentvalidation']['packageVersion']
-
-    def assembly_version(package):
-        if package == 'netwasm.fluentvalidation':
-            return fluentvalidation
-        return libraries
 
     def replace(relative, package, version, member):
         destination = stage / relative
@@ -618,11 +612,10 @@ def refresh_public_assets(stage, pins, runtime_plan=None, candidate_toolchain=No
 
     def image(role, name):
         if (role, name) not in images:
-            if name in MICROSOFT_PACKAGE_ASSEMBLIES:
-                payload = public_member(*MICROSOFT_PACKAGE_ASSEMBLIES[name])
+            if name in PUBLISHED_PACKAGE_ASSEMBLIES:
+                payload = public_member(*PUBLISHED_PACKAGE_ASSEMBLIES[name])
             elif name in PACKAGE_ASSEMBLIES:
-                package = PACKAGE_ASSEMBLIES[name]
-                payload = public_member(package, assembly_version(package), f'lib/net10.0-netwasm/{name}')
+                payload = public_member(PACKAGE_ASSEMBLIES[name], libraries, f'lib/net10.0-netwasm/{name}')
             else:
                 package, prefix = (FRAMEWORK_REFERENCES if role == 'references' or facade(name)
                                    else FRAMEWORK_IMPLEMENTATIONS)
@@ -687,8 +680,10 @@ def refresh_public_assets(stage, pins, runtime_plan=None, candidate_toolchain=No
         packages = sorted(set().union(*(closure('references', root) for root in roots)) & set(PACKAGE_ASSEMBLIES))
         if len(packages) > RECIPE_ASSEMBLY_LIMIT:
             raise ValueError(f'The {recipe_id} recipe needs {len(packages)} references')
-        # An example of in-box assemblies alone follows NetWasm's version.
-        version = (fluentvalidation if recipe_id == 'fluentvalidation' else libraries if packages else core)
+        # An example of in-box assemblies alone follows NetWasm's version, one of a published package that package's.
+        published = {PUBLISHED_PACKAGE_ASSEMBLIES[name][1] for name in packages if name in PUBLISHED_PACKAGE_ASSEMBLIES}
+        version = (published.pop() if packages and len(published) == 1 and set(packages) <= set(PUBLISHED_PACKAGE_ASSEMBLIES)
+                   else libraries if packages else core)
         (stage / 'recipes' / f'{recipe_id}.json').write_bytes(encoded({
             'schemaVersion': 1, 'id': recipe_id,
             'references': {name: f'references/{name}' for name in packages},
@@ -750,8 +745,6 @@ def main():
     parser.add_argument('--candidate-commit')
     parser.add_argument('--candidate-libraries-version')
     parser.add_argument('--candidate-libraries-commit')
-    parser.add_argument('--candidate-fluentvalidation-version')
-    parser.add_argument('--candidate-fluentvalidation-commit')
     parser.add_argument('--runtime-plan', type=Path,
                         help='Actual candidate compiler runtime plan captured from a preliminary toolchain')
     parser.add_argument('--candidate-toolchain-manifest', type=Path,
@@ -771,13 +764,6 @@ def main():
         parser.error('--candidate-libraries-version must be an exact prerelease version')
     if args.candidate_libraries_commit and not re.fullmatch(r'[a-f0-9]{40}', args.candidate_libraries_commit):
         parser.error('--candidate-libraries-commit must be a full Git SHA')
-    fluentvalidation_values = (args.candidate_fluentvalidation_version, args.candidate_fluentvalidation_commit)
-    if any(fluentvalidation_values) != all(fluentvalidation_values) or any(fluentvalidation_values) and not args.candidate_feed:
-        parser.error('--candidate-fluentvalidation-version and --candidate-fluentvalidation-commit require each other and a candidate feed')
-    if args.candidate_fluentvalidation_version and not re.fullmatch(r'[0-9]+\.[0-9]+\.[0-9]+-[0-9A-Za-z.-]+', args.candidate_fluentvalidation_version):
-        parser.error('--candidate-fluentvalidation-version must be an exact prerelease version')
-    if args.candidate_fluentvalidation_commit and not re.fullmatch(r'[a-f0-9]{40}', args.candidate_fluentvalidation_commit):
-        parser.error('--candidate-fluentvalidation-commit must be a full Git SHA')
     if args.candidate_feed and not args.candidate_feed.is_dir():
         parser.error('--candidate-feed must be an existing directory')
     if args.runtime_plan and not args.candidate_feed:
@@ -786,8 +772,7 @@ def main():
         parser.error('--candidate-toolchain-manifest is only valid with a candidate feed')
     CANDIDATE_FEED = args.candidate_feed.resolve() if args.candidate_feed else None
     CANDIDATE_VERSION = args.candidate_version
-    CANDIDATE_VERSIONS = {version for version in (args.candidate_version, args.candidate_libraries_version,
-                                                  args.candidate_fluentvalidation_version) if version}
+    CANDIDATE_VERSIONS = {version for version in (args.candidate_version, args.candidate_libraries_version) if version}
     runtime_plan = json.loads(args.runtime_plan.read_text()) if args.runtime_plan else None
     candidate_toolchain = (json.loads(args.candidate_toolchain_manifest.read_text())
                            if args.candidate_toolchain_manifest else None)
@@ -847,9 +832,6 @@ def main():
         if args.candidate_libraries_version:
             pins['libraries']['packageVersion'] = args.candidate_libraries_version
             pins['libraries']['commit'] = args.candidate_libraries_commit
-        if args.candidate_fluentvalidation_version:
-            pins['fluentvalidation']['packageVersion'] = args.candidate_fluentvalidation_version
-            pins['fluentvalidation']['commit'] = args.candidate_fluentvalidation_commit
         verify_nativeaot_compiler(args.compiler_framework, upstream['nativeAotLlvmCandidate'],
                                   pins['netwasm']['packageVersion'])
         pins['nativeAotLlvmCompilerHost'] = upstream['nativeAotLlvmCandidate']

@@ -23,20 +23,18 @@ PACKAGES = {
     'json-dom': [],
     'json-generated': [],
     'regex': [],
-    'fluentvalidation': ['NetWasm.FluentValidation'],
+    'fluentvalidation': ['FluentValidation'],
     'di': ['NetWasm.Microsoft.Extensions.DependencyInjection'],
     'logging': ['NetWasm.Microsoft.Extensions.Logging'],
     'hashing': ['System.IO.Hashing'],
 }
-# Microsoft's packages the examples use as published.
-MICROSOFT_PACKAGE_VERSIONS = {'System.IO.Hashing': '11.0.0'}
+# Packages the examples use as published.
+PUBLISHED_PACKAGE_VERSIONS = {'System.IO.Hashing': '11.0.0', 'FluentValidation': '12.2.0'}
 
 
 def package_version(pins, package):
-    if package in MICROSOFT_PACKAGE_VERSIONS:
-        return MICROSOFT_PACKAGE_VERSIONS[package]
-    if package == 'NetWasm.FluentValidation':
-        return pins['sources']['fluentvalidation']['packageVersion']
+    if package in PUBLISHED_PACKAGE_VERSIONS:
+        return PUBLISHED_PACKAGE_VERSIONS[package]
     return pins['sources']['libraries']['packageVersion']
 def fingerprint(path):
     return {'bytes': path.stat().st_size, 'sha256': hashlib.sha256(path.read_bytes()).hexdigest()}

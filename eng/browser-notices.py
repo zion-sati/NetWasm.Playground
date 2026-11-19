@@ -245,10 +245,10 @@ PUBLIC_CATALOG = {'files': {
                                                        'implementations/FluentValidation.*',
                                                        'references/FluentValidation.dll'],
                                             'sha256': '6d1d968fb225eca367cb7f0b8831ab012a35d92b547e945e17ef8e7b05c3e5cc',
-                                            'source': {'commit': 'f6f3d049872bc9f8b5259251841f15092bb12c70',
+                                            'source': {'commit': '299ef377bde844af7d28b7aa21786a6853f930e3',
                                                        'kind': 'git',
                                                        'path': 'License.txt',
-                                                       'repository': 'https://github.com/zion-sati/FluentValidation'}},
+                                                       'repository': 'https://github.com/FluentValidation/FluentValidation'}},
            'netwasm-libraries/LICENSE-MAP.md': {'bytes': 403,
                                                 'covers': ['compiler/target-*.dll',
                                                                    'implementations/Microsoft.Extensions.*',
@@ -494,7 +494,7 @@ def download(url, cache, expected_sha=None, limit=2 * 1024 * 1024):
 def git_origin(repository, commit, path):
     repository = repository.removesuffix('.git').rstrip('/')
     parsed = urllib.parse.urlparse(repository)
-    allowed = {'zion-sati/FluentValidation', 'zion-sati/NetWasm',
+    allowed = {'FluentValidation/FluentValidation', 'zion-sati/NetWasm',
                'zion-sati/NetWasm.Libraries', 'zion-sati/TUnit-NetWasm',
                'dotnet/dotnet', 'emscripten-core/emscripten', 'llvm/llvm-project'}
     repo_path = parsed.path.lstrip('/')
