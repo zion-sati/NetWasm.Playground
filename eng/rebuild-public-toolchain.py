@@ -361,13 +361,15 @@ PACKAGE_ASSEMBLIES = {
     'Microsoft.Extensions.Logging.Abstractions.dll': 'netwasm.microsoft.extensions.logging.abstractions',
     'Microsoft.Extensions.Logging.dll': 'netwasm.microsoft.extensions.logging',
     'Microsoft.Extensions.Options.dll': 'netwasm.microsoft.extensions.options',
-    'Microsoft.Extensions.Primitives.dll': 'netwasm.microsoft.extensions.primitives',
+    'Microsoft.Extensions.Primitives.dll': 'microsoft.extensions.primitives',
     'FluentValidation.dll': 'fluentvalidation',
 }
 # Assemblies from packages that run on net10.0-netwasm as published: package, version and member.
 PUBLISHED_PACKAGE_ASSEMBLIES = {
     'System.IO.Hashing.dll': ('system.io.hashing', '11.0.0', 'lib/net10.0/System.IO.Hashing.dll'),
     'FluentValidation.dll': ('fluentvalidation', '12.2.0', 'lib/net8.0/FluentValidation.dll'),
+    'Microsoft.Extensions.Primitives.dll': ('microsoft.extensions.primitives', '11.0.0',
+                                            'lib/net10.0/Microsoft.Extensions.Primitives.dll'),
 }
 # NetWasm.App's in-box assemblies: code compiles against the reference pack's image and the compiler
 # links the runtime pack's.
