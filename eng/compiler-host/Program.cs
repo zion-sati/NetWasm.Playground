@@ -296,7 +296,11 @@ public static partial class Program
             Stage("roslyn");
             var started = Stopwatch.GetTimestamp();
             var parse = new CSharpParseOptions(languageVersion == "15" ? LanguageVersion.CSharp15 : LanguageVersion.Preview,
-                preprocessorSymbols: ["TRACE", "NETWASM", "NETWASM0_1", "RELEASE"]);
+                preprocessorSymbols: ["TRACE", "RELEASE", "NET", "NET10_0", "NET10_0_OR_GREATER", "NET5_0_OR_GREATER",
+                    "NET6_0_OR_GREATER", "NET7_0_OR_GREATER", "NET8_0_OR_GREATER", "NET9_0_OR_GREATER", "NETCOREAPP",
+                    "NETCOREAPP1_0_OR_GREATER", "NETCOREAPP1_1_OR_GREATER", "NETCOREAPP2_0_OR_GREATER",
+                    "NETCOREAPP2_1_OR_GREATER", "NETCOREAPP2_2_OR_GREATER", "NETCOREAPP3_0_OR_GREATER",
+                    "NETCOREAPP3_1_OR_GREATER", "NETWASM", "NETWASM1_0", "NETWASM1_0_OR_GREATER"]);
             if (updatedMemorySafetyRules)
                 parse = parse.WithFeatures([new("updated-memory-safety-rules", "true")]);
             var userSources = ParseUserSources(source, "Program.cs");

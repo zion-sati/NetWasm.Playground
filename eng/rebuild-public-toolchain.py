@@ -151,8 +151,7 @@ def verified_archive(package, version):
 
 
 def package_archive(package, version):
-    # The candidate NetWasm, Libraries and FluentValidation versions come from the local feed; every other version
-    # is public.
+    # The candidate NetWasm and Libraries versions come from the local feed; every other version is public.
     if CANDIDATE_FEED is not None and version in CANDIDATE_VERSIONS:
         expected = f'{package}.{version}.nupkg'.lower()
         matches = [path for path in CANDIDATE_FEED.glob('*.nupkg')
@@ -183,15 +182,44 @@ def drop_uncatalogued_notices(stage, origins):
         (stage / 'notices' / target).unlink()
 
 
+def add_missing_git_notices(origins):
+    # A catalogued notice from a Git repository that the base lacks joins it: a pinned source's at its pin, another
+    # project's, such as FluentValidation's license, at the commit the catalog names; rebinding fetches its bytes.
+    for target, catalog_entry in NOTICES.PUBLIC_CATALOG['files'].items():
+        if target not in origins['files'] and catalog_entry['source'].get('kind') == 'git':
+            origins['files'][target] = json.loads(json.dumps(catalog_entry))
+
+
+def bind_public_package_notices(stage, origins, rebuilt_packages, fetch=None):
+    # A notice from a public NuGet package that the catalog pins at its own version, such as Microsoft's
+    # System.IO.Hashing, comes from that package when the base lacks it or carries other bytes or another origin.
+    fetch = fetch or verified_archive
+    for target, catalog_entry in NOTICES.PUBLIC_CATALOG['files'].items():
+        source = catalog_entry['source']
+        if source.get('kind') != 'nuget' or source['package'] in rebuilt_packages:
+            continue
+        notice_path = stage / 'notices' / target
+        if origins['files'].get(target) == catalog_entry and notice_path.is_file() and \
+                sha256(notice_path.read_bytes()) == catalog_entry['sha256']:
+            continue
+        url, archive, _ = fetch(source['package'], source['version'])
+        if url != source['url'] or sha256(archive) != source['archiveSha256']:
+            raise ValueError(f'Public package differs from the notice catalog: {source["package"]}/{source["version"]}')
+        with zipfile.ZipFile(io.BytesIO(archive)) as package_zip:
+            notice = package_zip.read(source['path'])
+        if len(notice) != catalog_entry['bytes'] or sha256(notice) != catalog_entry['sha256']:
+            raise ValueError(f'Notice changed in public package: {source["package"]}/{source["path"]}')
+        notice_path.parent.mkdir(parents=True, exist_ok=True)
+        notice_path.write_bytes(notice)
+        origins['files'][target] = json.loads(json.dumps(catalog_entry))
+
+
 def rebind_notice_origins(stage, pins):
     origins_path = stage / 'notices/origins.json'
     origins = json.loads(origins_path.read_text())
     drop_uncatalogued_notices(stage, origins)
     source_families = {source['repository']: family for family, source in pins.items()}
-    for target, catalog_entry in NOTICES.PUBLIC_CATALOG['files'].items():
-        source = catalog_entry['source']
-        if target not in origins['files'] and source.get('repository') in source_families:
-            origins['files'][target] = json.loads(json.dumps(catalog_entry))
+    add_missing_git_notices(origins)
     versions = {
         'netwasm.toolchain': pins['netwasm']['packageVersion'],
     }
@@ -205,6 +233,7 @@ def rebind_notice_origins(stage, pins):
             continue
         url, archive, restore_hash = verified_archive(package, version)
         packages[package] = (version, url, archive, restore_hash)
+    bind_public_package_notices(stage, origins, packages)
     for target, entry in origins['files'].items():
         catalog_entry = NOTICES.PUBLIC_CATALOG['files'][target]
         entry['covers'] = catalog_entry['covers']
@@ -298,7 +327,7 @@ def add_timezone_data(stage, netwasm_version):
         (project / 'Program.cs').write_text('System.Console.WriteLine(System.DateTime.Now.Kind);\n')
         (project / 'TimeZoneData.csproj').write_text(
             '<Project Sdk="NetWasm.Sdk"><PropertyGroup><OutputType>Exe</OutputType>'
-            '<TargetFramework>netwasm0.1</TargetFramework>'
+            '<TargetFramework>net10.0-netwasm</TargetFramework>'
             '<NetWasmTimeZoneMode>Full</NetWasmTimeZoneMode></PropertyGroup></Project>\n')
         (project / 'global.json').write_bytes(encoded({
             'sdk': {'version': '10.0.303', 'rollForward': 'latestMajor', 'allowPrerelease': True},
@@ -337,13 +366,19 @@ PACKAGE_ASSEMBLIES = {
     'Microsoft.Extensions.Logging.Abstractions.dll': 'netwasm.microsoft.extensions.logging.abstractions',
     'Microsoft.Extensions.Logging.dll': 'netwasm.microsoft.extensions.logging',
     'Microsoft.Extensions.Options.dll': 'netwasm.microsoft.extensions.options',
-    'Microsoft.Extensions.Primitives.dll': 'netwasm.microsoft.extensions.primitives',
-    'System.IO.Hashing.dll': 'netwasm.system.io.hashing',
-    'FluentValidation.dll': 'netwasm.fluentvalidation',
+    'Microsoft.Extensions.Primitives.dll': 'microsoft.extensions.primitives',
+    'FluentValidation.dll': 'fluentvalidation',
+}
+# Assemblies from packages that run on net10.0-netwasm as published: package, version and member.
+PUBLISHED_PACKAGE_ASSEMBLIES = {
+    'System.IO.Hashing.dll': ('system.io.hashing', '11.0.0', 'lib/net10.0/System.IO.Hashing.dll'),
+    'FluentValidation.dll': ('fluentvalidation', '12.2.0', 'lib/net8.0/FluentValidation.dll'),
+    'Microsoft.Extensions.Primitives.dll': ('microsoft.extensions.primitives', '11.0.0',
+                                            'lib/net10.0/Microsoft.Extensions.Primitives.dll'),
 }
 # NetWasm.App's in-box assemblies: code compiles against the reference pack's image and the compiler
 # links the runtime pack's.
-FRAMEWORK_REFERENCES = ('netwasm.app.ref', 'ref/NetWasm,Version=v0.1/')
+FRAMEWORK_REFERENCES = ('netwasm.app.ref', 'ref/net10.0-netwasm/')
 FRAMEWORK_IMPLEMENTATIONS = ('netwasm.app.runtime', 'framework/')
 # Each example's package libraries; the packages they reference join them. In-box examples need none.
 RECIPES = {
@@ -432,6 +467,10 @@ def runtime_variant_assets(targets):
             if not isinstance(target['speed'], dict):
                 raise ValueError('Invalid runtime speed profile')
             profiles.append((target['speed'], ('runtimeArchive', 'collectorArchive')))
+        # Every browser link takes the Emscripten support archive and its stand-ins (NetWasm 0.15 and later).
+        emscripten = target.get('emscriptenArchives')
+        if emscripten is not None and (not isinstance(emscripten, dict) or set(emscripten) != {'support', 'standIns'}):
+            raise ValueError('Invalid runtime Emscripten archives')
         for profile, fields in profiles:
             # Each profile links one platform archive: the WASI one, or the one for a plain
             # core module without WASI.
@@ -440,6 +479,8 @@ def runtime_variant_assets(targets):
                 raise ValueError('Invalid runtime platform archives')
             named = [(field, profile.get(field)) for field in fields]
             named += [(f'platformArchives.{name}', asset) for name, asset in sorted(platform.items())]
+            if profile is target and emscripten is not None:
+                named += [(f'emscriptenArchives.{name}', asset) for name, asset in sorted(emscripten.items())]
             for field, asset in named:
                 if (not isinstance(asset, dict) or set(asset) != {'path', 'sha256'} or
                         not isinstance(asset['path'], str) or not isinstance(asset['sha256'], str) or
@@ -457,16 +498,14 @@ def runtime_variant_assets(targets):
     return assets
 
 
+# A runtime system library's file name, as Emscripten names them: libc++-noexcept.a has a plus sign.
+SYSTEM_LIBRARY_NAME = re.compile(r'[A-Za-z0-9_.+-]+\.a')
+
+
 def refresh_public_assets(stage, pins, runtime_plan=None, candidate_toolchain=None):
     """Replace every versioned compiler input in the pinned reusable browser base."""
     core = pins['netwasm']['packageVersion']
     libraries = pins['libraries']['packageVersion']
-    fluentvalidation = pins['fluentvalidation']['packageVersion']
-
-    def assembly_version(package):
-        if package == 'netwasm.fluentvalidation':
-            return fluentvalidation
-        return libraries
 
     def replace(relative, package, version, member):
         destination = stage / relative
@@ -475,7 +514,7 @@ def refresh_public_assets(stage, pins, runtime_plan=None, candidate_toolchain=No
         destination.write_bytes(public_member(package, version, member))
 
     replace('compiler/target-reference.dll', 'netwasm.ref', core,
-            'ref/NetWasm,Version=v0.1/NetWasm.CoreLib.dll')
+            'ref/net10.0-netwasm/NetWasm.CoreLib.dll')
     replace('compiler/target-implementation.dll', 'netwasm.runtime.wasm32', core,
             'runtime/NetWasm.CoreLib.dll')
     replace('compiler/compiler.wit.wasm', 'netwasm.toolchain', core,
@@ -545,7 +584,7 @@ def refresh_public_assets(stage, pins, runtime_plan=None, candidate_toolchain=No
         raise ValueError('Public runtime pack has an incomplete wasm32 system-library closure')
     for name, asset in zip(system_names, system_assets):
         expected_path = f'wasm32/system-libraries/{name}'
-        if (not isinstance(name, str) or not re.fullmatch(r'[A-Za-z0-9_.-]+\.a', name) or
+        if (not isinstance(name, str) or not SYSTEM_LIBRARY_NAME.fullmatch(name) or
                 not isinstance(asset, dict) or set(asset) != {'path', 'sha256'} or
                 asset.get('path') != expected_path or
                 not isinstance(asset.get('sha256'), str) or
@@ -555,7 +594,7 @@ def refresh_public_assets(stage, pins, runtime_plan=None, candidate_toolchain=No
     if not system_directory.is_dir():
         raise ValueError('Public base lacks the wasm32 system-library directory')
     for existing in system_directory.iterdir():
-        if not existing.is_file() or not re.fullmatch(r'[A-Za-z0-9_.-]+\.a', existing.name):
+        if not existing.is_file() or not SYSTEM_LIBRARY_NAME.fullmatch(existing.name):
             raise ValueError(f'Unexpected public base system-library entry: {existing.name}')
         if existing.name not in system_names:
             existing.unlink()
@@ -580,9 +619,11 @@ def refresh_public_assets(stage, pins, runtime_plan=None, candidate_toolchain=No
 
     def image(role, name):
         if (role, name) not in images:
-            if name in PACKAGE_ASSEMBLIES:
-                package = PACKAGE_ASSEMBLIES[name]
-                payload = public_member(package, assembly_version(package), f'lib/NetWasm,Version=v0.1/{name}')
+            if name in PUBLISHED_PACKAGE_ASSEMBLIES:
+                payload = public_member(*PUBLISHED_PACKAGE_ASSEMBLIES[name])
+            elif name in PACKAGE_ASSEMBLIES:
+                # NuGet packs a net10.0-netwasm library into its platform-versioned folder.
+                payload = public_member(PACKAGE_ASSEMBLIES[name], libraries, f'lib/net10.0-netwasm1.0/{name}')
             else:
                 package, prefix = (FRAMEWORK_REFERENCES if role == 'references' or facade(name)
                                    else FRAMEWORK_IMPLEMENTATIONS)
@@ -647,8 +688,10 @@ def refresh_public_assets(stage, pins, runtime_plan=None, candidate_toolchain=No
         packages = sorted(set().union(*(closure('references', root) for root in roots)) & set(PACKAGE_ASSEMBLIES))
         if len(packages) > RECIPE_ASSEMBLY_LIMIT:
             raise ValueError(f'The {recipe_id} recipe needs {len(packages)} references')
-        # An example of in-box assemblies alone follows NetWasm's version.
-        version = (fluentvalidation if recipe_id == 'fluentvalidation' else libraries if packages else core)
+        # An example of in-box assemblies alone follows NetWasm's version, one of a published package that package's.
+        published = {PUBLISHED_PACKAGE_ASSEMBLIES[name][1] for name in packages if name in PUBLISHED_PACKAGE_ASSEMBLIES}
+        version = (published.pop() if packages and len(published) == 1 and set(packages) <= set(PUBLISHED_PACKAGE_ASSEMBLIES)
+                   else libraries if packages else core)
         (stage / 'recipes' / f'{recipe_id}.json').write_bytes(encoded({
             'schemaVersion': 1, 'id': recipe_id,
             'references': {name: f'references/{name}' for name in packages},
@@ -710,8 +753,6 @@ def main():
     parser.add_argument('--candidate-commit')
     parser.add_argument('--candidate-libraries-version')
     parser.add_argument('--candidate-libraries-commit')
-    parser.add_argument('--candidate-fluentvalidation-version')
-    parser.add_argument('--candidate-fluentvalidation-commit')
     parser.add_argument('--runtime-plan', type=Path,
                         help='Actual candidate compiler runtime plan captured from a preliminary toolchain')
     parser.add_argument('--candidate-toolchain-manifest', type=Path,
@@ -731,13 +772,6 @@ def main():
         parser.error('--candidate-libraries-version must be an exact prerelease version')
     if args.candidate_libraries_commit and not re.fullmatch(r'[a-f0-9]{40}', args.candidate_libraries_commit):
         parser.error('--candidate-libraries-commit must be a full Git SHA')
-    fluentvalidation_values = (args.candidate_fluentvalidation_version, args.candidate_fluentvalidation_commit)
-    if any(fluentvalidation_values) != all(fluentvalidation_values) or any(fluentvalidation_values) and not args.candidate_feed:
-        parser.error('--candidate-fluentvalidation-version and --candidate-fluentvalidation-commit require each other and a candidate feed')
-    if args.candidate_fluentvalidation_version and not re.fullmatch(r'[0-9]+\.[0-9]+\.[0-9]+-[0-9A-Za-z.-]+', args.candidate_fluentvalidation_version):
-        parser.error('--candidate-fluentvalidation-version must be an exact prerelease version')
-    if args.candidate_fluentvalidation_commit and not re.fullmatch(r'[a-f0-9]{40}', args.candidate_fluentvalidation_commit):
-        parser.error('--candidate-fluentvalidation-commit must be a full Git SHA')
     if args.candidate_feed and not args.candidate_feed.is_dir():
         parser.error('--candidate-feed must be an existing directory')
     if args.runtime_plan and not args.candidate_feed:
@@ -746,8 +780,7 @@ def main():
         parser.error('--candidate-toolchain-manifest is only valid with a candidate feed')
     CANDIDATE_FEED = args.candidate_feed.resolve() if args.candidate_feed else None
     CANDIDATE_VERSION = args.candidate_version
-    CANDIDATE_VERSIONS = {version for version in (args.candidate_version, args.candidate_libraries_version,
-                                                  args.candidate_fluentvalidation_version) if version}
+    CANDIDATE_VERSIONS = {version for version in (args.candidate_version, args.candidate_libraries_version) if version}
     runtime_plan = json.loads(args.runtime_plan.read_text()) if args.runtime_plan else None
     candidate_toolchain = (json.loads(args.candidate_toolchain_manifest.read_text())
                            if args.candidate_toolchain_manifest else None)
@@ -807,9 +840,6 @@ def main():
         if args.candidate_libraries_version:
             pins['libraries']['packageVersion'] = args.candidate_libraries_version
             pins['libraries']['commit'] = args.candidate_libraries_commit
-        if args.candidate_fluentvalidation_version:
-            pins['fluentvalidation']['packageVersion'] = args.candidate_fluentvalidation_version
-            pins['fluentvalidation']['commit'] = args.candidate_fluentvalidation_commit
         verify_nativeaot_compiler(args.compiler_framework, upstream['nativeAotLlvmCandidate'],
                                   pins['netwasm']['packageVersion'])
         pins['nativeAotLlvmCompilerHost'] = upstream['nativeAotLlvmCandidate']

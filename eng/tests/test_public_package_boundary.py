@@ -137,7 +137,7 @@ class PublicPackageBoundaryTests(unittest.TestCase):
         self.assertIn("--candidate-version", rebuilder_help)
         self.assertIn("--candidate-commit", rebuilder_help)
         self.assertIn("--candidate-libraries-version", rebuilder_help)
-        self.assertIn("--candidate-fluentvalidation-version", rebuilder_help)
+        self.assertNotIn("--candidate-fluentvalidation-version", rebuilder_help)
         self.assertIn("--runtime-plan", rebuilder_help)
 
         incomplete = subprocess.run([

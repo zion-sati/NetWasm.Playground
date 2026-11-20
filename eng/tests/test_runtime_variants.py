@@ -70,3 +70,43 @@ class RuntimeVariantTests(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class EmscriptenArchiveTests(unittest.TestCase):
+    def emscripten(self):
+        return {'support': {'path': 'wasm32/libnetwasm-emscripten-support.a', 'sha256': 'b' * 64},
+                'standIns': {'path': 'wasm32/libnetwasm-emscripten-stand-ins.a', 'sha256': 'c' * 64}}
+
+    def test_every_collector_stages_the_shared_emscripten_archives_once(self):
+        targets = [target('compact'), target('netwasm')]
+        for item in targets:
+            item['emscriptenArchives'] = self.emscripten()
+        assets = MODULE.runtime_variant_assets(targets)
+        self.assertEqual('b' * 64, assets[PurePosixPath('wasm32/libnetwasm-emscripten-support.a')])
+        self.assertEqual('c' * 64, assets[PurePosixPath('wasm32/libnetwasm-emscripten-stand-ins.a')])
+
+    def test_invalid_emscripten_archives_fail(self):
+        for archives in [[], {'support': self.emscripten()['support']},
+                         {**self.emscripten(), 'other': self.emscripten()['support']},
+                         {**self.emscripten(), 'support': {'path': 'wasm64/libsupport.a', 'sha256': 'b' * 64}},
+                         {**self.emscripten(), 'standIns': {'path': 'wasm32/stand-ins.a', 'sha256': 'not-a-hash'}}]:
+            item = target('compact')
+            item['emscriptenArchives'] = archives
+            with self.assertRaises(ValueError):
+                MODULE.runtime_variant_assets([item])
+        conflicting = [target('compact'), target('netwasm')]
+        conflicting[0]['emscriptenArchives'] = self.emscripten()
+        conflicting[1]['emscriptenArchives'] = {**self.emscripten(),
+            'support': {'path': 'wasm32/libnetwasm-emscripten-support.a', 'sha256': 'd' * 64}}
+        with self.assertRaisesRegex(ValueError, 'Conflicting runtime asset hashes'):
+            MODULE.runtime_variant_assets(conflicting)
+
+
+class SystemLibraryNameTests(unittest.TestCase):
+    def test_runtime_pack_file_names_are_accepted_and_paths_are_not(self):
+        # 0.15's runtime pack names libc++'s archives with plus signs.
+        for name in ['libc.a', 'libc_optz.a', 'libstandalonewasm-nocatch-memgrow.a', 'libc++-noexcept.a',
+                     'libc++abi-noexcept.a']:
+            self.assertIsNotNone(MODULE.SYSTEM_LIBRARY_NAME.fullmatch(name), name)
+        for name in ['../libc.a', 'system/libc.a', 'lib c.a', 'libc.so', 'libc.a\n']:
+            self.assertIsNone(MODULE.SYSTEM_LIBRARY_NAME.fullmatch(name), name)

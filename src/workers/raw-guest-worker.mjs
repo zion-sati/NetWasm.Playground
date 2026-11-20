@@ -3,6 +3,7 @@ import {
   bindWorkerImports,
   createBrowserFileMounts,
   createBrowserRawExportSession,
+  createBrowserSidecarMaterializer,
   createWasiFilesystem,
   createWasiPlatform,
   platformProviderCatalog,
@@ -133,6 +134,8 @@ serveWorker(async (data, emit) => {
           }));
         },
         createImports: createWasiPlatform(Object.freeze({ initialDirectory: null, network: null })),
+        // With the file system, the program's sidecars (type and method names, time zone data) mount in it.
+        createSidecarMaterializer: createBrowserSidecarMaterializer,
         createModuleUrl: bytes => URL.createObjectURL(new Blob([bytes], { type: 'text/javascript' })),
         digest: crypto.subtle.digest.bind(crypto.subtle),
         fetch: fetchArtifact,

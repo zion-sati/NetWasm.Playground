@@ -23,14 +23,18 @@ PACKAGES = {
     'json-dom': [],
     'json-generated': [],
     'regex': [],
-    'fluentvalidation': ['NetWasm.FluentValidation'],
+    'fluentvalidation': ['FluentValidation'],
     'di': ['NetWasm.Microsoft.Extensions.DependencyInjection'],
     'logging': ['NetWasm.Microsoft.Extensions.Logging'],
-    'hashing': ['NetWasm.System.IO.Hashing'],
+    'hashing': ['System.IO.Hashing'],
 }
+# Packages the examples use as published.
+PUBLISHED_PACKAGE_VERSIONS = {'System.IO.Hashing': '11.0.0', 'FluentValidation': '12.2.0'}
+
+
 def package_version(pins, package):
-    if package == 'NetWasm.FluentValidation':
-        return pins['sources']['fluentvalidation']['packageVersion']
+    if package in PUBLISHED_PACKAGE_VERSIONS:
+        return PUBLISHED_PACKAGE_VERSIONS[package]
     return pins['sources']['libraries']['packageVersion']
 def fingerprint(path):
     return {'bytes': path.stat().st_size, 'sha256': hashlib.sha256(path.read_bytes()).hexdigest()}
@@ -73,7 +77,7 @@ def main():
         if package_versions:
             raise RuntimeError(f'{recipe} requires packages from different release versions')
         refs=''.join(f'<PackageReference Include="{package}" Version="[{package_version(pins, package)}]"/>' for package in PACKAGES[recipe])
-        (app/'NetWasmApp.csproj').write_text('<Project Sdk="NetWasm.Sdk"><PropertyGroup><OutputType>Exe</OutputType><TargetFramework>netwasm0.1</TargetFramework><ImplicitUsings>disable</ImplicitUsings><Nullable>enable</Nullable><GenerateAssemblyInfo>false</GenerateAssemblyInfo><GenerateTargetFrameworkAttribute>false</GenerateTargetFrameworkAttribute></PropertyGroup><ItemGroup>'+refs+'</ItemGroup></Project>\n')
+        (app/'NetWasmApp.csproj').write_text('<Project Sdk="NetWasm.Sdk"><PropertyGroup><OutputType>Exe</OutputType><TargetFramework>net10.0-netwasm</TargetFramework><ImplicitUsings>disable</ImplicitUsings><Nullable>enable</Nullable><GenerateAssemblyInfo>false</GenerateAssemblyInfo><GenerateTargetFrameworkAttribute>false</GenerateTargetFrameworkAttribute></PropertyGroup><ItemGroup>'+refs+'</ItemGroup></Project>\n')
         (app/'linker.targets').write_text('<Project><Target Name="UseVerifiedExampleLinker" AfterTargets="NetWasmSdkResolveBuildEnvironment"><PropertyGroup><NetWasmWasmLdPath>'+escape(str(args.wasm_ld.absolute()))+'</NetWasmWasmLdPath></PropertyGroup></Target></Project>')
         def execute(command,name):
             result=subprocess.run(command,cwd=app,env=env,capture_output=True,text=True)
@@ -107,7 +111,7 @@ def main():
             if not stdout.startswith('Survivor: 42\nGuest collections: ') or int(stdout.strip().split(': ')[-1])<1: raise RuntimeError('Guest GC output mismatch')
         elif stdout!=expected[recipe]: raise RuntimeError('Example output mismatch')
         libraries={}
-        for package, entry in assets['targets']['netwasm0.1'].items():
+        for package, entry in assets['targets']['net10.0-netwasm'].items():
             for relative in entry.get('compile',{}):
                 if relative.endswith('.dll') and Path(relative).name!='NetWasm.CoreLib.dll':
                     libraries[Path(relative).name]=(Path('packages')/assets['libraries'][package]['path']/relative).as_posix()

@@ -243,6 +243,6 @@ Keep historical bundles outside
 
 Built on [NetWasm](https://github.com/zion-sati/NetWasm), with examples using
 [NetWasm libraries](https://github.com/zion-sati/NetWasm.Libraries) and
-[FluentValidation for NetWasm](https://github.com/zion-sati/FluentValidation).
+[FluentValidation](https://github.com/FluentValidation/FluentValidation) as published.
 
 [Sponsor development](https://github.com/sponsors/zion-sati)

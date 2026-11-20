@@ -126,7 +126,7 @@ export function createNativeAotCompilerChannel(options = {}) {
             throw Error('Invalid runtime system-library manifest');
           const assets = await loader.manifest();
           return JSON.stringify(target.systemLibraries.names.map(name => {
-            if (!/^[A-Za-z0-9_.-]+\.a$/.test(name))
+            if (!/^[A-Za-z0-9_.+-]+\.a$/.test(name))
               throw Error('Invalid runtime system-library name');
             const asset = `runtime/wasm32/system/${name}`, receipt = assets[asset];
             if (!receipt || !/^[a-f0-9]{64}$/.test(receipt.sha256))
