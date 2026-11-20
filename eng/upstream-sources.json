@@ -24,19 +24,19 @@
   "sources": {
     "netwasm": {
       "repository": "https://github.com/zion-sati/NetWasm",
-      "commit": "feae839486dba1ac0c7a58a5b4b13a7ba1698fc3",
-      "tag": "v0.14.2",
-      "packageVersion": "0.14.2",
+      "commit": "87a4233a43c48ee3e17a1deebd51c1ae3f352b16",
+      "tag": "v0.15.0",
+      "packageVersion": "0.15.0",
       "toolchainManifest": "eng/toolchain.json",
-      "browserCompilerCommit": "feae839486dba1ac0c7a58a5b4b13a7ba1698fc3",
-      "browserLinkerCommit": "feae839486dba1ac0c7a58a5b4b13a7ba1698fc3",
-      "browserToolHostCommit": "feae839486dba1ac0c7a58a5b4b13a7ba1698fc3"
+      "browserCompilerCommit": "87a4233a43c48ee3e17a1deebd51c1ae3f352b16",
+      "browserLinkerCommit": "87a4233a43c48ee3e17a1deebd51c1ae3f352b16",
+      "browserToolHostCommit": "87a4233a43c48ee3e17a1deebd51c1ae3f352b16"
     },
     "libraries": {
       "repository": "https://github.com/zion-sati/NetWasm.Libraries",
-      "commit": "5ba485cb038e0bd74bc8ae6f82a589d3c0133f69",
-      "tag": "v0.14.2",
-      "packageVersion": "0.14.2"
+      "commit": "9f2ec811b8bb2bf9e3bbe63011e0100d1c8de96b",
+      "tag": "v0.15.0",
+      "packageVersion": "0.15.0"
     }
   },
   "compilerFramework": {
@@ -45,19 +45,19 @@
         "source": "netwasm",
         "package": "netwasm.app.ref",
         "path": "analyzers/dotnet/cs/System.Text.Json.SourceGeneration.dll",
-        "sha256": "39f9ef1932ab0014af65ce996c8d920e1853dbcd72a4b530797994ad5653177d"
+        "sha256": "aba99de9ca610ae21a0f5035405420cd0f7d5c201c172f9922a384165a756761"
       },
       "di": {
         "source": "libraries",
         "package": "netwasm.microsoft.extensions.dependencyinjection",
         "path": "analyzers/dotnet/cs/NetWasm.Microsoft.Extensions.DependencyInjection.Generator.dll",
-        "sha256": "05bb97a9b7d6764dc9c0d7298cbb6a9312ec231353e309c69397ca52bf88e09a"
+        "sha256": "fdf8bfdf2bef872a775b1551eae80a0c1a865719867796c9dfc1f8ca147e81e2"
       },
       "logging": {
         "source": "libraries",
         "package": "netwasm.microsoft.extensions.logging.abstractions",
         "path": "analyzers/dotnet/cs/NetWasm.Microsoft.Extensions.Logging.Generators.dll",
-        "sha256": "5eb3f7fb1a461650b0e326610edb81c22287758d9ac3c8205f73dcdb0850e380"
+        "sha256": "f17e7d8ceed95b2fa64fdd4244341a97bfc416f287feec3d8bc137d72d748de7"
       }
     }
   }
